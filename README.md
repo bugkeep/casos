@@ -95,6 +95,10 @@ casos/
 └── main.go
 ```
 
+## Guides
+
+- [Worker Node Setup (WSL2)](worker-setup.md) — connect a WSL2 Ubuntu instance as a worker node
+
 ## License
 
 See [LICENSE](LICENSE).
