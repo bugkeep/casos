@@ -147,6 +147,9 @@ nodeName: $NODE_NAME
 cgroupDriver: systemd
 failSwapOn: false
 containerRuntimeEndpoint: unix:///run/containerd/containerd.sock
+clusterDNS:
+  - 10.43.0.10
+clusterDomain: cluster.local
 EOF
 ```
 
