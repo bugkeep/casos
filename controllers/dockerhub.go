@@ -4,21 +4,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"net/url"
 	"strings"
-	"time"
+
+	"github.com/casosorg/casos/proxy"
 )
 
-var dockerHubClient = &http.Client{Timeout: 8 * time.Second}
-
 type dockerHubSearchResult struct {
-	Count   int               `json:"count"`
-	Results []dockerHubImage  `json:"results"`
+	Count   int              `json:"count"`
+	Results []dockerHubImage `json:"results"`
 }
 
 type dockerHubImage struct {
-	Name        string `json:"name"`
+	Name        string `json:"repo_name"`
 	Description string `json:"short_description"`
 	IsOfficial  bool   `json:"is_official"`
 	PullCount   int64  `json:"pull_count"`
@@ -45,7 +43,7 @@ func (c *ApiController) SearchDockerHubImages() {
 		url.QueryEscape(q),
 	)
 
-	resp, err := dockerHubClient.Get(apiURL)
+	resp, err := proxy.GetHttpClient(apiURL).Get(apiURL)
 	if err != nil {
 		c.ResponseError(fmt.Sprintf("failed to reach Docker Hub: %v", err))
 		return

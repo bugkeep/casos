@@ -27,6 +27,9 @@ func main() {
 		logrus.Fatalf("load app.conf: %v", err)
 	}
 
+	// Initialize HTTP clients (with optional socks5 proxy).
+	proxy.InitHttpClient()
+
 	// Initialize database connection.
 	if err := object.InitDB(); err != nil {
 		logrus.Fatalf("db init: %v", err)
