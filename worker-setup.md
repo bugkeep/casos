@@ -89,7 +89,9 @@ sudo systemctl is-active containerd
 ## 3. Download kubelet
 
 ```bash
-curl -Lo /tmp/kubelet https://dl.k8s.io/v1.36.1/bin/linux/amd64/kubelet
+WINDOWS_IP=$(ip route | grep default | awk '{print $3}')
+curl -Lo /tmp/kubelet https://dl.k8s.io/v1.36.1/bin/linux/amd64/kubelet \
+  --proxy "http://$WINDOWS_IP:10809"
 sudo install -o root -g root -m 0755 /tmp/kubelet /usr/local/bin/kubelet
 kubelet --version
 ```
@@ -242,7 +244,63 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now kubelet
 ```
 
-## 10. Verify the node joined the cluster
+## 10. Install kube-proxy
+
+kube-proxy sets up iptables rules for NodePort and ClusterIP services. Without it, NodePort services will not listen on any port and cannot be accessed from outside the cluster.
+
+```bash
+WINDOWS_IP=$(ip route | grep default | awk '{print $3}')
+curl -Lo /tmp/kube-proxy https://dl.k8s.io/v1.36.1/bin/linux/amd64/kube-proxy \
+  --proxy "http://$WINDOWS_IP:10809"
+sudo install -o root -g root -m 0755 /tmp/kube-proxy /usr/local/bin/kube-proxy
+```
+
+Create the config:
+
+```bash
+sudo mkdir -p /var/lib/kube-proxy
+
+sudo tee /var/lib/kube-proxy/config.yaml > /dev/null << 'EOF'
+apiVersion: kubeproxy.config.k8s.io/v1alpha1
+kind: KubeProxyConfiguration
+clientConnection:
+  kubeconfig: /etc/kubernetes/worker.kubeconfig
+mode: iptables
+clusterCIDR: 10.42.0.0/16
+EOF
+```
+
+Create the systemd service:
+
+```bash
+sudo tee /etc/systemd/system/kube-proxy.service > /dev/null << 'EOF'
+[Unit]
+Description=Kubernetes Kube-Proxy
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/kube-proxy \
+  --config=/var/lib/kube-proxy/config.yaml \
+  --v=2
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now kube-proxy
+```
+
+Verify — port 31000 should appear within a few seconds:
+
+```bash
+sudo systemctl status kube-proxy
+ss -tlnp | grep 31000
+```
+
+## 11. Verify the node joined the cluster
 
 Check kubelet logs:
 
@@ -263,12 +321,13 @@ The node should appear with `"status": "Ready"` within 30 seconds.
 
 ## Troubleshooting
 
-| Symptom                                                           | Cause                                                                            | Fix                                                                                                                                           |
-|-------------------------------------------------------------------|----------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
-| `Network is unreachable` in WSL2                                  | `networkingMode=mirrored` failed                                                 | Set `networkingMode=NAT` in `~/.wslconfig`, run `wsl --shutdown`                                                                              |
-| `unknown flag: --node-name`                                       | Removed in kubelet 1.36                                                          | Set `nodeName` in `config.yaml` instead                                                                                                       |
-| `connection refused` to apiserver                                 | Wrong IP in kubeconfig                                                           | Re-run the `sed` command in step 5 with current `$WINDOWS_IP`                                                                                 |
-| `x509: certificate is valid for 127.0.0.1, not <WSL2 gateway IP>` | API server cert was generated before casos included all interface IPs in the SAN | On Windows: delete `<dataDir>/tls/apiserver.crt` and `apiserver.key`, then restart casos — it will regenerate the cert with all interface IPs |
-| Node stuck in `NotReady`                                          | containerd not running                                                           | `sudo systemctl status containerd`                                                                                                            |
-| Pod stuck in `ImagePullBackOff` / i/o timeout pulling images      | Docker Hub / registry.k8s.io unreachable in restricted areas                                     | Follow the registry mirror steps in section 2; verify with `sudo ctr images pull --hosts-dir /etc/containerd/certs.d docker.io/library/hello-world:latest` |
-| `the server has asked for the client to provide credentials` on pod logs | kubelet missing `--client-ca-file`, can't verify API server client cert | Extract CA from worker kubeconfig (step 8) and add `--client-ca-file=/etc/kubernetes/ca.crt` to kubelet service |
+| Symptom                                                                  | Cause                                                                            | Fix                                                                                                                                                        |
+|--------------------------------------------------------------------------|----------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `Network is unreachable` in WSL2                                         | `networkingMode=mirrored` failed                                                 | Set `networkingMode=NAT` in `~/.wslconfig`, run `wsl --shutdown`                                                                                           |
+| `unknown flag: --node-name`                                              | Removed in kubelet 1.36                                                          | Set `nodeName` in `config.yaml` instead                                                                                                                    |
+| `connection refused` to apiserver                                        | Wrong IP in kubeconfig                                                           | Re-run the `sed` command in step 5 with current `$WINDOWS_IP`                                                                                              |
+| `x509: certificate is valid for 127.0.0.1, not <WSL2 gateway IP>`        | API server cert was generated before casos included all interface IPs in the SAN | On Windows: delete `<dataDir>/tls/apiserver.crt` and `apiserver.key`, then restart casos — it will regenerate the cert with all interface IPs              |
+| Node stuck in `NotReady`                                                 | containerd not running                                                           | `sudo systemctl status containerd`                                                                                                                         |
+| Pod stuck in `ImagePullBackOff` / i/o timeout pulling images             | Docker Hub / registry.k8s.io unreachable in restricted areas                     | Follow the registry mirror steps in section 2; verify with `sudo ctr images pull --hosts-dir /etc/containerd/certs.d docker.io/library/hello-world:latest` |
+| `the server has asked for the client to provide credentials` on pod logs | kubelet missing `--client-ca-file`, can't verify API server client cert          | Extract CA from worker kubeconfig (step 8) and add `--client-ca-file=/etc/kubernetes/ca.crt` to kubelet service                                            |
+| NodePort `ERR_CONNECTION_REFUSED` / port not listening                   | kube-proxy not installed or not running                                          | Follow step 10 to install kube-proxy; check `sudo systemctl status kube-proxy`                                                                             |

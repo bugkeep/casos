@@ -72,9 +72,13 @@ func main() {
 	go func() {
 		select {
 		case <-readyCh:
-			controllers.SetAdminRestConfig(server.AdminRestConfig(srvCfg))
+			adminCfg := server.AdminRestConfig(srvCfg)
+			controllers.SetAdminRestConfig(adminCfg)
 			logrus.Infof("apiserver ready — kubectl endpoint: https://127.0.0.1:%d", srvCfg.ApiserverPort)
 			logrus.Infof("UI available at http://localhost:%d", gatewayPort)
+			if err := server.Bootstrap(ctx, adminCfg); err != nil {
+				logrus.Errorf("bootstrap: %v", err)
+			}
 			if err := server.StartScheduler(ctx, srvCfg); err != nil {
 				logrus.Errorf("start scheduler: %v", err)
 			}
