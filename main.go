@@ -14,6 +14,7 @@ import (
 	"github.com/casosorg/casos/controllers"
 	"github.com/casosorg/casos/object"
 	"github.com/casosorg/casos/proxy"
+	"github.com/casosorg/casos/routers"
 	"github.com/casosorg/casos/server"
 )
 
@@ -42,7 +43,7 @@ func main() {
 	}
 
 	// Register beego routes.
-	web.Router("/api/pods", &controllers.PodController{}, "get:GetAll")
+	routers.InitAPI()
 	web.BConfig.Listen.HTTPPort = mustInt("httpport", 9090)
 
 	// Start beego on its internal port (not the public-facing gateway).

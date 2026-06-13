@@ -1,23 +1,28 @@
-import React from "react";
-import { ConfigProvider, Layout, Typography } from "antd";
-import PodList from "./PodList";
+import React, {Component} from "react";
+import {ConfigProvider, Layout} from "antd";
+import ManagementPage from "./ManagementPage";
 
-const { Header, Content } = Layout;
-const { Title } = Typography;
+const {Footer} = Layout;
 
-export default function App() {
-  return (
-    <ConfigProvider>
-      <Layout style={{ minHeight: "100vh" }}>
-        <Header style={{ display: "flex", alignItems: "center" }}>
-          <Title level={4} style={{ color: "#fff", margin: 0 }}>
-            Casos — Control Plane
-          </Title>
-        </Header>
-        <Content style={{ padding: "24px" }}>
-          <PodList />
-        </Content>
-      </Layout>
-    </ConfigProvider>
-  );
+class App extends Component {
+  renderFooter() {
+    return (
+      <Footer style={{textAlign: "center"}}>
+        Casos — Control Plane ©{new Date().getFullYear()}
+      </Footer>
+    );
+  }
+
+  render() {
+    return (
+      <ConfigProvider>
+        <Layout id="parent-area">
+          <ManagementPage />
+          {this.renderFooter()}
+        </Layout>
+      </ConfigProvider>
+    );
+  }
 }
+
+export default App;
