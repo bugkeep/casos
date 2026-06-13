@@ -8,6 +8,7 @@ import * as Setting from "./Setting";
 import PodListPage from "./PodListPage";
 import ConfigMapListPage from "./ConfigMapListPage";
 import NamespaceListPage from "./NamespaceListPage";
+import NodeListPage from "./NodeListPage";
 import ServiceAccountListPage from "./ServiceAccountListPage";
 
 const {Text} = Typography;
@@ -23,10 +24,11 @@ function getMenuItems() {
       ]
     ),
     Setting.getItem(
-      <Link to="/namespaces">Cluster</Link>,
+      <Link to="/nodes">Cluster</Link>,
       "/cluster",
       <AppstoreOutlined />,
       [
+        Setting.getItem(<Link to="/nodes">Nodes</Link>, "/nodes"),
         Setting.getItem(<Link to="/namespaces">Namespaces</Link>, "/namespaces"),
         Setting.getItem(<Link to="/serviceaccounts">Service Accounts</Link>, "/serviceaccounts"),
       ]
@@ -44,6 +46,7 @@ function getMenuItems() {
 
 const pathToGroup = {
   "/pods": "/workloads",
+  "/nodes": "/cluster",
   "/namespaces": "/cluster",
   "/serviceaccounts": "/cluster",
   "/configmaps": "/configuration",
@@ -116,8 +119,9 @@ function ManagementPage(props) {
 
         <Content style={{margin: "24px 16px", padding: 24, background: "#fff", borderRadius: 8}}>
           <Switch>
-            <Redirect exact from="/" to="/pods" />
+            <Redirect exact from="/" to="/nodes" />
             <Route exact path="/pods" render={(props) => <PodListPage {...props} />} />
+            <Route exact path="/nodes" render={(props) => <NodeListPage {...props} />} />
             <Route exact path="/namespaces" render={(props) => <NamespaceListPage {...props} />} />
             <Route exact path="/serviceaccounts" render={(props) => <ServiceAccountListPage {...props} />} />
             <Route exact path="/configmaps" render={(props) => <ConfigMapListPage {...props} />} />

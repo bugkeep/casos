@@ -12,6 +12,12 @@ func InitAPI() {
 	beego.Router("/api/update-pod", &controllers.ApiController{}, "POST:UpdatePod")
 	beego.Router("/api/delete-pod", &controllers.ApiController{}, "POST:DeletePod")
 
+	beego.Router("/api/get-nodes", &controllers.ApiController{}, "GET:GetNodes")
+	beego.Router("/api/get-node", &controllers.ApiController{}, "GET:GetNode")
+	beego.Router("/api/update-node", &controllers.ApiController{}, "POST:UpdateNode")
+	beego.Router("/api/delete-node", &controllers.ApiController{}, "POST:DeleteNode")
+	beego.Router("/api/get-worker-kubeconfig", &controllers.ApiController{}, "GET:GetWorkerKubeconfig")
+
 	beego.Router("/api/get-namespaces", &controllers.ApiController{}, "GET:GetNamespaces")
 	beego.Router("/api/get-namespace", &controllers.ApiController{}, "GET:GetNamespace")
 	beego.Router("/api/add-namespace", &controllers.ApiController{}, "POST:AddNamespace")
