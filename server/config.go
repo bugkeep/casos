@@ -48,9 +48,15 @@ func ConfigFromAppConf() (Config, error) {
 		advertise = bind
 	}
 
+	socks5Proxy := beego.AppConfig.String("socks5Proxy")
+
 	sandboxImage := beego.AppConfig.String("sandboxImage")
 	if sandboxImage == "" {
-		sandboxImage = "registry.k8s.io/pause:3.10.1"
+		if socks5Proxy != "" {
+			sandboxImage = "registry.aliyuncs.com/google_containers/pause:3.10.1"
+		} else {
+			sandboxImage = "registry.k8s.io/pause:3.10.1"
+		}
 	}
 
 	return Config{
@@ -60,7 +66,7 @@ func ConfigFromAppConf() (Config, error) {
 		ApiserverPort:    port,
 		DSN:              dsn,
 		SandboxImage:     sandboxImage,
-		Socks5Proxy:      beego.AppConfig.String("socks5Proxy"),
+		Socks5Proxy:      socks5Proxy,
 	}, nil
 }
 
