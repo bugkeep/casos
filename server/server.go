@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -83,6 +84,9 @@ func Start(ctx context.Context, cfg Config) (<-chan struct{}, error) {
 	if err := ensureCerts(certDir, cfg.ApiserverBind); err != nil {
 		return nil, fmt.Errorf("certs: %w", err)
 	}
+	if err := ensureServiceAccountKey(certDir); err != nil {
+		return nil, fmt.Errorf("service account key: %w", err)
+	}
 
 	// Step 1: start kine (MySQL backend exposed as etcd v3 gRPC on loopback).
 	// endpoint.Listen returns (ETCDConfig, error) directly — not a struct field.
@@ -90,6 +94,7 @@ func Start(ctx context.Context, cfg Config) (<-chan struct{}, error) {
 		Endpoint:         "mysql://" + cfg.DSN,
 		Listener:         "tcp://127.0.0.1:2379",
 		CompactBatchSize: 100,
+		NotifyInterval:   time.Second,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("kine listen: %w", err)
@@ -184,6 +189,8 @@ func injectDBName(dsn, dbName string) string {
 }
 
 func buildApiserverArgs(cfg Config, certDir, etcdEndpoint string) []string {
+	saKey := filepath.Join(certDir, "sa.key")
+	saPub := filepath.Join(certDir, "sa.pub")
 	return []string{
 		"--advertise-address=" + cfg.ApiserverBind,
 		"--bind-address=0.0.0.0",
@@ -196,8 +203,10 @@ func buildApiserverArgs(cfg Config, certDir, etcdEndpoint string) []string {
 		"--tls-cert-file=" + filepath.Join(certDir, "apiserver.crt"),
 		"--tls-private-key-file=" + filepath.Join(certDir, "apiserver.key"),
 		"--client-ca-file=" + filepath.Join(certDir, "ca.crt"),
-		// Pure control-plane mode: no embedded kubelet / agent components.
-		"--cloud-provider=",
+		"--service-account-key-file=" + saPub,
+		"--service-account-signing-key-file=" + saKey,
+		"--service-account-issuer=https://kubernetes.default.svc",
+		"--cert-dir=" + certDir,
 	}
 }
 
@@ -276,4 +285,27 @@ func writePEM(path, typ string, der []byte) error {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// ensureServiceAccountKey generates an RSA key pair for service-account token
+// signing/verification if not already present.
+func ensureServiceAccountKey(dir string) error {
+	keyFile := filepath.Join(dir, "sa.key")
+	pubFile := filepath.Join(dir, "sa.pub")
+	if fileExists(keyFile) && fileExists(pubFile) {
+		return nil
+	}
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return err
+	}
+	keyDER := x509.MarshalPKCS1PrivateKey(key)
+	if err := writePEM(keyFile, "RSA PRIVATE KEY", keyDER); err != nil {
+		return err
+	}
+	pubDER, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
+	if err != nil {
+		return err
+	}
+	return writePEM(pubFile, "PUBLIC KEY", pubDER)
 }
