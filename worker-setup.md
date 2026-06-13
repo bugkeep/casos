@@ -36,6 +36,49 @@ containerd config default | sudo tee /etc/containerd/config.toml > /dev/null
 sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
 ```
 
+Point the CRI image plugin at the hosts-dir for registry mirrors:
+
+```bash
+sudo python3 << 'EOF'
+with open('/etc/containerd/config.toml') as f:
+    lines = f.readlines()
+
+in_registry = False
+for i, line in enumerate(lines):
+    if "io.containerd.cri.v1.images'.registry]" in line or 'io.containerd.cri.v1.images".registry]' in line:
+        in_registry = True
+    if in_registry and 'config_path' in line:
+        lines[i] = "      config_path = '/etc/containerd/certs.d'\n"
+        break
+
+with open('/etc/containerd/config.toml', 'w') as f:
+    f.writelines(lines)
+print('done')
+EOF
+```
+
+Create per-registry mirror configs:
+
+```bash
+# Docker Hub
+sudo mkdir -p /etc/containerd/certs.d/docker.io
+sudo tee /etc/containerd/certs.d/docker.io/hosts.toml > /dev/null << 'EOF'
+server = "https://registry-1.docker.io"
+
+[host."https://docker.1ms.run"]
+  capabilities = ["pull", "resolve"]
+EOF
+
+# registry.k8s.io (pause image)
+sudo mkdir -p /etc/containerd/certs.d/registry.k8s.io
+sudo tee /etc/containerd/certs.d/registry.k8s.io/hosts.toml > /dev/null << 'EOF'
+server = "https://registry.k8s.io"
+
+[host."https://registry.aliyuncs.com/google_containers"]
+  capabilities = ["pull", "resolve"]
+EOF
+```
+
 Start and verify:
 
 ```bash
@@ -207,3 +250,4 @@ The node should appear with `"status": "Ready"` within 30 seconds.
 | `connection refused` to apiserver                                 | Wrong IP in kubeconfig                                                           | Re-run the `sed` command in step 5 with current `$WINDOWS_IP`                                                                                 |
 | `x509: certificate is valid for 127.0.0.1, not <WSL2 gateway IP>` | API server cert was generated before casos included all interface IPs in the SAN | On Windows: delete `<dataDir>/tls/apiserver.crt` and `apiserver.key`, then restart casos — it will regenerate the cert with all interface IPs |
 | Node stuck in `NotReady`                                          | containerd not running                                                           | `sudo systemctl status containerd`                                                                                                            |
+| Pod stuck in `ImagePullBackOff` / i/o timeout pulling images      | Docker Hub / registry.k8s.io unreachable in restricted areas                                     | Follow the registry mirror steps in section 2; verify with `sudo ctr images pull --hosts-dir /etc/containerd/certs.d docker.io/library/hello-world:latest` |
