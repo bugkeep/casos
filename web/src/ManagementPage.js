@@ -11,6 +11,7 @@ import NamespaceListPage from "./NamespaceListPage";
 import NodeListPage from "./NodeListPage";
 import ServiceAccountListPage from "./ServiceAccountListPage";
 import ServiceListPage from "./ServiceListPage";
+import ClusterRoleBindingListPage from "./ClusterRoleBindingListPage";
 
 const {Text} = Typography;
 
@@ -50,6 +51,14 @@ function getMenuItems() {
         Setting.getItem(<Link to="/services">Services</Link>, "/services"),
       ]
     ),
+    Setting.getItem(
+      <Link to="/clusterrolebindings">Access Control</Link>,
+      "/accesscontrol",
+      <AppstoreOutlined />,
+      [
+        Setting.getItem(<Link to="/clusterrolebindings">ClusterRoleBindings</Link>, "/clusterrolebindings"),
+      ]
+    ),
   ];
 }
 
@@ -60,6 +69,7 @@ const pathToGroup = {
   "/serviceaccounts": "/cluster",
   "/configmaps": "/configuration",
   "/services": "/networking",
+  "/clusterrolebindings": "/accesscontrol",
 };
 
 function ManagementPage(props) {
@@ -136,6 +146,7 @@ function ManagementPage(props) {
             <Route exact path="/serviceaccounts" render={(props) => <ServiceAccountListPage {...props} />} />
             <Route exact path="/configmaps" render={(props) => <ConfigMapListPage {...props} />} />
             <Route exact path="/services" render={(props) => <ServiceListPage {...props} />} />
+            <Route exact path="/clusterrolebindings" render={(props) => <ClusterRoleBindingListPage {...props} />} />
           </Switch>
         </Content>
       </Layout>

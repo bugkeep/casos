@@ -41,6 +41,12 @@ func InitAPI() {
 	beego.Router("/api/update-service", &controllers.ApiController{}, "POST:UpdateService")
 	beego.Router("/api/delete-service", &controllers.ApiController{}, "POST:DeleteService")
 
+	beego.Router("/api/get-clusterrolebindings", &controllers.ApiController{}, "GET:GetClusterRoleBindings")
+	beego.Router("/api/get-clusterrolebinding", &controllers.ApiController{}, "GET:GetClusterRoleBinding")
+	beego.Router("/api/add-clusterrolebinding", &controllers.ApiController{}, "POST:AddClusterRoleBinding")
+	beego.Router("/api/update-clusterrolebinding", &controllers.ApiController{}, "POST:UpdateClusterRoleBinding")
+	beego.Router("/api/delete-clusterrolebinding", &controllers.ApiController{}, "POST:DeleteClusterRoleBinding")
+
 	beego.Router("/api/get-configmaps", &controllers.ApiController{}, "GET:GetConfigMaps")
 	beego.Router("/api/get-configmap", &controllers.ApiController{}, "GET:GetConfigMap")
 	beego.Router("/api/add-configmap", &controllers.ApiController{}, "POST:AddConfigMap")
