@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"encoding/json"
+	"strconv"
 	"sync/atomic"
 	"unsafe"
 
@@ -229,6 +230,34 @@ func (c *ApiController) GetPodEvents() {
 		})
 	}
 	c.ResponseOk(result)
+}
+
+// GetPodLogs returns stdout/stderr logs for a pod container.
+// @router /api/get-pod-logs [get]
+func (c *ApiController) GetPodLogs() {
+	cfg := getAdminRestConfig()
+	if cfg == nil {
+		c.ResponseError("apiserver not ready")
+		return
+	}
+	namespace := c.GetString("namespace")
+	name := c.GetString("name")
+	container := c.GetString("container")
+	if namespace == "" {
+		namespace = "default"
+	}
+	var tailLines int64 = 500
+	if v := c.GetString("tailLines"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			tailLines = n
+		}
+	}
+	logs, err := object.GetPodLogs(cfg, namespace, name, container, tailLines)
+	if err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
+	c.ResponseOk(logs)
 }
 
 // DeletePod

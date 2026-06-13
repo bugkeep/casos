@@ -2,6 +2,7 @@ package object
 
 import (
 	"context"
+	"io"
 	"sort"
 
 	corev1 "k8s.io/api/core/v1"
@@ -56,6 +57,31 @@ func DeletePod(cfg *rest.Config, namespace, name string) error {
 		return err
 	}
 	return client.CoreV1().Pods(namespace).Delete(context.Background(), name, metav1.DeleteOptions{})
+}
+
+func GetPodLogs(cfg *rest.Config, namespace, name, container string, tailLines int64) (string, error) {
+	client, err := newClient(cfg)
+	if err != nil {
+		return "", err
+	}
+	opts := &corev1.PodLogOptions{}
+	if container != "" {
+		opts.Container = container
+	}
+	if tailLines > 0 {
+		opts.TailLines = &tailLines
+	}
+	req := client.CoreV1().Pods(namespace).GetLogs(name, opts)
+	rc, err := req.Stream(context.Background())
+	if err != nil {
+		return "", err
+	}
+	defer rc.Close()
+	buf, err := io.ReadAll(rc)
+	if err != nil {
+		return "", err
+	}
+	return string(buf), nil
 }
 
 func GetPodEvents(cfg *rest.Config, namespace, name string) ([]corev1.Event, error) {

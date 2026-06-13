@@ -2,7 +2,7 @@ import React from "react";
 import {
   Alert, Button, Drawer, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag, Tooltip, Typography,
 } from "antd";
-import {AppstoreOutlined, DeleteOutlined, EditOutlined, MinusCircleOutlined, PlusOutlined, ReloadOutlined, UnorderedListOutlined} from "@ant-design/icons";
+import {AppstoreOutlined, DeleteOutlined, EditOutlined, FileTextOutlined, MinusCircleOutlined, PlusOutlined, ReloadOutlined, UnorderedListOutlined} from "@ant-design/icons";
 import * as PodBackend from "./backend/PodBackend";
 import * as NamespaceBackend from "./backend/NamespaceBackend";
 import * as Setting from "./Setting";
@@ -35,6 +35,11 @@ class PodListPage extends React.Component {
       events: [],
       eventsLoading: false,
       eventsError: null,
+      logsDrawerVisible: false,
+      logsPod: null,
+      logs: "",
+      logsLoading: false,
+      logsError: null,
       marketplaceVisible: false,
       modalInitialValues: {},
     };
@@ -48,6 +53,7 @@ class PodListPage extends React.Component {
 
   componentWillUnmount() {
     this.stopEventsPolling();
+    this.stopLogsPolling();
   }
 
   openEventsDrawer(pod) {
@@ -85,6 +91,48 @@ class PodListPage extends React.Component {
       this.setState({eventsError: e.message});
     }).finally(() => {
       this.setState({eventsLoading: false});
+    });
+  }
+
+  openLogsDrawer(pod) {
+    this.setState({logsDrawerVisible: true, logsPod: pod, logs: "", logsError: null}, () => {
+      this.fetchLogs();
+      this._logsTimer = setInterval(() => this.fetchLogs(), 3000);
+    });
+  }
+
+  closeLogsDrawer() {
+    this.stopLogsPolling();
+    this.setState({logsDrawerVisible: false, logsPod: null, logs: ""});
+  }
+
+  stopLogsPolling() {
+    if (this._logsTimer) {
+      clearInterval(this._logsTimer);
+      this._logsTimer = null;
+    }
+  }
+
+  fetchLogs() {
+    const {logsPod} = this.state;
+    if (!logsPod) {
+      return;
+    }
+    this.setState({logsLoading: true});
+    PodBackend.getPodLogs(logsPod.namespace, logsPod.name).then(res => {
+      if (res.status === "ok") {
+        this.setState({logs: res.data ?? "", logsError: null}, () => {
+          if (this._logsEndRef) {
+            this._logsEndRef.scrollIntoView({behavior: "smooth"});
+          }
+        });
+      } else {
+        this.setState({logsError: res.msg});
+      }
+    }).catch(e => {
+      this.setState({logsError: e.message});
+    }).finally(() => {
+      this.setState({logsLoading: false});
     });
   }
 
@@ -212,6 +260,7 @@ class PodListPage extends React.Component {
   render() {
     const {pods, namespaces, loading, error, modalVisible, modalMode, submitting,
       eventsDrawerVisible, eventsPod, events, eventsLoading, eventsError,
+      logsDrawerVisible, logsPod, logs, logsLoading, logsError,
       marketplaceVisible, modalInitialValues} = this.state;
 
     const nsOptions = namespaces.map(ns => ({label: ns.name, value: ns.name}));
@@ -243,6 +292,13 @@ class PodListPage extends React.Component {
         width: 140,
         render: (_, record) => (
           <Space>
+            <Button
+              size="small"
+              icon={<FileTextOutlined />}
+              onClick={() => this.openLogsDrawer(record)}
+            >
+              Logs
+            </Button>
             <Button
               size="small"
               icon={<UnorderedListOutlined />}
@@ -432,6 +488,42 @@ class PodListPage extends React.Component {
             this.setState({marketplaceVisible: false});
           }}
         />
+
+        <Drawer
+          title={logsPod ? `Logs — ${logsPod.namespace}/${logsPod.name}` : "Logs"}
+          open={logsDrawerVisible}
+          onClose={() => this.closeLogsDrawer()}
+          width={800}
+          extra={
+            <Tag color={logsLoading ? "processing" : "success"}>
+              {logsLoading ? "refreshing…" : "live · 3s"}
+            </Tag>
+          }
+        >
+          {logsError && (
+            <Alert type="error" message={logsError} style={{marginBottom: 12}} showIcon />
+          )}
+          <div style={{
+            background: "#0d1117",
+            borderRadius: 6,
+            padding: "12px 16px",
+            fontFamily: "'Cascadia Code', 'Fira Mono', 'Consolas', monospace",
+            fontSize: 13,
+            lineHeight: 1.7,
+            minHeight: 200,
+            maxHeight: "calc(100vh - 160px)",
+            overflowY: "auto",
+            color: "#c9d1d9",
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-all",
+          }}>
+            {!logs && !logsLoading && (
+              <span style={{color: "#6e7681"}}>No logs yet…</span>
+            )}
+            {logs}
+            <div ref={el => { this._logsEndRef = el; }} />
+          </div>
+        </Drawer>
 
         <Drawer
           title={eventsPod ? `Events — ${eventsPod.namespace}/${eventsPod.name}` : "Events"}
