@@ -135,6 +135,9 @@ func buildApiserverArgs(cfg Config, certDir, etcdEndpoint string) []string {
 		"--service-account-signing-key-file=" + saKey,
 		"--service-account-issuer=https://kubernetes.default.svc",
 		"--cert-dir=" + certDir,
+		"--kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname",
+		"--kubelet-client-certificate=" + filepath.Join(certDir, "apiserver-kubelet-client.crt"),
+		"--kubelet-client-key=" + filepath.Join(certDir, "apiserver-kubelet-client.key"),
 	}
 }
 

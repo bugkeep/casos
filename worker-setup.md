@@ -196,7 +196,26 @@ clusterDomain: cluster.local
 EOF
 ```
 
-## 8. Create the kubelet systemd service
+## 8. Extract the cluster CA certificate
+
+The kubelet needs the cluster CA to authenticate requests from the API server (e.g. log streaming). It is already embedded in the worker kubeconfig — extract it:
+
+```bash
+python3 -c "
+import base64
+kc = open('/etc/kubernetes/worker.kubeconfig').read()
+for line in kc.splitlines():
+    line = line.strip()
+    if line.startswith('certificate-authority-data:'):
+        ca_b64 = line.split(':', 1)[1].strip()
+        open('/etc/kubernetes/ca.crt', 'wb').write(base64.b64decode(ca_b64))
+        print('ca.crt written')
+        break
+"
+sudo mv /etc/kubernetes/ca.crt /etc/kubernetes/ca.crt  # already root-owned if run with sudo
+```
+
+## 9. Create the kubelet systemd service
 
 ```bash
 sudo tee /etc/systemd/system/kubelet.service > /dev/null << 'EOF'
@@ -209,6 +228,7 @@ Requires=containerd.service
 ExecStart=/usr/local/bin/kubelet \
   --kubeconfig=/etc/kubernetes/worker.kubeconfig \
   --config=/var/lib/kubelet/config.yaml \
+  --client-ca-file=/etc/kubernetes/ca.crt \
   --register-node=true \
   --v=2
 Restart=always
@@ -222,7 +242,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now kubelet
 ```
 
-## 9. Verify the node joined the cluster
+## 10. Verify the node joined the cluster
 
 Check kubelet logs:
 
@@ -251,3 +271,4 @@ The node should appear with `"status": "Ready"` within 30 seconds.
 | `x509: certificate is valid for 127.0.0.1, not <WSL2 gateway IP>` | API server cert was generated before casos included all interface IPs in the SAN | On Windows: delete `<dataDir>/tls/apiserver.crt` and `apiserver.key`, then restart casos — it will regenerate the cert with all interface IPs |
 | Node stuck in `NotReady`                                          | containerd not running                                                           | `sudo systemctl status containerd`                                                                                                            |
 | Pod stuck in `ImagePullBackOff` / i/o timeout pulling images      | Docker Hub / registry.k8s.io unreachable in restricted areas                                     | Follow the registry mirror steps in section 2; verify with `sudo ctr images pull --hosts-dir /etc/containerd/certs.d docker.io/library/hello-world:latest` |
+| `the server has asked for the client to provide credentials` on pod logs | kubelet missing `--client-ca-file`, can't verify API server client cert | Extract CA from worker kubeconfig (step 8) and add `--client-ca-file=/etc/kubernetes/ca.crt` to kubelet service |

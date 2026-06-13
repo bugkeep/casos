@@ -26,8 +26,10 @@ func ensureCerts(dir, ip, advertiseIP string) error {
 	caCertFile := filepath.Join(dir, "ca.crt")
 	srvKeyFile := filepath.Join(dir, "apiserver.key")
 	srvCrtFile := filepath.Join(dir, "apiserver.crt")
-	admKeyFile := filepath.Join(dir, "admin.key")
-	admCrtFile := filepath.Join(dir, "admin.crt")
+	admKeyFile    := filepath.Join(dir, "admin.key")
+	admCrtFile    := filepath.Join(dir, "admin.crt")
+	kubeletKeyFile := filepath.Join(dir, "apiserver-kubelet-client.key")
+	kubeletCrtFile := filepath.Join(dir, "apiserver-kubelet-client.crt")
 
 	var caKey *ecdsa.PrivateKey
 	var caCert *x509.Certificate
@@ -129,6 +131,32 @@ func ensureCerts(dir, ip, advertiseIP string) error {
 		}
 		admKeyDER, _ := x509.MarshalECPrivateKey(admKey)
 		if err := writePEM(admKeyFile, "EC PRIVATE KEY", admKeyDER); err != nil {
+			return err
+		}
+	}
+
+	if !fileExists(kubeletCrtFile) {
+		kubeletKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		if err != nil {
+			return err
+		}
+		kubeletTemplate := &x509.Certificate{
+			SerialNumber: big.NewInt(4),
+			Subject:      pkix.Name{CommonName: "kube-apiserver-kubelet-client", Organization: []string{"system:masters"}},
+			NotBefore:    time.Now().Add(-time.Minute),
+			NotAfter:     time.Now().Add(10 * 365 * 24 * time.Hour),
+			KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+			ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+		}
+		kubeletDER, err := x509.CreateCertificate(rand.Reader, kubeletTemplate, caCert, &kubeletKey.PublicKey, caKey)
+		if err != nil {
+			return err
+		}
+		if err := writePEM(kubeletCrtFile, "CERTIFICATE", kubeletDER); err != nil {
+			return err
+		}
+		kubeletKeyDER, _ := x509.MarshalECPrivateKey(kubeletKey)
+		if err := writePEM(kubeletKeyFile, "EC PRIVATE KEY", kubeletKeyDER); err != nil {
 			return err
 		}
 	}
