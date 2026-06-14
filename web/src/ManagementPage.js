@@ -4,7 +4,7 @@ import {Avatar, Button, Card, Dropdown, Layout, Menu, Result} from "antd";
 import {
   AppstoreOutlined,
   ClusterOutlined,
-  DatabaseOutlined,
+  DashboardOutlined,
   DownOutlined,
   LockOutlined,
   LogoutOutlined,
@@ -13,7 +13,7 @@ import {
   NodeIndexOutlined,
   SafetyOutlined,
   SettingOutlined,
-  UserOutlined,
+  UserOutlined
 } from "@ant-design/icons";
 import * as Setting from "./Setting";
 import LanguageSelect from "./LanguageSelect";
@@ -24,11 +24,13 @@ import NodeListPage from "./NodeListPage";
 import ServiceAccountListPage from "./ServiceAccountListPage";
 import ServiceListPage from "./ServiceListPage";
 import ClusterRoleBindingListPage from "./ClusterRoleBindingListPage";
+import DashboardPage from "./DashboardPage";
 
 const {Header, Footer, Content, Sider} = Layout;
 
 function getMenuParentKey(uri) {
   if (!uri) {return null;}
+  if (uri === "/dashboard") {return null;}
   if (uri.includes("/pods")) {return "/workloads";}
   if (uri.includes("/nodes") || uri.includes("/namespaces") || uri.includes("/serviceaccounts")) {return "/cluster";}
   if (uri.includes("/configmaps")) {return "/configuration";}
@@ -61,6 +63,11 @@ function persistMenuOpenKeys(keys) {
 
 function getMenuItems() {
   return [
+    Setting.getItem(
+      <Link to="/dashboard">Dashboard</Link>,
+      "/dashboard",
+      <DashboardOutlined />
+    ),
     Setting.getItem(
       <Link to="/pods">Workloads</Link>,
       "/workloads",
@@ -150,7 +157,7 @@ function ManagementPage(props) {
     }
   }, [menuOpenKeys, siderCollapsed]);
 
-  const {uri, history, account, onSignout} = props;
+  const {uri, account, onSignout} = props;
 
   function getAvatarColor(s) {
     const colorList = ["#f56a00", "#7265e6", "#ffbf00", "#00a2ae"];
@@ -205,7 +212,7 @@ function ManagementPage(props) {
 
   // eslint-disable-next-line no-restricted-globals
   const currentUri = uri || location.pathname;
-  const firstSeg = currentUri.split("/").filter(Boolean)[0] || "nodes";
+  const firstSeg = currentUri.split("/").filter(Boolean)[0] || "dashboard";
   const selectedLeafKey = "/" + firstSeg;
 
   const toggleSider = () => {
@@ -217,7 +224,8 @@ function ManagementPage(props) {
   function renderRouter() {
     return (
       <Switch>
-        <Redirect exact from="/" to="/nodes" />
+        <Redirect exact from="/" to="/dashboard" />
+        <Route exact path="/dashboard" render={(props) => <DashboardPage {...props} />} />
         <Route exact path="/pods" render={(props) => <PodListPage {...props} />} />
         <Route exact path="/nodes" render={(props) => <NodeListPage {...props} />} />
         <Route exact path="/namespaces" render={(props) => <NamespaceListPage {...props} />} />
