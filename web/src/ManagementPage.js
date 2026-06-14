@@ -150,10 +150,10 @@ function ManagementPage(props) {
 
   function renderUserInfo() {
     return (
-      <div style={{display: "flex", alignItems: "center", gap: "8px"}}>
+      <div style={{display: "flex", alignItems: "center", gap: "8px", cursor: "pointer"}}>
         {renderAvatar()}
         {!Setting.isMobile() && (
-          <span style={{fontSize: "14px", fontWeight: 500, maxWidth: "120px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"}}>
+          <span style={{fontSize: "14px", fontWeight: 500, maxWidth: "120px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "pointer"}}>
             {account?.displayName || account?.name || ""}
           </span>
         )}
@@ -180,7 +180,7 @@ function ManagementPage(props) {
     ];
     return (
       <Dropdown key="/rightDropDown" menu={{items}} placement="bottomRight">
-        <div className="rightDropDown">
+        <div className="rightDropDown" style={{cursor: "pointer", userSelect: "none"}}>
           {renderUserInfo()}
         </div>
       </Dropdown>
