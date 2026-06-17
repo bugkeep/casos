@@ -8,7 +8,7 @@ import i18next from "i18next";
 
 const casosNavTreeData = [
   {title: "Dashboard", key: "/dashboard"},
-  {title: "Workloads", key: "/workloads", children: [{title: "Pods", key: "/pods"}]},
+  {title: "Workloads", key: "/workloads", children: [{title: "Deployments", key: "/deployments"}, {title: "Pods", key: "/pods"}]},
   {title: "Cluster", key: "/cluster", children: [
     {title: "Nodes", key: "/nodes"},
     {title: "Namespaces", key: "/namespaces"},

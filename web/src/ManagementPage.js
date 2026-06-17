@@ -22,6 +22,7 @@ import LanguageSelect from "./LanguageSelect";
 import ThemeSelect from "./ThemeSelect";
 import BreadcrumbBar from "./common/BreadcrumbBar";
 import PodListPage from "./PodListPage";
+import DeploymentListPage from "./DeploymentListPage";
 import ConfigMapListPage from "./ConfigMapListPage";
 import NamespaceListPage from "./NamespaceListPage";
 import NodeListPage from "./NodeListPage";
@@ -38,7 +39,7 @@ const {Header, Footer, Content, Sider} = Layout;
 function getMenuParentKey(uri) {
   if (!uri) {return null;}
   if (uri === "/dashboard") {return null;}
-  if (uri.includes("/pods")) {return "/workloads";}
+  if (uri.includes("/pods") || uri.includes("/deployments")) {return "/workloads";}
   if (uri.includes("/nodes") || uri.includes("/namespaces") || uri.includes("/serviceaccounts")) {return "/cluster";}
   if (uri.includes("/configmaps")) {return "/configuration";}
   if (uri.includes("/services")) {return "/networking";}
@@ -193,6 +194,7 @@ function ManagementPage(props) {
     const allItems = [
       Setting.getItem(<Link to="/dashboard">{i18next.t("general:Dashboard")}</Link>, "/dashboard", <DashboardOutlined />),
       Setting.getItem(<Link to="/pods">{i18next.t("general:Workloads")}</Link>, "/workloads", <AppstoreOutlined />, [
+        Setting.getItem(<Link to="/deployments">{i18next.t("general:Deployments")}</Link>, "/deployments"),
         Setting.getItem(<Link to="/pods">{i18next.t("general:Pods")}</Link>, "/pods"),
       ]),
       Setting.getItem(<Link to="/nodes">{i18next.t("general:Cluster")}</Link>, "/cluster", <ClusterOutlined />, [
@@ -221,6 +223,7 @@ function ManagementPage(props) {
       <Switch>
         <Redirect exact from="/" to="/dashboard" />
         <Route exact path="/dashboard" render={(props) => <DashboardPage {...props} />} />
+        <Route exact path="/deployments" render={(props) => <DeploymentListPage {...props} />} />
         <Route exact path="/pods" render={(props) => <PodListPage {...props} />} />
         <Route exact path="/nodes" render={(props) => <NodeListPage {...props} />} />
         <Route exact path="/namespaces" render={(props) => <NamespaceListPage {...props} />} />

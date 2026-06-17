@@ -66,4 +66,10 @@ func InitAPI() {
 	beego.Router("/api/add-configmap", &controllers.ApiController{}, "POST:AddConfigMap")
 	beego.Router("/api/update-configmap", &controllers.ApiController{}, "POST:UpdateConfigMap")
 	beego.Router("/api/delete-configmap", &controllers.ApiController{}, "POST:DeleteConfigMap")
+
+	beego.Router("/api/get-deployments", &controllers.ApiController{}, "GET:GetDeployments")
+	beego.Router("/api/get-deployment", &controllers.ApiController{}, "GET:GetDeployment")
+	beego.Router("/api/add-deployment", &controllers.ApiController{}, "POST:AddDeployment")
+	beego.Router("/api/update-deployment", &controllers.ApiController{}, "POST:UpdateDeployment")
+	beego.Router("/api/delete-deployment", &controllers.ApiController{}, "POST:DeleteDeployment")
 }
