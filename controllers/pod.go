@@ -44,6 +44,7 @@ type podSummary struct {
 	Phase           string            `json:"phase"`
 	NodeName        string            `json:"nodeName"`
 	Image           string            `json:"image"`
+	Containers      []string          `json:"containers"`
 	Labels          map[string]string `json:"labels"`
 	CreatedAt       string            `json:"createdAt"`
 	ResourceVersion string            `json:"resourceVersion"`
@@ -51,7 +52,11 @@ type podSummary struct {
 
 func toPodSummary(p corev1.Pod) podSummary {
 	image := ""
-	if len(p.Spec.Containers) > 0 {
+	containers := make([]string, 0, len(p.Spec.Containers))
+	for _, c := range p.Spec.Containers {
+		containers = append(containers, c.Name)
+	}
+	if len(containers) > 0 {
 		image = p.Spec.Containers[0].Image
 	}
 	return podSummary{
@@ -60,6 +65,7 @@ func toPodSummary(p corev1.Pod) podSummary {
 		Phase:           string(p.Status.Phase),
 		NodeName:        p.Spec.NodeName,
 		Image:           image,
+		Containers:      containers,
 		Labels:          p.Labels,
 		CreatedAt:       p.CreationTimestamp.UTC().Format("2006-01-02 15:04:05"),
 		ResourceVersion: p.ResourceVersion,

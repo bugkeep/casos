@@ -40,8 +40,10 @@ export function getPodEvents(namespace, name) {
   }).then(res => res.json());
 }
 
-export function getPodLogs(namespace, name, tailLines = 500) {
-  return fetch(`${Setting.ServerUrl}/api/get-pod-logs?namespace=${encodeURIComponent(namespace)}&name=${encodeURIComponent(name)}&tailLines=${tailLines}`, {
+export function getPodLogs(namespace, name, container = "", tailLines = 500) {
+  const params = new URLSearchParams({namespace, name, tailLines});
+  if (container) {params.set("container", container);}
+  return fetch(`${Setting.ServerUrl}/api/get-pod-logs?${params}`, {
     method: "GET",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},
