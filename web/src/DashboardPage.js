@@ -1,12 +1,14 @@
 import React, {useEffect, useMemo, useRef, useState} from "react";
-import {Card, Col, Progress, Row, Spin, Statistic} from "antd";
+import {Alert, Card, Col, Progress, Row, Spin, Statistic, Table, Tag} from "antd";
+import {useHistory} from "react-router-dom";
+import {useTranslation} from "react-i18next";
 import {
   AppstoreOutlined,
   CheckCircleOutlined,
   ClusterOutlined,
   NodeIndexOutlined,
   SettingOutlined,
-  UserOutlined
+  WarningOutlined
 } from "@ant-design/icons";
 import * as echarts from "echarts";
 import * as DashboardBackend from "./backend/DashboardBackend";
@@ -218,6 +220,35 @@ function buildNodeInfraOption(nodesByOS, nodesByArch) {
 function DashboardPage() {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const history = useHistory();
+  const {t} = useTranslation();
+
+  const reasonLabels = {
+    "CrashLoopBackOff": {text: t("dashboard:reason CrashLoopBackOff"), color: "red"},
+    "OOMKilled": {text: t("dashboard:reason OOMKilled"), color: "volcano"},
+    "ImagePullBackOff": {text: t("dashboard:reason ImagePullBackOff"), color: "orange"},
+    "ErrImagePull": {text: t("dashboard:reason ImagePullBackOff"), color: "orange"},
+    "InvalidImageName": {text: t("dashboard:reason InvalidImageName"), color: "orange"},
+    "CreateContainerConfigError": {text: t("dashboard:reason ConfigError"), color: "gold"},
+    "CreateContainerError": {text: t("dashboard:reason ContainerError"), color: "gold"},
+    "Evicted": {text: t("dashboard:reason Evicted"), color: "purple"},
+    "Failed": {text: t("dashboard:reason Failed"), color: "red"},
+    "Unknown": {text: t("dashboard:reason Unknown"), color: "default"},
+  };
+
+  const unhealthyColumns = [
+    {title: t("dashboard:col Namespace"), dataIndex: "namespace", key: "namespace", width: 160},
+    {title: t("dashboard:col App name"), dataIndex: "name", key: "name"},
+    {
+      title: t("dashboard:col Status"),
+      dataIndex: "reason",
+      key: "reason",
+      render: (reason) => {
+        const label = reasonLabels[reason] || {text: reason, color: "default"};
+        return <Tag color={label.color}>{label.text}</Tag>;
+      },
+    },
+  ];
 
   useEffect(() => {
     DashboardBackend.getDashboard().then(res => {
@@ -258,15 +289,53 @@ function DashboardPage() {
   const cardStyle = {borderRadius: 8, border: "1px solid #e8e8e8", minHeight: 110};
   const gutter = [16, 16];
 
+  const unhealthyPods = stats.unhealthyPods || [];
+
   return (
     <div style={{padding: 24}}>
 
-      {/* Row 1 — 8 stat cards */}
+      {/* Unhealthy alert banner */}
+      {unhealthyPods.length > 0 && (
+        <Alert
+          type="error"
+          showIcon
+          icon={<WarningOutlined />}
+          style={{marginBottom: 16, borderRadius: 8, cursor: "pointer"}}
+          message={
+            <span style={{fontWeight: 600}}>
+              {t("dashboard:alert unhealthy", {count: unhealthyPods.length})}
+            </span>
+          }
+          description={
+            <Table
+              size="small"
+              dataSource={unhealthyPods.map((p, i) => ({...p, key: i}))}
+              columns={unhealthyColumns}
+              pagination={false}
+              style={{marginTop: 8, background: "transparent"}}
+              onRow={(record) => ({
+                onClick: () => history.push(`/pods?namespace=${record.namespace}`),
+                style: {cursor: "pointer"},
+              })}
+            />
+          }
+        />
+      )}
+      {unhealthyPods.length === 0 && (
+        <Alert
+          type="success"
+          showIcon
+          message={t("dashboard:alert healthy")}
+          style={{marginBottom: 16, borderRadius: 8}}
+        />
+      )}
+
+      {/* Row 1 — stat cards */}
       <Row gutter={gutter}>
         <Col xs={12} sm={8} md={6} lg={3}>
           <Card variant="borderless" style={cardStyle}>
             <Statistic
-              title="Total Nodes"
+              title={t("dashboard:stat Nodes total")}
               value={stats.nodesTotal}
               prefix={<ClusterOutlined style={{color: "#1677ff"}} />}
               valueStyle={{color: "#1677ff"}}
@@ -276,7 +345,7 @@ function DashboardPage() {
         <Col xs={12} sm={8} md={6} lg={3}>
           <Card variant="borderless" style={cardStyle}>
             <Statistic
-              title="Nodes Ready"
+              title={t("dashboard:stat Nodes ready")}
               value={stats.nodesReady}
               prefix={<CheckCircleOutlined style={{color: "#14b8a6"}} />}
               valueStyle={{color: "#14b8a6"}}
@@ -286,7 +355,7 @@ function DashboardPage() {
         <Col xs={12} sm={8} md={6} lg={3}>
           <Card variant="borderless" style={cardStyle}>
             <Statistic
-              title="Total Pods"
+              title={t("dashboard:stat Pods total")}
               value={stats.podsTotal}
               prefix={<AppstoreOutlined style={{color: "#0958d9"}} />}
               valueStyle={{color: "#0958d9"}}
@@ -296,7 +365,7 @@ function DashboardPage() {
         <Col xs={12} sm={8} md={6} lg={3}>
           <Card variant="borderless" style={cardStyle}>
             <Statistic
-              title="Running Pods"
+              title={t("dashboard:stat Pods running")}
               value={stats.podsRunning}
               prefix={<AppstoreOutlined style={{color: "#0ea5e9"}} />}
               valueStyle={{color: "#0ea5e9"}}
@@ -306,7 +375,7 @@ function DashboardPage() {
         <Col xs={12} sm={8} md={6} lg={3}>
           <Card variant="borderless" style={cardStyle}>
             <Statistic
-              title="Namespaces"
+              title={t("dashboard:stat Namespaces")}
               value={stats.namespacesTotal}
               prefix={<SettingOutlined style={{color: "#6366f1"}} />}
               valueStyle={{color: "#6366f1"}}
@@ -316,7 +385,7 @@ function DashboardPage() {
         <Col xs={12} sm={8} md={6} lg={3}>
           <Card variant="borderless" style={cardStyle}>
             <Statistic
-              title="Services"
+              title={t("dashboard:stat Services")}
               value={stats.servicesTotal}
               prefix={<NodeIndexOutlined style={{color: "#8b5cf6"}} />}
               valueStyle={{color: "#8b5cf6"}}
@@ -326,20 +395,24 @@ function DashboardPage() {
         <Col xs={12} sm={8} md={6} lg={3}>
           <Card variant="borderless" style={cardStyle}>
             <Statistic
-              title="ConfigMaps"
-              value={stats.configMapsTotal}
-              prefix={<SettingOutlined style={{color: "#0891b2"}} />}
+              title={t("dashboard:stat Deployments total")}
+              value={stats.deploymentsTotal}
+              prefix={<AppstoreOutlined style={{color: "#0891b2"}} />}
               valueStyle={{color: "#0891b2"}}
             />
           </Card>
         </Col>
         <Col xs={12} sm={8} md={6} lg={3}>
-          <Card variant="borderless" style={cardStyle}>
+          <Card variant="borderless" style={{
+            ...cardStyle,
+            borderColor: stats.deploymentsAvailable < stats.deploymentsTotal ? "#ff4d4f" : "#e8e8e8",
+          }}>
             <Statistic
-              title="Service Accounts"
-              value={stats.serviceAccounts}
-              prefix={<UserOutlined style={{color: "#5734d3"}} />}
-              valueStyle={{color: "#5734d3"}}
+              title={t("dashboard:stat Deployments available")}
+              value={stats.deploymentsAvailable}
+              suffix={`/ ${stats.deploymentsTotal}`}
+              prefix={<CheckCircleOutlined style={{color: stats.deploymentsAvailable < stats.deploymentsTotal ? "#ff4d4f" : "#14b8a6"}} />}
+              valueStyle={{color: stats.deploymentsAvailable < stats.deploymentsTotal ? "#ff4d4f" : "#14b8a6"}}
             />
           </Card>
         </Col>
@@ -349,7 +422,7 @@ function DashboardPage() {
       <Row gutter={gutter} style={{marginTop: 16}}>
         <Col xs={24} xl={14}>
           <Card
-            title="Pods by Namespace"
+            title={t("dashboard:chart Pods by namespace")}
             variant="borderless"
             style={cardStyle}
           >
@@ -361,7 +434,7 @@ function DashboardPage() {
         </Col>
         <Col xs={24} xl={10}>
           <Card
-            title="Pod Phase Distribution"
+            title={t("dashboard:chart Pod phase")}
             variant="borderless"
             style={{...cardStyle, height: "100%"}}
           >
@@ -377,7 +450,7 @@ function DashboardPage() {
       <Row gutter={gutter} style={{marginTop: 16}}>
         <Col xs={24} xl={7}>
           <Card
-            title="Node Health"
+            title={t("dashboard:chart Node health")}
             variant="borderless"
             style={{...cardStyle, height: "100%"}}
             styles={{body: {display: "flex", alignItems: "center", justifyContent: "center", padding: "24px 16px"}}}
@@ -391,18 +464,18 @@ function DashboardPage() {
                 format={(pct) => (
                   <span>
                     <div style={{fontSize: 22, fontWeight: "bold", color: "#1677ff", lineHeight: 1.2}}>{pct}%</div>
-                    <div style={{fontSize: 11, color: "#999", marginTop: 4}}>Ready</div>
+                    <div style={{fontSize: 11, color: "#999", marginTop: 4}}>{t("dashboard:label Online")}</div>
                   </span>
                 )}
               />
               <div style={{display: "flex", flexDirection: "column", gap: 16, fontSize: 14}}>
                 <div>
                   <div style={{color: "#1677ff", fontWeight: 600, fontSize: 22}}>{stats.nodesReady}</div>
-                  <div style={{color: "#888"}}>Ready</div>
+                  <div style={{color: "#888"}}>{t("dashboard:label Online")}</div>
                 </div>
                 <div>
                   <div style={{color: "#6366f1", fontWeight: 600, fontSize: 22}}>{stats.nodesTotal - stats.nodesReady}</div>
-                  <div style={{color: "#888"}}>Not Ready</div>
+                  <div style={{color: "#888"}}>{t("dashboard:label Offline")}</div>
                 </div>
               </div>
             </div>
@@ -410,7 +483,7 @@ function DashboardPage() {
         </Col>
         <Col xs={24} xl={7}>
           <Card
-            title="Pod Availability"
+            title={t("dashboard:chart Pod availability")}
             variant="borderless"
             style={{...cardStyle, height: "100%"}}
             styles={{body: {display: "flex", alignItems: "center", justifyContent: "center", padding: "24px 16px"}}}
@@ -424,18 +497,18 @@ function DashboardPage() {
                 format={(pct) => (
                   <span>
                     <div style={{fontSize: 22, fontWeight: "bold", color: "#0958d9", lineHeight: 1.2}}>{pct}%</div>
-                    <div style={{fontSize: 11, color: "#999", marginTop: 4}}>Running</div>
+                    <div style={{fontSize: 11, color: "#999", marginTop: 4}}>{t("dashboard:label Running")}</div>
                   </span>
                 )}
               />
               <div style={{display: "flex", flexDirection: "column", gap: 16, fontSize: 14}}>
                 <div>
                   <div style={{color: "#0958d9", fontWeight: 600, fontSize: 22}}>{stats.podsRunning}</div>
-                  <div style={{color: "#888"}}>Running</div>
+                  <div style={{color: "#888"}}>{t("dashboard:label Running")}</div>
                 </div>
                 <div>
                   <div style={{color: "#6366f1", fontWeight: 600, fontSize: 22}}>{stats.podsTotal - stats.podsRunning}</div>
-                  <div style={{color: "#888"}}>Other</div>
+                  <div style={{color: "#888"}}>{t("dashboard:label Other")}</div>
                 </div>
               </div>
             </div>
@@ -443,7 +516,7 @@ function DashboardPage() {
         </Col>
         <Col xs={24} xl={10}>
           <Card
-            title="Service Types"
+            title={t("dashboard:chart Service types")}
             variant="borderless"
             style={{...cardStyle, height: "100%"}}
           >
@@ -456,7 +529,7 @@ function DashboardPage() {
       <Row gutter={gutter} style={{marginTop: 16}}>
         <Col xs={24}>
           <Card
-            title="Node Infrastructure  (left: OS · right: Architecture)"
+            title={t("dashboard:chart Node infra")}
             variant="borderless"
             style={cardStyle}
           >
