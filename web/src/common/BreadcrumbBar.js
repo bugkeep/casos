@@ -14,6 +14,7 @@ const RESOURCE_LABELS = {
   "secrets": "general:Secrets",
   "services": "general:Services",
   "clusterrolebindings": "general:ClusterRoleBindings",
+  "ingresses": "general:Ingresses",
   "sites": "general:Sites",
 };
 

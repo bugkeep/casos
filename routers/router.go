@@ -39,6 +39,12 @@ func InitAPI() {
 
 	beego.Router("/api/search-docker-hub-images", &controllers.ApiController{}, "GET:SearchDockerHubImages")
 
+	beego.Router("/api/get-ingresses", &controllers.ApiController{}, "GET:GetIngresses")
+	beego.Router("/api/get-ingress", &controllers.ApiController{}, "GET:GetIngress")
+	beego.Router("/api/add-ingress", &controllers.ApiController{}, "POST:AddIngress")
+	beego.Router("/api/update-ingress", &controllers.ApiController{}, "POST:UpdateIngress")
+	beego.Router("/api/delete-ingress", &controllers.ApiController{}, "POST:DeleteIngress")
+
 	beego.Router("/api/get-services", &controllers.ApiController{}, "GET:GetServices")
 	beego.Router("/api/get-service", &controllers.ApiController{}, "GET:GetService")
 	beego.Router("/api/add-service", &controllers.ApiController{}, "POST:AddService")

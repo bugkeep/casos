@@ -32,6 +32,7 @@ import ServiceAccountListPage from "./ServiceAccountListPage";
 import ServiceListPage from "./ServiceListPage";
 import ClusterRoleBindingListPage from "./ClusterRoleBindingListPage";
 import PvcListPage from "./PvcListPage";
+import IngressListPage from "./IngressListPage";
 import DashboardPage from "./DashboardPage";
 import SiteListPage from "./SiteListPage";
 import SiteEditPage from "./SiteEditPage";
@@ -46,6 +47,7 @@ function getMenuParentKey(uri) {
   if (uri.includes("/pods") || uri.includes("/deployments")) {return "/workloads";}
   if (uri.includes("/nodes") || uri.includes("/namespaces") || uri.includes("/serviceaccounts")) {return "/cluster";}
   if (uri.includes("/configmaps") || uri.includes("/secrets") || uri.includes("/pvcs")) {return "/configuration";}
+  if (uri.includes("/ingresses")) {return "/networking";}
   if (uri.includes("/services")) {return "/networking";}
   if (uri.includes("/clusterrolebindings")) {return "/accesscontrol";}
   if (uri.includes("/sites")) {return "/admin";}
@@ -200,6 +202,7 @@ function ManagementPage(props) {
       ]),
       Setting.getItem(<Link to="/services">{i18next.t("general:Networking")}</Link>, "/networking", <NodeIndexOutlined />, [
         Setting.getItem(<Link to="/services">{i18next.t("general:Services")}</Link>, "/services"),
+        Setting.getItem(<Link to="/ingresses">{i18next.t("general:Ingresses")}</Link>, "/ingresses"),
       ]),
       Setting.getItem(<Link to="/clusterrolebindings">{i18next.t("general:Access Control")}</Link>, "/accesscontrol", <LockOutlined />, [
         Setting.getItem(<Link to="/clusterrolebindings">{i18next.t("general:ClusterRoleBindings")}</Link>, "/clusterrolebindings"),
@@ -226,6 +229,7 @@ function ManagementPage(props) {
         <Route exact path="/secrets" render={(props) => <SecretListPage {...props} />} />
         <Route exact path="/pvcs" render={(props) => <PvcListPage {...props} />} />
         <Route exact path="/services" render={(props) => <ServiceListPage {...props} />} />
+        <Route exact path="/ingresses" render={(props) => <IngressListPage {...props} />} />
         <Route exact path="/clusterrolebindings" render={(props) => <ClusterRoleBindingListPage {...props} />} />
         <Route exact path="/sites" render={(props) => <SiteListPage account={account} {...props} />} />
         <Route exact path="/sites/:siteName" render={(props) => <SiteEditPage account={account} onUpdateSite={onUpdateSite} {...props} />} />
