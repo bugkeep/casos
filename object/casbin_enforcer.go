@@ -8,18 +8,21 @@ import (
 	"github.com/casbin/casbin/v2/persist"
 )
 
+// Allow-and-deny model: allowed when at least one allow rule matches AND no deny rule matches.
+// A default "allow all" seed rule is inserted on first startup so the webhook is a no-op
+// until the operator deliberately refines the policy.
 const casbinModelText = `
 [request_definition]
 r = sub, ns, resource, action
 
 [policy_definition]
-p = sub, ns, resource, action
+p = sub, ns, resource, action, eft
 
 [role_definition]
 g = _, _
 
 [policy_effect]
-e = some(where (p.eft == allow))
+e = some(where (p.eft == allow)) && !some(where (p.eft == deny))
 
 [matchers]
 m = (g(r.sub, p.sub) || r.sub == p.sub || p.sub == "*") && (p.ns == "*" || r.ns == p.ns) && (p.resource == "*" || r.resource == p.resource) && (p.action == "*" || r.action == p.action)
@@ -35,20 +38,16 @@ type dbAdapter struct{ rules []*CasbinRule }
 
 func (a *dbAdapter) LoadPolicy(m model.Model) error {
 	for _, r := range a.rules {
-		parts := []string{r.PType, r.V0}
-		for _, v := range []string{r.V1, r.V2, r.V3} {
-			if v == "" {
-				break
+		var line string
+		if r.PType == "p" {
+			eft := r.V4
+			if eft == "" {
+				eft = "allow"
 			}
-			parts = append(parts, v)
-		}
-		line := ""
-		for i, p := range parts {
-			if i == 0 {
-				line = p
-			} else {
-				line += ", " + p
-			}
+			line = "p, " + r.V0 + ", " + r.V1 + ", " + r.V2 + ", " + r.V3 + ", " + eft
+		} else {
+			// g: role assignment — no eft field
+			line = "g, " + r.V0 + ", " + r.V1
 		}
 		persist.LoadPolicyLine(line, m)
 	}
@@ -81,17 +80,11 @@ func ReloadEnforcer() error {
 }
 
 // EnforceAdmission checks whether the user may perform action on resource in namespace.
-// Returns (true, nil) when no policy rules exist yet (safe opt-in behaviour).
 func EnforceAdmission(user, namespace, resource, action string) (bool, error) {
 	enforcerMu.RLock()
 	e := gEnforcer
 	enforcerMu.RUnlock()
 	if e == nil {
-		return true, nil
-	}
-	policies, _ := e.GetPolicy()
-	roles, _ := e.GetGroupingPolicy()
-	if len(policies) == 0 && len(roles) == 0 {
 		return true, nil
 	}
 	return e.Enforce(user, namespace, resource, action)

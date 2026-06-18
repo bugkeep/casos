@@ -72,6 +72,12 @@ func ensureCasbinWebhook(ctx context.Context, client kubernetes.Interface, cfg C
 	}
 
 	ar := client.AdmissionregistrationV1().ValidatingWebhookConfigurations()
+
+	// Remove the old name left by a previous release.
+	if err := ar.Delete(ctx, "casbin-gatekeeper", metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+		logrus.Warnf("delete legacy casbin-gatekeeper webhook: %v", err)
+	}
+
 	existing, err := ar.Get(ctx, "casbin-admission", metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		if _, err := ar.Create(ctx, whConfig, metav1.CreateOptions{}); err != nil {

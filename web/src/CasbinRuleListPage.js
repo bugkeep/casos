@@ -22,6 +22,12 @@ function ruleTag(pType) {
     : <Tag color="green">policy</Tag>;
 }
 
+function eftTag(v4) {
+  return v4 === "deny"
+    ? <Tag color="red">deny</Tag>
+    : <Tag color="green">allow</Tag>;
+}
+
 class CasbinRuleListPage extends React.Component {
   constructor(props) {
     super(props);
@@ -63,6 +69,7 @@ class CasbinRuleListPage extends React.Component {
       v1: values.v1 || "",
       v2: values.v2 || "",
       v3: values.v3 || "",
+      v4: values.pType === "p" ? (values.v4 || "allow") : "",
     };
     CasbinRuleBackend.addCasbinRule(rule)
       .then(res => {
@@ -119,7 +126,7 @@ class CasbinRuleListPage extends React.Component {
         confirmLoading={submitting}
         destroyOnClose
       >
-        <Form ref={this.formRef} layout="vertical" onFinish={(v) => this.handleAdd(v)} initialValues={{pType: "p", v1: "*", v2: "*", v3: "*"}}>
+        <Form ref={this.formRef} layout="vertical" onFinish={(v) => this.handleAdd(v)} initialValues={{pType: "p", v1: "*", v2: "*", v3: "*", v4: "allow"}}>
           <Form.Item name="pType" label="Type" rules={[{required: true}]}>
             <Select>
               {PTYPES.map(pt => <Option key={pt.value} value={pt.value}>{pt.label}</Option>)}
@@ -146,6 +153,12 @@ class CasbinRuleListPage extends React.Component {
                       <Form.Item name="v3" label="Action">
                         <Select placeholder="* for all actions">
                           {ACTIONS.map(a => <Option key={a} value={a}>{a}</Option>)}
+                        </Select>
+                      </Form.Item>
+                      <Form.Item name="v4" label="Effect" rules={[{required: true}]}>
+                        <Select>
+                          <Option value="allow">allow</Option>
+                          <Option value="deny">deny</Option>
                         </Select>
                       </Form.Item>
                     </>
@@ -194,6 +207,12 @@ class CasbinRuleListPage extends React.Component {
         render: (v) => v ? <Tag>{v}</Tag> : <Text type="secondary">—</Text>,
       },
       {
+        title: "Effect",
+        dataIndex: "v4",
+        width: 80,
+        render: (v, record) => record.pType === "p" ? eftTag(v) : <Text type="secondary">—</Text>,
+      },
+      {
         title: "Action",
         key: "actions",
         width: 80,
@@ -226,7 +245,7 @@ class CasbinRuleListPage extends React.Component {
           <Text type="secondary" style={{fontSize: 12}}>
             The same rules are enforced by two in-process webhooks: <strong>ValidatingAdmissionWebhook</strong> (<Text code style={{fontSize: 11}}>casbin-admission</Text>) intercepts write operations before resources are persisted, and <strong>Authorization Webhook</strong> intercepts every API request (get / list / watch / create …) before it reaches RBAC.
             <br />
-            <strong>p</strong> = allow policy (subject, namespace, resource, action) · <strong>g</strong> = role assignment (user → role) · <Text code style={{fontSize: 11}}>*</Text> = wildcard · system:* users bypass the authorization webhook. When no rules exist, all requests are allowed.
+            <strong>p</strong> = policy (subject, namespace, resource, action, <em>effect</em>) · <strong>g</strong> = role assignment · <Text code style={{fontSize: 11}}>*</Text> = wildcard · effect <Text code style={{fontSize: 11}}>allow</Text> / <Text code style={{fontSize: 11}}>deny</Text>. A default <Text code style={{fontSize: 11}}>p, *, *, *, *, allow</Text> rule is seeded on first run so everything is permitted until you refine the policy. system:* users bypass the authorization webhook.
           </Text>
         </div>
 

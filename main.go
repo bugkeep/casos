@@ -27,6 +27,9 @@ func main() {
 	object.InitAdapter()
 	object.CreateTables()
 	object.InitSite()
+	if err := object.SeedDefaultPolicies(); err != nil {
+		logs.Warning("casbin seed: %v", err)
+	}
 	if err := object.ReloadEnforcer(); err != nil {
 		logs.Warning("casbin enforcer init: %v", err)
 	}
