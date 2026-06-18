@@ -14,6 +14,7 @@ import {
   MenuUnfoldOutlined,
   NodeIndexOutlined,
   SettingOutlined,
+  ShopOutlined,
   UserOutlined
 } from "@ant-design/icons";
 import "./App.less";
@@ -34,13 +35,14 @@ import PvcListPage from "./PvcListPage";
 import DashboardPage from "./DashboardPage";
 import SiteListPage from "./SiteListPage";
 import SiteEditPage from "./SiteEditPage";
+import AppStorePage from "./AppStorePage";
 import i18next from "i18next";
 
 const {Header, Footer, Content, Sider} = Layout;
 
 function getMenuParentKey(uri) {
   if (!uri) {return null;}
-  if (uri === "/dashboard") {return null;}
+  if (uri === "/dashboard" || uri === "/app-store") {return null;}
   if (uri.includes("/pods") || uri.includes("/deployments")) {return "/workloads";}
   if (uri.includes("/nodes") || uri.includes("/namespaces") || uri.includes("/serviceaccounts")) {return "/cluster";}
   if (uri.includes("/configmaps") || uri.includes("/secrets") || uri.includes("/pvcs")) {return "/configuration";}
@@ -181,6 +183,7 @@ function ManagementPage(props) {
   function getMenuItems() {
     const allItems = [
       Setting.getItem(<Link to="/dashboard">{i18next.t("general:Dashboard")}</Link>, "/dashboard", <DashboardOutlined />),
+      Setting.getItem(<Link to="/app-store">{i18next.t("general:App Store")}</Link>, "/app-store", <ShopOutlined />),
       Setting.getItem(<Link to="/pods">{i18next.t("general:Workloads")}</Link>, "/workloads", <AppstoreOutlined />, [
         Setting.getItem(<Link to="/deployments">{i18next.t("general:Deployments")}</Link>, "/deployments"),
         Setting.getItem(<Link to="/pods">{i18next.t("general:Pods")}</Link>, "/pods"),
@@ -213,6 +216,7 @@ function ManagementPage(props) {
       <Switch>
         <Redirect exact from="/" to="/dashboard" />
         <Route exact path="/dashboard" render={(props) => <DashboardPage {...props} />} />
+        <Route exact path="/app-store" render={(props) => <AppStorePage {...props} />} />
         <Route exact path="/deployments" render={(props) => <DeploymentListPage {...props} />} />
         <Route exact path="/pods" render={(props) => <PodListPage {...props} />} />
         <Route exact path="/nodes" render={(props) => <NodeListPage {...props} />} />
