@@ -44,6 +44,7 @@ type podSummary struct {
 	Phase           string            `json:"phase"`
 	NodeName        string            `json:"nodeName"`
 	Image           string            `json:"image"`
+	ContainerPorts  []int32           `json:"containerPorts"`
 	Labels          map[string]string `json:"labels"`
 	CreatedAt       string            `json:"createdAt"`
 	ResourceVersion string            `json:"resourceVersion"`
@@ -60,6 +61,7 @@ func toPodSummary(p corev1.Pod) podSummary {
 		Phase:           string(p.Status.Phase),
 		NodeName:        p.Spec.NodeName,
 		Image:           image,
+		ContainerPorts:  object.ContainerPortsFromPod(&p),
 		Labels:          p.Labels,
 		CreatedAt:       p.CreationTimestamp.UTC().Format("2006-01-02 15:04:05"),
 		ResourceVersion: p.ResourceVersion,
@@ -110,6 +112,7 @@ type podRequest struct {
 	Name            string            `json:"name"`
 	Image           string            `json:"image"`
 	ContainerName   string            `json:"containerName"`
+	Ports           []int32           `json:"ports"`
 	Labels          map[string]string `json:"labels"`
 	ResourceVersion string            `json:"resourceVersion"`
 }
@@ -133,6 +136,14 @@ func (c *ApiController) AddPod() {
 	if req.ContainerName == "" {
 		req.ContainerName = "app"
 	}
+	ports := make([]corev1.ContainerPort, 0, len(req.Ports))
+	for _, port := range req.Ports {
+		if port < 1 || port > 65535 {
+			c.ResponseError("ports must be between 1 and 65535")
+			return
+		}
+		ports = append(ports, corev1.ContainerPort{ContainerPort: port})
+	}
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      req.Name,
@@ -141,7 +152,7 @@ func (c *ApiController) AddPod() {
 		},
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{
-				{Name: req.ContainerName, Image: req.Image},
+				{Name: req.ContainerName, Image: req.Image, Ports: ports},
 			},
 		},
 	}

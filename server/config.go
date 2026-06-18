@@ -10,13 +10,16 @@ import (
 
 // Config holds control-plane settings populated from app.conf.
 type Config struct {
-	DataDir          string
-	ApiserverBind    string // actual bind / SAN IP (may be loopback in dev)
-	AdvertiseAddress string // non-loopback IP registered as kubernetes service endpoint
-	ApiserverPort    int
-	DSN              string // MySQL DSN forwarded to kine
-	SandboxImage     string // containerd sandbox (pause) image, empty = upstream default
-	Socks5Proxy      string // outbound socks5 proxy, e.g. 127.0.0.1:10808
+	DataDir                 string
+	ApiserverBind           string // actual bind / SAN IP (may be loopback in dev)
+	AdvertiseAddress        string // non-loopback IP registered as kubernetes service endpoint
+	ApiserverPort           int
+	PublicOrigin            string // external CasOS origin behind reverse proxy, optional
+	DSN                     string // MySQL DSN forwarded to kine
+	SandboxImage            string // containerd sandbox (pause) image, empty = upstream default
+	Socks5Proxy             string // outbound socks5 proxy, e.g. 127.0.0.1:10808
+	PodUIProxyBind          string // fixed Pod UI proxy listen address
+	PodUIProxyPublicBaseURL string // public Pod UI base URL template, must include {id} in host
 }
 
 // ConfigFromAppConf reads server config from the beego app.conf.
@@ -33,6 +36,7 @@ func ConfigFromAppConf() (Config, error) {
 	if port == 0 {
 		port = 6443
 	}
+	publicOrigin := strings.TrimSpace(beego.AppConfig.String("publicOrigin"))
 	dsn := beego.AppConfig.String("dataSourceName")
 	if dsn == "" {
 		return Config{}, fmt.Errorf("dataSourceName not set in app.conf")
@@ -49,6 +53,11 @@ func ConfigFromAppConf() (Config, error) {
 	}
 
 	socks5Proxy := beego.AppConfig.String("socks5Proxy")
+	podUIProxyBind := strings.TrimSpace(beego.AppConfig.String("podUIProxyBind"))
+	if podUIProxyBind == "" {
+		podUIProxyBind = "127.0.0.1:9001"
+	}
+	podUIProxyPublicBaseURL := strings.TrimSpace(beego.AppConfig.String("podUIProxyPublicBaseUrl"))
 
 	sandboxImage := beego.AppConfig.String("sandboxImage")
 	if sandboxImage == "" {
@@ -60,13 +69,16 @@ func ConfigFromAppConf() (Config, error) {
 	}
 
 	return Config{
-		DataDir:          dataDir,
-		ApiserverBind:    bind,
-		AdvertiseAddress: advertise,
-		ApiserverPort:    port,
-		DSN:              dsn,
-		SandboxImage:     sandboxImage,
-		Socks5Proxy:      socks5Proxy,
+		DataDir:                 dataDir,
+		ApiserverBind:           bind,
+		AdvertiseAddress:        advertise,
+		ApiserverPort:           port,
+		PublicOrigin:            publicOrigin,
+		DSN:                     dsn,
+		SandboxImage:            sandboxImage,
+		Socks5Proxy:             socks5Proxy,
+		PodUIProxyBind:          podUIProxyBind,
+		PodUIProxyPublicBaseURL: podUIProxyPublicBaseURL,
 	}, nil
 }
 
