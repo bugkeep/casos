@@ -7,6 +7,8 @@ import * as DeploymentBackend from "./backend/DeploymentBackend";
 import * as NamespaceBackend from "./backend/NamespaceBackend";
 import * as ConfigMapBackend from "./backend/ConfigMapBackend";
 import * as SecretBackend from "./backend/SecretBackend";
+import * as ServiceBackend from "./backend/ServiceBackend";
+import * as NodeBackend from "./backend/NodeBackend";
 import * as Setting from "./Setting";
 import DeploymentExposeModal from "./DeploymentExposeModal";
 import EnvVarEditor, {ENV_SOURCE_CONFIGMAP, ENV_SOURCE_PLAIN, ENV_SOURCE_SECRET} from "./EnvVarEditor";
@@ -48,6 +50,8 @@ class DeploymentListPage extends React.Component {
       namespaces: [],
       configMaps: [],
       secrets: [],
+      services: [],
+      nodeIP: null,
       loading: true,
       error: null,
       modalVisible: false,
@@ -63,6 +67,8 @@ class DeploymentListPage extends React.Component {
   componentDidMount() {
     this.fetchDeployments();
     this.fetchNamespaces();
+    this.fetchServices();
+    this.fetchNodeIP();
   }
 
   fetchNamespaces() {
@@ -71,6 +77,42 @@ class DeploymentListPage extends React.Component {
         this.setState({namespaces: res.data ?? []});
       }
     }).catch(() => {});
+  }
+
+  fetchServices() {
+    ServiceBackend.getServices().then(res => {
+      if (res.status === "ok") {
+        this.setState({services: res.data ?? []});
+      }
+    }).catch(() => {});
+  }
+
+  fetchNodeIP() {
+    NodeBackend.getNodes().then(res => {
+      if (res.status === "ok") {
+        const nodes = res.data ?? [];
+        for (const node of nodes) {
+          if (node.externalIP) {
+            this.setState({nodeIP: node.externalIP});
+            return;
+          }
+        }
+        for (const node of nodes) {
+          if (node.internalIP) {
+            this.setState({nodeIP: node.internalIP});
+            return;
+          }
+        }
+      }
+    }).catch(() => {});
+  }
+
+  getAccessUrls(deploy) {
+    const {services, nodeIP} = this.state;
+    if (!nodeIP) {return [];}
+    const svc = services.find(s => s.name === deploy.name && s.namespace === deploy.namespace && s.type === "NodePort");
+    if (!svc) {return [];}
+    return (svc.ports ?? []).filter(p => p.nodePort).map(p => `http://${nodeIP}:${p.nodePort}`);
   }
 
   fetchDeployments() {
@@ -87,6 +129,7 @@ class DeploymentListPage extends React.Component {
       this.setState({error: e.message});
     }).finally(() => {
       this.setState({loading: false});
+      this.fetchServices();
     });
   }
 
@@ -212,6 +255,19 @@ class DeploymentListPage extends React.Component {
             }).catch(e => Setting.showMessage("error", e.message))}
           />
         ),
+      },
+      {
+        title: "Access URL",
+        key: "accessUrl",
+        render: (_, record) => {
+          const urls = this.getAccessUrls(record);
+          if (urls.length === 0) {return null;}
+          return urls.map((url, i) => (
+            <a key={i} href={url} target="_blank" rel="noopener noreferrer" style={{display: "block"}}>
+              {url}
+            </a>
+          ));
+        },
       },
       {title: "Created", dataIndex: "createdAt", key: "createdAt", width: 180},
       {

@@ -100,7 +100,7 @@ func (c *ApiController) DeployApp() {
 		}
 		svcType := req.ServiceType
 		if svcType == "" {
-			svcType = "ClusterIP"
+			svcType = "NodePort"
 		}
 		svcReq := serviceRequest{
 			Namespace: req.Namespace,
