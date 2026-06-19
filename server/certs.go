@@ -170,7 +170,14 @@ func EnsureWebhookCert(certDir string) error {
 	certFile := filepath.Join(certDir, "webhook.crt")
 	keyFile := filepath.Join(certDir, "webhook.key")
 	if fileExists(certFile) && fileExists(keyFile) {
-		return nil
+		// Verify the existing cert is still valid under the current CA.
+		// If the CA was regenerated, the old webhook cert will fail verification
+		// and must be replaced.
+		if webhookCertValidUnderCA(certFile, filepath.Join(certDir, "ca.crt")) {
+			return nil
+		}
+		_ = os.Remove(certFile)
+		_ = os.Remove(keyFile)
 	}
 
 	caKeyPEM, err := os.ReadFile(filepath.Join(certDir, "ca.key"))
@@ -385,6 +392,33 @@ func uniqueIPs(addrs ...string) []net.IP {
 		result = append(result, ip)
 	}
 	return result
+}
+
+// webhookCertValidUnderCA returns true if the PEM cert at certFile verifies
+// against the PEM CA at caFile. Returns false on any read, parse, or verify error.
+func webhookCertValidUnderCA(certFile, caFile string) bool {
+	caPEM, err := os.ReadFile(caFile)
+	if err != nil {
+		return false
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(caPEM) {
+		return false
+	}
+	certPEM, err := os.ReadFile(certFile)
+	if err != nil {
+		return false
+	}
+	block, _ := pem.Decode(certPEM)
+	if block == nil {
+		return false
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return false
+	}
+	_, err = cert.Verify(x509.VerifyOptions{Roots: pool, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}})
+	return err == nil
 }
 
 // allInterfaceIPs returns all unicast IP addresses assigned to local network
