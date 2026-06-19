@@ -1,10 +1,12 @@
 import React from "react";
 import {
-  Alert, Badge, Button, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Table, Tag, Tooltip
+  Alert, Button, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tag, Tooltip
 } from "antd";
 import {DeleteOutlined, EditOutlined, LockOutlined, MinusCircleOutlined, PlusOutlined, ReloadOutlined, UnlockOutlined} from "@ant-design/icons";
 import * as IngressBackend from "./backend/IngressBackend";
 import * as NamespaceBackend from "./backend/NamespaceBackend";
+import * as CertificateBackend from "./backend/CertificateBackend";
+import CertificateModal from "./CertificateModal";
 import * as Setting from "./Setting";
 
 const PATH_TYPE_OPTIONS = [
@@ -25,8 +27,8 @@ class IngressListPage extends React.Component {
       modalMode: "add",
       submitting: false,
       editingIng: null,
-      tlsEnabled: false,
-      certStatus: {},
+      certStatuses: {},
+      certModalIng: null,
     };
     this.formRef = React.createRef();
   }
@@ -49,9 +51,7 @@ class IngressListPage extends React.Component {
     IngressBackend.getIngresses().then(res => {
       if (res.status === "ok") {
         const ingresses = res.data ?? [];
-        this.setState({ingresses}, () => {
-          this.fetchCertStatuses(ingresses);
-        });
+        this.setState({ingresses}, () => this.fetchAllCertStatuses(ingresses));
       } else {
         Setting.showMessage("error", res.msg);
         this.setState({error: res.msg});
@@ -64,34 +64,30 @@ class IngressListPage extends React.Component {
     });
   }
 
-  fetchCertStatuses(ingresses) {
-    const tlsIngresses = ingresses.filter(ing => ing.tlsEnabled);
-    if (tlsIngresses.length === 0) {return;}
+  fetchAllCertStatuses(ingresses) {
     const updates = {};
-    const promises = tlsIngresses.map(ing =>
-      IngressBackend.getIngressCertStatus(ing.namespace, ing.name)
+    const promises = ingresses.map(ing =>
+      CertificateBackend.getCertStatus(ing.namespace, ing.name)
         .then(res => {
-          if (res.status === "ok") {
+          if (res.status === "ok" && res.data?.status !== "none") {
             updates[`${ing.namespace}/${ing.name}`] = res.data;
           }
         })
         .catch(() => {})
     );
     Promise.all(promises).then(() => {
-      this.setState(prev => ({certStatus: {...prev.certStatus, ...updates}}));
+      this.setState(prev => ({certStatuses: {...prev.certStatuses, ...updates}}));
     });
   }
 
   openAddModal() {
-    this.setState({modalVisible: true, modalMode: "add", editingIng: null, tlsEnabled: false}, () => {
+    this.setState({modalVisible: true, modalMode: "add", editingIng: null}, () => {
       const defaultNs = this.state.namespaces.length > 0 ? this.state.namespaces[0].name : "default";
       setTimeout(() => {
         this.formRef.current?.setFieldsValue({
           name: "",
           namespace: defaultNs,
           ingressClass: "",
-          tlsEnabled: false,
-          clusterIssuer: "letsencrypt-prod",
           rules: [{host: "", path: "/", pathType: "Prefix", serviceName: "", servicePort: 80}],
         });
       }, 0);
@@ -99,14 +95,12 @@ class IngressListPage extends React.Component {
   }
 
   openEditModal(ing) {
-    this.setState({modalVisible: true, modalMode: "edit", editingIng: ing, tlsEnabled: ing.tlsEnabled ?? false}, () => {
+    this.setState({modalVisible: true, modalMode: "edit", editingIng: ing}, () => {
       setTimeout(() => {
         this.formRef.current?.setFieldsValue({
           name: ing.name,
           namespace: ing.namespace,
           ingressClass: ing.ingressClass,
-          tlsEnabled: ing.tlsEnabled ?? false,
-          clusterIssuer: ing.clusterIssuer || "letsencrypt-prod",
           rules: (ing.rules ?? []).map(r => ({
             host: r.host,
             path: r.path,
@@ -120,7 +114,7 @@ class IngressListPage extends React.Component {
   }
 
   closeModal() {
-    this.setState({modalVisible: false, editingIng: null, tlsEnabled: false});
+    this.setState({modalVisible: false, editingIng: null});
   }
 
   handleSubmit() {
@@ -129,8 +123,6 @@ class IngressListPage extends React.Component {
         name: values.name,
         namespace: values.namespace,
         ingressClass: values.ingressClass ?? "",
-        tlsEnabled: values.tlsEnabled ?? false,
-        clusterIssuer: values.tlsEnabled ? (values.clusterIssuer || "letsencrypt-prod") : "",
         rules: (values.rules ?? []).map(r => ({
           host: r.host ?? "",
           path: r.path ?? "/",
@@ -183,32 +175,30 @@ class IngressListPage extends React.Component {
     }).catch(e => Setting.showMessage("error", e.message));
   }
 
-  renderTLSCell(record) {
-    if (!record.tlsEnabled) {
-      return (
-        <Tag icon={<UnlockOutlined />} color="default">HTTP</Tag>
-      );
-    }
+  renderTLSBadge(record) {
     const key = `${record.namespace}/${record.name}`;
-    const cert = this.state.certStatus[key];
-    if (!cert) {
+    const cert = this.state.certStatuses[key];
+
+    if (!record.tlsEnabled && !cert) {
+      return <Tag icon={<UnlockOutlined />}>HTTP</Tag>;
+    }
+    if (!cert || cert.status === "none") {
+      return <Tag icon={<LockOutlined />} color="default">HTTPS (no cert)</Tag>;
+    }
+    if (cert.status === "pending" || cert.status === "verifying") {
+      return <Tag icon={<LockOutlined />} color="processing">HTTPS (issuing…)</Tag>;
+    }
+    if (cert.status === "failed") {
       return (
-        <Tooltip title="Checking certificate status...">
-          <Badge status="processing" text={<Tag icon={<LockOutlined />} color="blue">HTTPS</Tag>} />
+        <Tooltip title={cert.error}>
+          <Tag icon={<LockOutlined />} color="error">HTTPS (failed)</Tag>
         </Tooltip>
       );
     }
-    if (cert.status === "pending") {
+    if (cert.status === "issued") {
       return (
-        <Tooltip title={`Issuer: ${record.clusterIssuer || "—"} — Certificate is being issued by cert-manager`}>
-          <Tag icon={<LockOutlined />} color="orange">HTTPS (pending)</Tag>
-        </Tooltip>
-      );
-    }
-    if (cert.status === "ready") {
-      return (
-        <Tooltip title={`Issuer: ${record.clusterIssuer || "—"} — Certificate valid until ${cert.expiry}`}>
-          <Tag icon={<LockOutlined />} color="green">HTTPS · {cert.expiry}</Tag>
+        <Tooltip title={`Valid until ${cert.expiry}`}>
+          <Tag icon={<LockOutlined />} color="success">HTTPS · {cert.expiry}</Tag>
         </Tooltip>
       );
     }
@@ -216,25 +206,25 @@ class IngressListPage extends React.Component {
   }
 
   render() {
-    const {ingresses, namespaces, loading, error, modalVisible, modalMode, submitting, tlsEnabled} = this.state;
+    const {ingresses, namespaces, loading, error, modalVisible, modalMode, submitting, certModalIng} = this.state;
 
     const nsOptions = namespaces.map(ns => ({label: ns.name, value: ns.name}));
 
     const columns = [
-      {title: "Namespace", dataIndex: "namespace", key: "namespace", width: 150},
+      {title: "Namespace", dataIndex: "namespace", key: "namespace", width: 140},
       {title: "Name", dataIndex: "name", key: "name"},
       {
         title: "Ingress Class",
         dataIndex: "ingressClass",
         key: "ingressClass",
-        width: 150,
+        width: 140,
         render: v => v || <span style={{color: "#bbb"}}>—</span>,
       },
       {
         title: "TLS",
         key: "tls",
-        width: 170,
-        render: (_, record) => this.renderTLSCell(record),
+        width: 180,
+        render: (_, record) => this.renderTLSBadge(record),
       },
       {
         title: "Rules",
@@ -250,13 +240,20 @@ class IngressListPage extends React.Component {
           </Space>
         ),
       },
-      {title: "Created", dataIndex: "createdAt", key: "createdAt", width: 180},
+      {title: "Created", dataIndex: "createdAt", key: "createdAt", width: 170},
       {
         title: "Actions",
         key: "actions",
-        width: 140,
+        width: 210,
         render: (_, record) => (
           <Space>
+            <Button
+              size="small"
+              icon={<LockOutlined />}
+              onClick={() => this.setState({certModalIng: record})}
+            >
+              HTTPS
+            </Button>
             <Button size="small" icon={<EditOutlined />} onClick={() => this.openEditModal(record)}>Edit</Button>
             <Popconfirm
               title={`Delete Ingress "${record.name}"?`}
@@ -341,36 +338,6 @@ class IngressListPage extends React.Component {
               <Input placeholder="nginx (optional)" />
             </Form.Item>
 
-            <Form.Item
-              label={
-                <span>
-                  <LockOutlined style={{marginRight: 6, color: tlsEnabled ? "#52c41a" : undefined}} />
-                  Enable HTTPS (cert-manager)
-                </span>
-              }
-              name="tlsEnabled"
-              valuePropName="checked"
-              extra={tlsEnabled ? "cert-manager will automatically issue and renew a TLS certificate" : "Enable to get a free TLS certificate via cert-manager + Let's Encrypt"}
-            >
-              <Switch
-                onChange={v => {
-                  this.setState({tlsEnabled: v});
-                  this.formRef.current?.setFieldValue("tlsEnabled", v);
-                }}
-              />
-            </Form.Item>
-
-            {tlsEnabled && (
-              <Form.Item
-                label="Cluster Issuer"
-                name="clusterIssuer"
-                rules={[{required: true, message: "Cluster issuer is required when HTTPS is enabled"}]}
-                extra="The cert-manager ClusterIssuer name to use (must be pre-installed in the cluster)"
-              >
-                <Input placeholder="letsencrypt-prod" />
-              </Form.Item>
-            )}
-
             <Form.List name="rules">
               {(fields, {add, remove}) => (
                 <>
@@ -442,6 +409,13 @@ class IngressListPage extends React.Component {
             </Form.List>
           </Form>
         </Modal>
+
+        <CertificateModal
+          ingress={certModalIng}
+          open={certModalIng !== null}
+          onClose={() => this.setState({certModalIng: null})}
+          onUpdated={() => this.fetchIngresses()}
+        />
       </div>
     );
   }
