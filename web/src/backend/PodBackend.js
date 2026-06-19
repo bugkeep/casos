@@ -66,6 +66,39 @@ export function getDockerHubImageTags(image) {
   }).then(res => res.json());
 }
 
+export function listPodFiles(namespace, name, container, dirPath) {
+  const params = new URLSearchParams({namespace, name, container, path: dirPath});
+  return fetch(`${Setting.ServerUrl}/api/pod-file-list?${params}`, {
+    method: "GET",
+    credentials: "include",
+    headers: {"Accept-Language": Setting.getAcceptLanguage()},
+  }).then(res => res.json());
+}
+
+export function downloadPodFile(namespace, name, container, filePath) {
+  const params = new URLSearchParams({namespace, name, container, path: filePath});
+  return fetch(`${Setting.ServerUrl}/api/pod-file-download?${params}`, {
+    method: "GET",
+    credentials: "include",
+    headers: {"Accept-Language": Setting.getAcceptLanguage()},
+  });
+}
+
+export function uploadPodFile(namespace, name, container, destDir, file) {
+  const form = new FormData();
+  form.append("namespace", namespace);
+  form.append("name", name);
+  form.append("container", container);
+  form.append("destDir", destDir);
+  form.append("file", file);
+  return fetch(`${Setting.ServerUrl}/api/pod-file-upload`, {
+    method: "POST",
+    credentials: "include",
+    headers: {"Accept-Language": Setting.getAcceptLanguage()},
+    body: form,
+  }).then(res => res.json());
+}
+
 export function deletePod(namespace, name) {
   return fetch(`${Setting.ServerUrl}/api/delete-pod`, {
     method: "POST",

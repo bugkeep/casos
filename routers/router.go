@@ -119,6 +119,9 @@ func InitAPI() {
 	beego.Router("/api/delete-hpa", &controllers.ApiController{}, "POST:DeleteHPA")
 
 	beego.Router("/api/pod-terminal", &controllers.ApiController{}, "GET:PodTerminal")
+	beego.Router("/api/pod-file-list", &controllers.ApiController{}, "GET:ListPodFiles")
+	beego.Router("/api/pod-file-download", &controllers.ApiController{}, "GET:DownloadPodFile")
+	beego.Router("/api/pod-file-upload", &controllers.ApiController{}, "POST:UploadPodFile")
 
 	beego.Router("/api/get-trivy-scan-results", &controllers.ApiController{}, "GET:GetTrivyScanResults")
 	beego.Router("/api/trigger-trivy-scan", &controllers.ApiController{}, "POST:TriggerTrivyScan")
