@@ -1,6 +1,6 @@
 import React from "react";
 import {Badge, Button, Form, Input, Modal, Popconfirm, Space, Table, Tag, Tooltip, Typography} from "antd";
-import {DeleteOutlined, ReloadOutlined, SafetyCertificateOutlined, ScanOutlined} from "@ant-design/icons";
+import {DeleteOutlined, RedoOutlined, ReloadOutlined, SafetyCertificateOutlined, ScanOutlined} from "@ant-design/icons";
 import i18next from "i18next";
 import * as TrivyBackend from "./backend/TrivyBackend";
 import * as Setting from "./Setting";
@@ -128,18 +128,41 @@ class TrivyScanPage extends React.Component {
       {
         title: i18next.t("general:Action"),
         key: "action",
-        width: 80,
+        width: 110,
         render: (_, record) => (
-          <Popconfirm
-            title={i18next.t("trivy:Delete this result?")}
-            onConfirm={() => this.handleDelete(record.id)}
-            okText={i18next.t("general:OK")}
-            cancelText={i18next.t("general:Cancel")}
-          >
-            <Tooltip title={i18next.t("general:Delete")}>
-              <Button type="text" danger icon={<DeleteOutlined />} size="small" />
-            </Tooltip>
-          </Popconfirm>
+          <Space size={4}>
+            {record.status === "failed" && (
+              <Tooltip title={i18next.t("trivy:Rescan")}>
+                <Button
+                  type="text"
+                  icon={<RedoOutlined />}
+                  size="small"
+                  onClick={() => {
+                    TrivyBackend.deleteTrivyScanResult(record.id).then(() => {
+                      TrivyBackend.triggerTrivyScan(record.image).then(res => {
+                        if (res.status === "ok") {
+                          Setting.showMessage("success", i18next.t("trivy:Scan complete"));
+                        } else {
+                          Setting.showMessage("error", res.msg);
+                        }
+                        this.loadResults();
+                      });
+                    });
+                  }}
+                />
+              </Tooltip>
+            )}
+            <Popconfirm
+              title={i18next.t("trivy:Delete this result?")}
+              onConfirm={() => this.handleDelete(record.id)}
+              okText={i18next.t("general:OK")}
+              cancelText={i18next.t("general:Cancel")}
+            >
+              <Tooltip title={i18next.t("general:Delete")}>
+                <Button type="text" danger icon={<DeleteOutlined />} size="small" />
+              </Tooltip>
+            </Popconfirm>
+          </Space>
         ),
       },
     ];

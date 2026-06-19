@@ -135,6 +135,7 @@
     "No vulnerabilities found": "未发现漏洞",
     "Package": "软件包",
     "Refresh tooltip": "从数据库重新加载扫描结果",
+    "Rescan": "重新扫描",
     "Scan Image": "扫描镜像",
     "Scan complete": "扫描完成",
     "Scanned At": "扫描时间",
