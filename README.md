@@ -11,6 +11,8 @@
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-blue?style=flat-square)](https://github.com/casosorg/casos/releases/latest)
 [![Discord](https://img.shields.io/discord/1022748306096537660?logo=discord&label=discord&color=5865F2&style=flat-square)](https://discord.gg/5rPsrAzK7S)
 
+**Official Website: [https://www.casos.net](https://www.casos.net)**
+
 **Live Demo: [https://casos.casnode.com](https://casos.casnode.com)**
 
 </div>
