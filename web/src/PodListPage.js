@@ -7,6 +7,7 @@ import * as PodBackend from "./backend/PodBackend";
 import * as NamespaceBackend from "./backend/NamespaceBackend";
 import * as Setting from "./Setting";
 import DockerHubModal from "./DockerHubModal";
+import PodLogsDrawer from "./PodLogsDrawer";
 
 const phaseColor = {
   Running: "green",
@@ -35,9 +36,6 @@ class PodListPage extends React.Component {
       eventsError: null,
       logsDrawerVisible: false,
       logsPod: null,
-      logs: "",
-      logsLoading: false,
-      logsError: null,
       marketplaceVisible: false,
       modalInitialValues: {},
       portPickerVisible: false,
@@ -55,7 +53,6 @@ class PodListPage extends React.Component {
 
   componentWillUnmount() {
     this.stopEventsPolling();
-    this.stopLogsPolling();
   }
 
   openEventsDrawer(pod) {
@@ -93,48 +90,6 @@ class PodListPage extends React.Component {
       this.setState({eventsError: e.message});
     }).finally(() => {
       this.setState({eventsLoading: false});
-    });
-  }
-
-  openLogsDrawer(pod) {
-    this.setState({logsDrawerVisible: true, logsPod: pod, logs: "", logsError: null}, () => {
-      this.fetchLogs();
-      this._logsTimer = setInterval(() => this.fetchLogs(), 3000);
-    });
-  }
-
-  closeLogsDrawer() {
-    this.stopLogsPolling();
-    this.setState({logsDrawerVisible: false, logsPod: null, logs: ""});
-  }
-
-  stopLogsPolling() {
-    if (this._logsTimer) {
-      clearInterval(this._logsTimer);
-      this._logsTimer = null;
-    }
-  }
-
-  fetchLogs() {
-    const {logsPod} = this.state;
-    if (!logsPod) {
-      return;
-    }
-    this.setState({logsLoading: true});
-    PodBackend.getPodLogs(logsPod.namespace, logsPod.name).then(res => {
-      if (res.status === "ok") {
-        this.setState({logs: res.data ?? "", logsError: null}, () => {
-          if (this._logsEndRef) {
-            this._logsEndRef.scrollIntoView({behavior: "smooth"});
-          }
-        });
-      } else {
-        this.setState({logsError: res.msg});
-      }
-    }).catch(e => {
-      this.setState({logsError: e.message});
-    }).finally(() => {
-      this.setState({logsLoading: false});
     });
   }
 
@@ -347,7 +302,7 @@ class PodListPage extends React.Component {
             <Button
               size="small"
               icon={<FileTextOutlined />}
-              onClick={() => this.openLogsDrawer(record)}
+              onClick={() => this.setState({logsDrawerVisible: true, logsPod: record})}
             >
               Logs
             </Button>
@@ -567,41 +522,11 @@ class PodListPage extends React.Component {
           }}
         />
 
-        <Drawer
-          title={logsPod ? `Logs — ${logsPod.namespace}/${logsPod.name}` : "Logs"}
+        <PodLogsDrawer
+          pod={logsPod}
           open={logsDrawerVisible}
-          onClose={() => this.closeLogsDrawer()}
-          width={800}
-          extra={
-            <Tag color={logsLoading ? "processing" : "success"}>
-              {logsLoading ? "refreshing…" : "live · 3s"}
-            </Tag>
-          }
-        >
-          {logsError && (
-            <Alert type="error" message={logsError} style={{marginBottom: 12}} showIcon />
-          )}
-          <div style={{
-            background: "#0d1117",
-            borderRadius: 6,
-            padding: "12px 16px",
-            fontFamily: "'Cascadia Code', 'Fira Mono', 'Consolas', monospace",
-            fontSize: 13,
-            lineHeight: 1.7,
-            minHeight: 200,
-            maxHeight: "calc(100vh - 160px)",
-            overflowY: "auto",
-            color: "#c9d1d9",
-            whiteSpace: "pre-wrap",
-            wordBreak: "break-all",
-          }}>
-            {!logs && !logsLoading && (
-              <span style={{color: "#6e7681"}}>No logs yet…</span>
-            )}
-            {logs}
-            <div ref={el => {this._logsEndRef = el;}} />
-          </div>
-        </Drawer>
+          onClose={() => this.setState({logsDrawerVisible: false, logsPod: null})}
+        />
 
         <Drawer
           title={eventsPod ? `Events — ${eventsPod.namespace}/${eventsPod.name}` : "Events"}

@@ -52,7 +52,11 @@ type podSummary struct {
 
 func toPodSummary(p corev1.Pod) podSummary {
 	image := ""
-	if len(p.Spec.Containers) > 0 {
+	containers := make([]string, 0, len(p.Spec.Containers))
+	for _, c := range p.Spec.Containers {
+		containers = append(containers, c.Name)
+	}
+	if len(containers) > 0 {
 		image = p.Spec.Containers[0].Image
 	}
 	return podSummary{

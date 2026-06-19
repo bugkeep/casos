@@ -52,6 +52,11 @@ func ConfigFromAppConf() (Config, error) {
 		advertise = bind
 	}
 
+	webhookPort, _ := beego.AppConfig.Int("webhookPort")
+	if webhookPort == 0 {
+		webhookPort = 9443
+	}
+
 	socks5Proxy := beego.AppConfig.String("socks5Proxy")
 	podUIProxyBind := strings.TrimSpace(beego.AppConfig.String("podUIProxyBind"))
 	if podUIProxyBind == "" {

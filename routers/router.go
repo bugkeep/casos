@@ -40,6 +40,12 @@ func InitAPI() {
 
 	beego.Router("/api/search-docker-hub-images", &controllers.ApiController{}, "GET:SearchDockerHubImages")
 
+	beego.Router("/api/get-ingresses", &controllers.ApiController{}, "GET:GetIngresses")
+	beego.Router("/api/get-ingress", &controllers.ApiController{}, "GET:GetIngress")
+	beego.Router("/api/add-ingress", &controllers.ApiController{}, "POST:AddIngress")
+	beego.Router("/api/update-ingress", &controllers.ApiController{}, "POST:UpdateIngress")
+	beego.Router("/api/delete-ingress", &controllers.ApiController{}, "POST:DeleteIngress")
+
 	beego.Router("/api/get-services", &controllers.ApiController{}, "GET:GetServices")
 	beego.Router("/api/get-service", &controllers.ApiController{}, "GET:GetService")
 	beego.Router("/api/add-service", &controllers.ApiController{}, "POST:AddService")
@@ -67,4 +73,34 @@ func InitAPI() {
 	beego.Router("/api/add-configmap", &controllers.ApiController{}, "POST:AddConfigMap")
 	beego.Router("/api/update-configmap", &controllers.ApiController{}, "POST:UpdateConfigMap")
 	beego.Router("/api/delete-configmap", &controllers.ApiController{}, "POST:DeleteConfigMap")
+
+	beego.Router("/api/get-secrets", &controllers.ApiController{}, "GET:GetSecrets")
+	beego.Router("/api/get-secret", &controllers.ApiController{}, "GET:GetSecret")
+	beego.Router("/api/add-secret", &controllers.ApiController{}, "POST:AddSecret")
+	beego.Router("/api/update-secret", &controllers.ApiController{}, "POST:UpdateSecret")
+	beego.Router("/api/delete-secret", &controllers.ApiController{}, "POST:DeleteSecret")
+
+	beego.Router("/api/get-pvcs", &controllers.ApiController{}, "GET:GetPersistentVolumeClaims")
+	beego.Router("/api/add-pvc", &controllers.ApiController{}, "POST:AddPersistentVolumeClaim")
+	beego.Router("/api/delete-pvc", &controllers.ApiController{}, "POST:DeletePersistentVolumeClaim")
+
+	beego.Router("/api/get-statefulsets", &controllers.ApiController{}, "GET:GetStatefulSets")
+	beego.Router("/api/get-statefulset", &controllers.ApiController{}, "GET:GetStatefulSet")
+	beego.Router("/api/add-statefulset", &controllers.ApiController{}, "POST:AddStatefulSet")
+	beego.Router("/api/update-statefulset", &controllers.ApiController{}, "POST:UpdateStatefulSet")
+	beego.Router("/api/delete-statefulset", &controllers.ApiController{}, "POST:DeleteStatefulSet")
+
+	beego.Router("/api/get-deployments", &controllers.ApiController{}, "GET:GetDeployments")
+	beego.Router("/api/get-deployment", &controllers.ApiController{}, "GET:GetDeployment")
+	beego.Router("/api/add-deployment", &controllers.ApiController{}, "POST:AddDeployment")
+	beego.Router("/api/update-deployment", &controllers.ApiController{}, "POST:UpdateDeployment")
+	beego.Router("/api/delete-deployment", &controllers.ApiController{}, "POST:DeleteDeployment")
+
+	beego.Router("/api/deploy-app", &controllers.ApiController{}, "POST:DeployApp")
+	beego.Router("/api/get-app-templates", &controllers.ApiController{}, "GET:GetAppTemplates")
+
+	beego.Router("/api/get-casbin-rules", &controllers.ApiController{}, "GET:GetCasbinRules")
+	beego.Router("/api/add-casbin-rule", &controllers.ApiController{}, "POST:AddCasbinRule")
+	beego.Router("/api/delete-casbin-rule", &controllers.ApiController{}, "POST:DeleteCasbinRule")
+	beego.Router("/api/reload-casbin-enforcer", &controllers.ApiController{}, "POST:ReloadCasbinEnforcer")
 }

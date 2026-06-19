@@ -14,6 +14,7 @@ import {
   MenuUnfoldOutlined,
   NodeIndexOutlined,
   SettingOutlined,
+  ShopOutlined,
   UserOutlined
 } from "@ant-design/icons";
 import "./App.less";
@@ -22,27 +23,36 @@ import LanguageSelect from "./LanguageSelect";
 import ThemeSelect from "./ThemeSelect";
 import BreadcrumbBar from "./common/BreadcrumbBar";
 import PodListPage from "./PodListPage";
+import DeploymentListPage from "./DeploymentListPage";
 import ConfigMapListPage from "./ConfigMapListPage";
+import SecretListPage from "./SecretListPage";
 import NamespaceListPage from "./NamespaceListPage";
 import NodeListPage from "./NodeListPage";
 import ServiceAccountListPage from "./ServiceAccountListPage";
 import ServiceListPage from "./ServiceListPage";
 import ClusterRoleBindingListPage from "./ClusterRoleBindingListPage";
+import PvcListPage from "./PvcListPage";
+import IngressListPage from "./IngressListPage";
+import StatefulSetListPage from "./StatefulSetListPage";
 import DashboardPage from "./DashboardPage";
 import SiteListPage from "./SiteListPage";
 import SiteEditPage from "./SiteEditPage";
+import AppStorePage from "./AppStorePage";
+import CasbinRuleListPage from "./CasbinRuleListPage";
 import i18next from "i18next";
 
 const {Header, Footer, Content, Sider} = Layout;
 
 function getMenuParentKey(uri) {
   if (!uri) {return null;}
-  if (uri === "/dashboard") {return null;}
-  if (uri.includes("/pods")) {return "/workloads";}
+  if (uri === "/dashboard" || uri === "/app-store") {return null;}
+  if (uri.includes("/pods") || uri.includes("/deployments") || uri.includes("/statefulsets")) {return "/workloads";}
   if (uri.includes("/nodes") || uri.includes("/namespaces") || uri.includes("/serviceaccounts")) {return "/cluster";}
-  if (uri.includes("/configmaps")) {return "/configuration";}
+  if (uri.includes("/configmaps") || uri.includes("/secrets") || uri.includes("/pvcs")) {return "/configuration";}
+  if (uri.includes("/ingresses")) {return "/networking";}
   if (uri.includes("/services")) {return "/networking";}
   if (uri.includes("/clusterrolebindings")) {return "/accesscontrol";}
+  if (uri.includes("/casbin-rules")) {return "/accesscontrol";}
   if (uri.includes("/sites")) {return "/admin";}
   return null;
 }
@@ -67,20 +77,6 @@ function persistMenuOpenKeys(keys) {
   } catch {
     // ignore
   }
-}
-
-function filterMenuItems(menuItems, navItems) {
-  if (!navItems || navItems.includes("all")) {return menuItems;}
-  const effectiveNavItems = new Set(navItems);
-  const filteredItems = menuItems.map(item => {
-    if (!Array.isArray(item.children)) {return item;}
-    const filteredChildren = item.children.filter(child => effectiveNavItems.has(child.key));
-    return {...item, children: filteredChildren};
-  });
-  return filteredItems.filter(item => {
-    if (Array.isArray(item.children)) {return item.children.length > 0;}
-    return effectiveNavItems.has(item.key);
-  });
 }
 
 function ManagementPage(props) {
@@ -192,7 +188,10 @@ function ManagementPage(props) {
   function getMenuItems() {
     const allItems = [
       Setting.getItem(<Link to="/dashboard">{i18next.t("general:Dashboard")}</Link>, "/dashboard", <DashboardOutlined />),
+      Setting.getItem(<Link to="/app-store">{i18next.t("general:App Store")}</Link>, "/app-store", <ShopOutlined />),
       Setting.getItem(<Link to="/pods">{i18next.t("general:Workloads")}</Link>, "/workloads", <AppstoreOutlined />, [
+        Setting.getItem(<Link to="/deployments">{i18next.t("general:Deployments")}</Link>, "/deployments"),
+        Setting.getItem(<Link to="/statefulsets">{i18next.t("general:Stateful Sets")}</Link>, "/statefulsets"),
         Setting.getItem(<Link to="/pods">{i18next.t("general:Pods")}</Link>, "/pods"),
       ]),
       Setting.getItem(<Link to="/nodes">{i18next.t("general:Cluster")}</Link>, "/cluster", <ClusterOutlined />, [
@@ -202,18 +201,22 @@ function ManagementPage(props) {
       ]),
       Setting.getItem(<Link to="/configmaps">{i18next.t("general:Configuration")}</Link>, "/configuration", <SettingOutlined />, [
         Setting.getItem(<Link to="/configmaps">{i18next.t("general:ConfigMaps")}</Link>, "/configmaps"),
+        Setting.getItem(<Link to="/secrets">{i18next.t("general:Secrets")}</Link>, "/secrets"),
+        Setting.getItem(<Link to="/pvcs">{i18next.t("general:Persistent Volume Claims")}</Link>, "/pvcs"),
       ]),
       Setting.getItem(<Link to="/services">{i18next.t("general:Networking")}</Link>, "/networking", <NodeIndexOutlined />, [
         Setting.getItem(<Link to="/services">{i18next.t("general:Services")}</Link>, "/services"),
+        Setting.getItem(<Link to="/ingresses">{i18next.t("general:Ingresses")}</Link>, "/ingresses"),
       ]),
       Setting.getItem(<Link to="/clusterrolebindings">{i18next.t("general:Access Control")}</Link>, "/accesscontrol", <LockOutlined />, [
         Setting.getItem(<Link to="/clusterrolebindings">{i18next.t("general:ClusterRoleBindings")}</Link>, "/clusterrolebindings"),
+        Setting.getItem(<Link to="/casbin-rules">Admission Policy</Link>, "/casbin-rules"),
       ]),
       Setting.getItem(<Link to="/sites/site-built-in">{i18next.t("general:Admin")}</Link>, "/admin", <LayoutOutlined />, [
         Setting.getItem(<Link to="/sites/site-built-in">{i18next.t("general:Sites")}</Link>, "/sites"),
       ]),
     ];
-    return filterMenuItems(allItems, site?.navItems);
+    return allItems;
   }
 
   function renderRouter() {
@@ -221,13 +224,20 @@ function ManagementPage(props) {
       <Switch>
         <Redirect exact from="/" to="/dashboard" />
         <Route exact path="/dashboard" render={(props) => <DashboardPage {...props} />} />
+        <Route exact path="/app-store" render={(props) => <AppStorePage {...props} />} />
+        <Route exact path="/deployments" render={(props) => <DeploymentListPage {...props} />} />
+        <Route exact path="/statefulsets" render={(props) => <StatefulSetListPage {...props} />} />
         <Route exact path="/pods" render={(props) => <PodListPage {...props} />} />
         <Route exact path="/nodes" render={(props) => <NodeListPage {...props} />} />
         <Route exact path="/namespaces" render={(props) => <NamespaceListPage {...props} />} />
         <Route exact path="/serviceaccounts" render={(props) => <ServiceAccountListPage {...props} />} />
         <Route exact path="/configmaps" render={(props) => <ConfigMapListPage {...props} />} />
+        <Route exact path="/secrets" render={(props) => <SecretListPage {...props} />} />
+        <Route exact path="/pvcs" render={(props) => <PvcListPage {...props} />} />
         <Route exact path="/services" render={(props) => <ServiceListPage {...props} />} />
+        <Route exact path="/ingresses" render={(props) => <IngressListPage {...props} />} />
         <Route exact path="/clusterrolebindings" render={(props) => <ClusterRoleBindingListPage {...props} />} />
+        <Route exact path="/casbin-rules" render={(props) => <CasbinRuleListPage {...props} />} />
         <Route exact path="/sites" render={(props) => <SiteListPage account={account} {...props} />} />
         <Route exact path="/sites/:siteName" render={(props) => <SiteEditPage account={account} onUpdateSite={onUpdateSite} {...props} />} />
         <Route path="" render={() => <Result status="404" title="404 NOT FOUND" subTitle="Sorry, the page you visited does not exist." extra={<a href="/"><Button type="primary">Back Home</Button></a>} />} />

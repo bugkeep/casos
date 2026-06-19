@@ -5,13 +5,17 @@ import i18next from "i18next";
 
 const RESOURCE_LABELS = {
   "dashboard": "general:Dashboard",
+  "deployments": "general:Deployments",
   "pods": "general:Pods",
   "nodes": "general:Nodes",
   "namespaces": "general:Namespaces",
   "serviceaccounts": "general:ServiceAccounts",
   "configmaps": "general:ConfigMaps",
+  "secrets": "general:Secrets",
   "services": "general:Services",
   "clusterrolebindings": "general:ClusterRoleBindings",
+  "ingresses": "general:Ingresses",
+  "statefulsets": "general:Stateful Sets",
   "sites": "general:Sites",
 };
 
