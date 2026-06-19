@@ -58,6 +58,14 @@ export function searchDockerHubImages(q) {
   }).then(res => res.json());
 }
 
+export function getDockerHubImageTags(image) {
+  return fetch(`${Setting.ServerUrl}/api/get-docker-hub-image-tags?image=${encodeURIComponent(image)}`, {
+    method: "GET",
+    credentials: "include",
+    headers: {"Accept-Language": Setting.getAcceptLanguage()},
+  }).then(res => res.json());
+}
+
 export function deletePod(namespace, name) {
   return fetch(`${Setting.ServerUrl}/api/delete-pod`, {
     method: "POST",

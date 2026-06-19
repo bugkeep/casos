@@ -1,14 +1,15 @@
 import React from "react";
 import {
-  Alert, Button, Divider, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Typography
+  Alert, Button, Divider, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tag, Tooltip, Typography
 } from "antd";
-import {DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined, ShareAltOutlined} from "@ant-design/icons";
+import {DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined, ShareAltOutlined, SyncOutlined} from "@ant-design/icons";
 import * as DeploymentBackend from "./backend/DeploymentBackend";
 import * as NamespaceBackend from "./backend/NamespaceBackend";
 import * as ConfigMapBackend from "./backend/ConfigMapBackend";
 import * as SecretBackend from "./backend/SecretBackend";
 import * as ServiceBackend from "./backend/ServiceBackend";
 import * as NodeBackend from "./backend/NodeBackend";
+import * as PodBackend from "./backend/PodBackend";
 import * as Setting from "./Setting";
 import DeploymentExposeModal from "./DeploymentExposeModal";
 import EnvVarEditor, {ENV_SOURCE_CONFIGMAP, ENV_SOURCE_PLAIN, ENV_SOURCE_SECRET} from "./EnvVarEditor";
@@ -60,6 +61,11 @@ class DeploymentListPage extends React.Component {
       editingDeploy: null,
       exposeDeploy: null,
       envVars: [],
+      updateImageDeploy: null,
+      updateImageTags: [],
+      updateImageTagsLoading: false,
+      updateImageSelectedTag: null,
+      updateImageSubmitting: false,
     };
     this.formRef = React.createRef();
   }
@@ -171,6 +177,47 @@ class DeploymentListPage extends React.Component {
     this.setState({modalVisible: false, editingDeploy: null, envVars: []});
   }
 
+  openUpdateImageModal(deploy) {
+    const imageRepo = deploy.image ? deploy.image.split(":")[0] : "";
+    this.setState({
+      updateImageDeploy: deploy,
+      updateImageTags: [],
+      updateImageTagsLoading: true,
+      updateImageSelectedTag: null,
+    });
+    PodBackend.getDockerHubImageTags(imageRepo).then(res => {
+      if (res.status === "ok") {
+        this.setState({updateImageTags: res.data ?? []});
+      } else {
+        Setting.showMessage("error", res.msg);
+      }
+    }).catch(e => Setting.showMessage("error", e.message))
+      .finally(() => this.setState({updateImageTagsLoading: false}));
+  }
+
+  handleUpdateImage() {
+    const {updateImageDeploy, updateImageSelectedTag} = this.state;
+    if (!updateImageSelectedTag) {
+      Setting.showMessage("error", "Please select a version");
+      return;
+    }
+    const imageRepo = updateImageDeploy.image.split(":")[0];
+    const newImage = `${imageRepo}:${updateImageSelectedTag}`;
+    this.setState({updateImageSubmitting: true});
+    DeploymentBackend.updateDeployment({...updateImageDeploy, image: newImage})
+      .then(res => {
+        if (res.status === "ok") {
+          Setting.showMessage("success", `Updated to ${newImage}`);
+          this.setState({updateImageDeploy: null});
+          this.fetchDeployments();
+        } else {
+          Setting.showMessage("error", res.msg);
+        }
+      })
+      .catch(e => Setting.showMessage("error", e.message))
+      .finally(() => this.setState({updateImageSubmitting: false}));
+  }
+
   handleSubmit() {
     this.formRef.current?.validateFields().then(values => {
       const payload = {
@@ -226,14 +273,30 @@ class DeploymentListPage extends React.Component {
   }
 
   render() {
-    const {deployments, namespaces, configMaps, secrets, loading, error, modalVisible, modalMode, submitting, exposeDeploy, envVars} = this.state;
+    const {deployments, namespaces, configMaps, secrets, loading, error, modalVisible, modalMode, submitting, exposeDeploy, envVars,
+      updateImageDeploy, updateImageTags, updateImageTagsLoading, updateImageSelectedTag, updateImageSubmitting} = this.state;
 
     const nsOptions = namespaces.map(ns => ({label: ns.name, value: ns.name}));
 
     const columns = [
       {title: "Namespace", dataIndex: "namespace", key: "namespace", width: 160},
       {title: "Name", dataIndex: "name", key: "name"},
-      {title: "Image", dataIndex: "image", key: "image", ellipsis: true},
+      {
+        title: "Image",
+        key: "image",
+        render: (_, r) => {
+          if (!r.image) {return null;}
+          const colonIdx = r.image.lastIndexOf(":");
+          const repo = colonIdx > 0 ? r.image.slice(0, colonIdx) : r.image;
+          const tag = colonIdx > 0 ? r.image.slice(colonIdx + 1) : "latest";
+          return (
+            <Tooltip title={r.image}>
+              <span style={{fontSize: 13, color: "#595959"}}>{repo} </span>
+              <Tag color="blue" style={{marginLeft: 2}}>{tag}</Tag>
+            </Tooltip>
+          );
+        },
+      },
       {
         title: "Replicas",
         key: "replicas",
@@ -273,10 +336,11 @@ class DeploymentListPage extends React.Component {
       {
         title: "Actions",
         key: "actions",
-        width: 230,
+        width: 310,
         render: (_, record) => (
           <Space size={4} wrap>
             <Button size="small" icon={<EditOutlined />} onClick={() => this.openEditModal(record)}>Edit</Button>
+            <Button size="small" icon={<SyncOutlined />} onClick={() => this.openUpdateImageModal(record)}>Update Image</Button>
             <Button size="small" icon={<ShareAltOutlined />} onClick={() => this.setState({exposeDeploy: record})}>Expose</Button>
             <Popconfirm
               title={`Delete Deployment "${record.name}"?`}
@@ -316,6 +380,52 @@ class DeploymentListPage extends React.Component {
             </div>
           )}
         />
+
+        <Modal
+          title={
+            updateImageDeploy
+              ? `Update Image — ${updateImageDeploy.name}`
+              : "Update Image"
+          }
+          open={updateImageDeploy !== null}
+          onOk={() => this.handleUpdateImage()}
+          onCancel={() => this.setState({updateImageDeploy: null})}
+          confirmLoading={updateImageSubmitting}
+          okText="Update"
+          width={480}
+          destroyOnHidden
+        >
+          {updateImageDeploy && (() => {
+            const colonIdx = (updateImageDeploy.image ?? "").lastIndexOf(":");
+            const repo = colonIdx > 0 ? updateImageDeploy.image.slice(0, colonIdx) : updateImageDeploy.image;
+            const currentTag = colonIdx > 0 ? updateImageDeploy.image.slice(colonIdx + 1) : "latest";
+            return (
+              <div>
+                <div style={{marginBottom: 12, fontSize: 13, color: "#595959"}}>
+                  Image: <b>{repo}</b> &nbsp; Current version: <Tag color="blue">{currentTag}</Tag>
+                </div>
+                <Select
+                  style={{width: "100%"}}
+                  placeholder="Select a version to update to"
+                  loading={updateImageTagsLoading}
+                  value={updateImageSelectedTag}
+                  onChange={v => this.setState({updateImageSelectedTag: v})}
+                  showSearch
+                  options={updateImageTags.map(t => ({
+                    label: (
+                      <span>
+                        {t}
+                        {t === currentTag && <Tag color="blue" style={{marginLeft: 8}}>current</Tag>}
+                      </span>
+                    ),
+                    value: t,
+                  }))}
+                  notFoundContent={updateImageTagsLoading ? "Loading…" : "No tags found"}
+                />
+              </div>
+            );
+          })()}
+        </Modal>
 
         <DeploymentExposeModal
           deploy={exposeDeploy}

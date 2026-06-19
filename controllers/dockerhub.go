@@ -83,3 +83,61 @@ func (c *ApiController) SearchDockerHubImages() {
 
 	c.ResponseOk(items)
 }
+
+type dockerHubTagsResult struct {
+	Results []struct {
+		Name string `json:"name"`
+	} `json:"results"`
+}
+
+func (c *ApiController) GetDockerHubImageTags() {
+	image := strings.TrimSpace(c.GetString("image"))
+	if image == "" {
+		c.ResponseError("image parameter is required")
+		return
+	}
+
+	// Strip tag if caller passed full image:tag
+	image = strings.SplitN(image, ":", 2)[0]
+
+	parts := strings.SplitN(image, "/", 2)
+	var namespace, name string
+	if len(parts) == 1 {
+		namespace = "library"
+		name = parts[0]
+	} else {
+		namespace = parts[0]
+		name = parts[1]
+	}
+
+	apiURL := fmt.Sprintf(
+		"https://hub.docker.com/v2/repositories/%s/%s/tags/?page_size=30&ordering=last_updated",
+		url.PathEscape(namespace), url.PathEscape(name),
+	)
+
+	resp, err := proxy.GetHttpClient(apiURL).Get(apiURL)
+	if err != nil {
+		c.ResponseError(fmt.Sprintf("failed to reach Docker Hub: %v", err))
+		return
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		c.ResponseError("failed to read Docker Hub response")
+		return
+	}
+
+	var result dockerHubTagsResult
+	if err := json.Unmarshal(body, &result); err != nil {
+		c.ResponseError("failed to parse Docker Hub response")
+		return
+	}
+
+	tags := make([]string, len(result.Results))
+	for i, t := range result.Results {
+		tags[i] = t.Name
+	}
+
+	c.ResponseOk(tags)
+}
