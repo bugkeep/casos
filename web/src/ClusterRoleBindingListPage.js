@@ -239,7 +239,6 @@ class ClusterRoleBindingListPage extends React.Component {
                   disabled={modalMode === "edit"}
                   options={[
                     {label: "ClusterRole", value: "ClusterRole"},
-                    {label: "Role", value: "Role"},
                   ]}
                 />
               </Form.Item>

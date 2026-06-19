@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"encoding/json"
+	"fmt"
 
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -92,11 +93,17 @@ type clusterRoleBindingRequest struct {
 	ResourceVersion string           `json:"resourceVersion"`
 }
 
-func buildCrb(req clusterRoleBindingRequest) *rbacv1.ClusterRoleBinding {
-	roleRefKind := req.RoleRefKind
+func normalizeClusterRoleBindingRoleRefKind(roleRefKind string) (string, error) {
 	if roleRefKind == "" {
-		roleRefKind = "ClusterRole"
+		return "ClusterRole", nil
 	}
+	if roleRefKind != "ClusterRole" {
+		return "", fmt.Errorf("ClusterRoleBinding only supports roleRefKind=ClusterRole")
+	}
+	return roleRefKind, nil
+}
+
+func buildCrb(req clusterRoleBindingRequest) *rbacv1.ClusterRoleBinding {
 	subjects := make([]rbacv1.Subject, 0, len(req.Subjects))
 	for _, s := range req.Subjects {
 		subj := rbacv1.Subject{
@@ -113,7 +120,7 @@ func buildCrb(req clusterRoleBindingRequest) *rbacv1.ClusterRoleBinding {
 		ObjectMeta: metav1.ObjectMeta{Name: req.Name},
 		RoleRef: rbacv1.RoleRef{
 			APIGroup: "rbac.authorization.k8s.io",
-			Kind:     roleRefKind,
+			Kind:     req.RoleRefKind,
 			Name:     req.RoleRef,
 		},
 		Subjects: subjects,
@@ -133,6 +140,12 @@ func (c *ApiController) AddClusterRoleBinding() {
 		c.ResponseError("invalid request body: " + err.Error())
 		return
 	}
+	roleRefKind, err := normalizeClusterRoleBindingRoleRefKind(req.RoleRefKind)
+	if err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
+	req.RoleRefKind = roleRefKind
 	crb := buildCrb(req)
 	created, err := object.AddClusterRoleBinding(cfg, crb)
 	if err != nil {
@@ -154,6 +167,12 @@ func (c *ApiController) UpdateClusterRoleBinding() {
 	if err := json.Unmarshal(c.Ctx.Input.RequestBody, &req); err != nil {
 		c.ResponseError("invalid request body: " + err.Error())
 		return
+	}
+	if req.RoleRefKind != "" {
+		if _, err := normalizeClusterRoleBindingRoleRefKind(req.RoleRefKind); err != nil {
+			c.ResponseError(err.Error())
+			return
+		}
 	}
 	// Fetch existing to preserve immutable roleRef.
 	existing, err := object.GetClusterRoleBinding(cfg, req.Name)
