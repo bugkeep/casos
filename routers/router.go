@@ -45,7 +45,13 @@ func InitAPI() {
 	beego.Router("/api/add-ingress", &controllers.ApiController{}, "POST:AddIngress")
 	beego.Router("/api/update-ingress", &controllers.ApiController{}, "POST:UpdateIngress")
 	beego.Router("/api/delete-ingress", &controllers.ApiController{}, "POST:DeleteIngress")
-	beego.Router("/api/get-ingress-cert-status", &controllers.ApiController{}, "GET:GetIngressCertStatus")
+
+	beego.Router("/api/request-le-cert", &controllers.ApiController{}, "POST:RequestLECert")
+	beego.Router("/api/upload-cert", &controllers.ApiController{}, "POST:UploadCert")
+	beego.Router("/api/get-cert-status", &controllers.ApiController{}, "GET:GetCertStatus")
+
+	// Public — no auth, must be reachable by Let's Encrypt verification servers.
+	beego.Router("/.well-known/acme-challenge/:token", &controllers.ApiController{}, "GET:ServeACMEChallenge")
 
 	beego.Router("/api/get-services", &controllers.ApiController{}, "GET:GetServices")
 	beego.Router("/api/get-service", &controllers.ApiController{}, "GET:GetService")

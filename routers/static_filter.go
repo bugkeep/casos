@@ -10,7 +10,10 @@ import (
 
 func StaticFilter(ctx *context.Context) {
 	urlPath := ctx.Request.URL.Path
-	if strings.HasPrefix(urlPath, "/api/") || strings.HasPrefix(urlPath, "/k8s/") || urlPath == "/k8s" {
+	if strings.HasPrefix(urlPath, "/api/") ||
+		strings.HasPrefix(urlPath, "/k8s/") ||
+		strings.HasPrefix(urlPath, "/.well-known/") ||
+		urlPath == "/k8s" {
 		return
 	}
 

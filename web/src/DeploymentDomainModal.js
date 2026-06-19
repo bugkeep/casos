@@ -1,6 +1,6 @@
 import React, {useEffect, useRef, useState} from "react";
-import {Alert, Form, Input, Modal, Select, Switch, Tag, Typography} from "antd";
-import {LinkOutlined, LockOutlined} from "@ant-design/icons";
+import {Alert, Form, Input, Modal, Select, Tag, Typography} from "antd";
+import {LinkOutlined} from "@ant-design/icons";
 import * as IngressBackend from "./backend/IngressBackend";
 import * as Setting from "./Setting";
 
@@ -10,7 +10,6 @@ function DeploymentDomainModal({deploy, services, open, onClose, onCreated}) {
   const [form] = Form.useForm();
   const [submitting, setSubmitting] = useState(false);
   const [serviceOptions, setServiceOptions] = useState([]);
-  const [tlsEnabled, setTlsEnabled] = useState(false);
   const prevOpen = useRef(false);
 
   useEffect(() => {
@@ -30,15 +29,12 @@ function DeploymentDomainModal({deploy, services, open, onClose, onCreated}) {
       }))
     );
     setServiceOptions(opts);
-    setTlsEnabled(false);
 
     const defaultSvc = opts.find(o => o.serviceName === deploy.name) ?? opts[0];
     form.setFieldsValue({
       host: "",
       path: "/",
       service: defaultSvc?.value ?? undefined,
-      tlsEnabled: false,
-      clusterIssuer: "letsencrypt-prod",
     });
   }, [open, deploy, services, form]);
 
@@ -57,15 +53,12 @@ function DeploymentDomainModal({deploy, services, open, onClose, onCreated}) {
           serviceName,
           servicePort: Number(servicePort),
         }],
-        tlsEnabled: values.tlsEnabled ?? false,
-        clusterIssuer: values.tlsEnabled ? (values.clusterIssuer || "letsencrypt-prod") : "",
       };
       setSubmitting(true);
       IngressBackend.addIngress(payload)
         .then(res => {
           if (res.status === "ok") {
-            const scheme = values.tlsEnabled ? "https" : "http";
-            Setting.showMessage("success", `Domain "${scheme}://${values.host}" bound to ${deploy.name}`);
+            Setting.showMessage("success", `Domain "${values.host}" bound to ${deploy.name}. Go to Ingresses to configure HTTPS.`);
             onCreated?.();
             onClose();
           } else {
@@ -121,13 +114,9 @@ function DeploymentDomainModal({deploy, services, open, onClose, onCreated}) {
               message: "Enter a valid domain, e.g. erp.company.internal",
             },
           ]}
-          extra="The domain you want to use to access this application, e.g. erp.company.internal"
+          extra="The domain to use for this application. Configure HTTPS afterwards via Ingresses → HTTPS button."
         >
-          <Input
-            placeholder="erp.company.internal"
-            prefix={tlsEnabled ? "https://" : "http://"}
-            disabled={!hasServices}
-          />
+          <Input placeholder="erp.company.com" disabled={!hasServices} />
         </Form.Item>
 
         <Form.Item
@@ -156,37 +145,6 @@ function DeploymentDomainModal({deploy, services, open, onClose, onCreated}) {
         >
           <Input placeholder="/" disabled={!hasServices} />
         </Form.Item>
-
-        <Form.Item
-          label={
-            <span>
-              <LockOutlined style={{marginRight: 6, color: tlsEnabled ? "#52c41a" : undefined}} />
-              Enable HTTPS (cert-manager)
-            </span>
-          }
-          name="tlsEnabled"
-          valuePropName="checked"
-          extra={tlsEnabled ? "cert-manager will automatically issue and renew a TLS certificate for this domain" : "Enable to get a free TLS certificate via cert-manager + Let's Encrypt"}
-        >
-          <Switch
-            disabled={!hasServices}
-            onChange={v => {
-              setTlsEnabled(v);
-              form.setFieldValue("tlsEnabled", v);
-            }}
-          />
-        </Form.Item>
-
-        {tlsEnabled && (
-          <Form.Item
-            label="Cluster Issuer"
-            name="clusterIssuer"
-            rules={[{required: true, message: "Cluster issuer is required when HTTPS is enabled"}]}
-            extra="The cert-manager ClusterIssuer to use. Must be pre-installed in your cluster."
-          >
-            <Input placeholder="letsencrypt-prod" disabled={!hasServices} />
-          </Form.Item>
-        )}
       </Form>
     </Modal>
   );
