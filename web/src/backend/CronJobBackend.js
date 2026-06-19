@@ -32,6 +32,26 @@ export function updateCronJob(cronjob) {
   }).then(res => res.json());
 }
 
+export function getCronJobJobs(namespace, name) {
+  return fetch(`${Setting.ServerUrl}/api/get-cronjob-jobs?namespace=${encodeURIComponent(namespace)}&name=${encodeURIComponent(name)}`, {
+    method: "GET",
+    credentials: "include",
+    headers: {"Accept-Language": Setting.getAcceptLanguage()},
+  }).then(res => res.json());
+}
+
+export function triggerCronJob(namespace, name) {
+  return fetch(`${Setting.ServerUrl}/api/trigger-cronjob`, {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+      "Accept-Language": Setting.getAcceptLanguage(),
+    },
+    body: JSON.stringify({namespace, name}),
+  }).then(res => res.json());
+}
+
 export function deleteCronJob(namespace, name) {
   return fetch(`${Setting.ServerUrl}/api/delete-cronjob`, {
     method: "POST",

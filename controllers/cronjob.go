@@ -3,6 +3,7 @@ package controllers
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -204,6 +205,107 @@ func (c *ApiController) UpdateCronJob() {
 		return
 	}
 	c.ResponseOk(toCronJobSummary(*updated))
+}
+
+type jobSummary struct {
+	Namespace      string `json:"namespace"`
+	Name           string `json:"name"`
+	Status         string `json:"status"`
+	StartTime      string `json:"startTime"`
+	CompletionTime string `json:"completionTime"`
+	Duration       string `json:"duration"`
+	PodName        string `json:"podName"`
+	Manual         bool   `json:"manual"`
+}
+
+func toJobSummary(job batchv1.Job, podName string) jobSummary {
+	status := "pending"
+	if job.Status.Active > 0 {
+		status = "running"
+	} else if job.Status.Succeeded > 0 {
+		status = "succeeded"
+	} else if job.Status.Failed > 0 {
+		status = "failed"
+	}
+	start := ""
+	completion := ""
+	duration := ""
+	if job.Status.StartTime != nil {
+		start = job.Status.StartTime.UTC().Format("2006-01-02 15:04:05")
+		if job.Status.CompletionTime != nil {
+			completion = job.Status.CompletionTime.UTC().Format("2006-01-02 15:04:05")
+			d := job.Status.CompletionTime.Sub(job.Status.StartTime.Time).Round(time.Second)
+			duration = d.String()
+		} else if status == "running" {
+			d := time.Since(job.Status.StartTime.Time).Round(time.Second)
+			duration = d.String()
+		}
+	}
+	manual := job.Labels["casos.io/triggered-by"] == "manual"
+	return jobSummary{
+		Namespace:      job.Namespace,
+		Name:           job.Name,
+		Status:         status,
+		StartTime:      start,
+		CompletionTime: completion,
+		Duration:       duration,
+		PodName:        podName,
+		Manual:         manual,
+	}
+}
+
+// GetCronJobJobs returns the execution history (Jobs) for a CronJob.
+// @router /api/get-cronjob-jobs [get]
+func (c *ApiController) GetCronJobJobs() {
+	cfg := getAdminRestConfig()
+	if cfg == nil {
+		c.ResponseError("apiserver not ready")
+		return
+	}
+	namespace := c.GetString("namespace")
+	cronJobName := c.GetString("name")
+	if namespace == "" {
+		namespace = "default"
+	}
+	jobs, err := object.GetJobsByCronJob(cfg, namespace, cronJobName)
+	if err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
+	result := make([]jobSummary, 0, len(jobs))
+	for _, job := range jobs {
+		podName, _ := object.GetJobPodName(cfg, namespace, job.Name)
+		result = append(result, toJobSummary(job, podName))
+	}
+	c.ResponseOk(result)
+}
+
+// TriggerCronJob manually creates a Job from a CronJob immediately.
+// @router /api/trigger-cronjob [post]
+func (c *ApiController) TriggerCronJob() {
+	cfg := getAdminRestConfig()
+	if cfg == nil {
+		c.ResponseError("apiserver not ready")
+		return
+	}
+	var req struct {
+		Namespace string `json:"namespace"`
+		Name      string `json:"name"`
+	}
+	if err := json.Unmarshal(c.Ctx.Input.RequestBody, &req); err != nil {
+		c.ResponseError("invalid request body: " + err.Error())
+		return
+	}
+	if req.Namespace == "" {
+		req.Namespace = "default"
+	}
+	job, err := object.TriggerCronJob(cfg, req.Namespace, req.Name)
+	if err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
+	podName, _ := object.GetJobPodName(cfg, req.Namespace, job.Name)
+	c.ResponseOk(toJobSummary(*job, podName))
 }
 
 // DeleteCronJob

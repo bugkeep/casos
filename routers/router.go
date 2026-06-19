@@ -111,6 +111,8 @@ func InitAPI() {
 	beego.Router("/api/add-cronjob", &controllers.ApiController{}, "POST:AddCronJob")
 	beego.Router("/api/update-cronjob", &controllers.ApiController{}, "POST:UpdateCronJob")
 	beego.Router("/api/delete-cronjob", &controllers.ApiController{}, "POST:DeleteCronJob")
+	beego.Router("/api/get-cronjob-jobs", &controllers.ApiController{}, "GET:GetCronJobJobs")
+	beego.Router("/api/trigger-cronjob", &controllers.ApiController{}, "POST:TriggerCronJob")
 
 	beego.Router("/api/get-hpas", &controllers.ApiController{}, "GET:GetHPAs")
 	beego.Router("/api/get-hpa", &controllers.ApiController{}, "GET:GetHPA")

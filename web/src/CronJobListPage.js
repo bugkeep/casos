@@ -2,10 +2,11 @@ import React from "react";
 import {
   Alert, Badge, Button, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Table, Tag, Tooltip
 } from "antd";
-import {DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined} from "@ant-design/icons";
+import {DeleteOutlined, EditOutlined, HistoryOutlined, PlusOutlined, ReloadOutlined} from "@ant-design/icons";
 import * as CronJobBackend from "./backend/CronJobBackend";
 import * as NamespaceBackend from "./backend/NamespaceBackend";
 import * as Setting from "./Setting";
+import CronJobHistoryDrawer from "./CronJobHistoryDrawer";
 
 const CONCURRENCY_POLICIES = ["Allow", "Forbid", "Replace"];
 
@@ -21,6 +22,7 @@ class CronJobListPage extends React.Component {
       modalMode: "add",
       submitting: false,
       editingCj: null,
+      historyCj: null,
     };
     this.formRef = React.createRef();
   }
@@ -157,7 +159,7 @@ class CronJobListPage extends React.Component {
   }
 
   render() {
-    const {cronjobs, namespaces, loading, error, modalVisible, modalMode, submitting} = this.state;
+    const {cronjobs, namespaces, loading, error, modalVisible, modalMode, submitting, historyCj} = this.state;
 
     const nsOptions = namespaces.map(ns => ({label: ns.name, value: ns.name}));
 
@@ -191,6 +193,7 @@ class CronJobListPage extends React.Component {
         render: (_, record) => (
           <Space>
             <Button size="small" icon={<EditOutlined />} onClick={() => this.openEditModal(record)}>Edit</Button>
+            <Button size="small" icon={<HistoryOutlined />} onClick={() => this.setState({historyCj: record})}>History</Button>
             <Popconfirm
               title={`Delete Cron Job "${record.name}"?`}
               okText="Delete"
@@ -239,6 +242,12 @@ class CronJobListPage extends React.Component {
               </Button>
             </div>
           )}
+        />
+
+        <CronJobHistoryDrawer
+          cronJob={historyCj}
+          open={historyCj !== null}
+          onClose={() => this.setState({historyCj: null})}
         />
 
         <Modal
