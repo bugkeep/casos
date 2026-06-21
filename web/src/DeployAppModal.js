@@ -4,8 +4,8 @@ import {InfoCircleOutlined, LockOutlined} from "@ant-design/icons";
 import i18next from "i18next";
 import * as AppBackend from "./backend/AppBackend";
 import * as NamespaceBackend from "./backend/NamespaceBackend";
-import * as NodeBackend from "./backend/NodeBackend";
 import EnvVarEditor from "./EnvVarEditor";
+import {getServiceAccessInfo} from "./K8sAccess";
 
 const {Text} = Typography;
 
@@ -60,7 +60,6 @@ class DeployAppModal extends React.Component {
     super(props);
     this.state = {
       namespaces: [],
-      nodeIP: null,
       envVars: [],
       submitting: false,
       result: null,
@@ -73,7 +72,6 @@ class DeployAppModal extends React.Component {
     if (this.props.open && !prevProps.open && this.props.template) {
       this.setState({result: null, error: null, envVars: []});
       this.fetchNamespaces();
-      this.fetchNodeIP();
     }
   }
 
@@ -93,26 +91,6 @@ class DeployAppModal extends React.Component {
             serviceType: "NodePort",
           });
         }, 0);
-      }
-    }).catch(() => {});
-  }
-
-  fetchNodeIP() {
-    NodeBackend.getNodes().then(res => {
-      if (res.status === "ok") {
-        const nodes = res.data ?? [];
-        for (const node of nodes) {
-          if (node.externalIP) {
-            this.setState({nodeIP: node.externalIP});
-            return;
-          }
-        }
-        for (const node of nodes) {
-          if (node.internalIP) {
-            this.setState({nodeIP: node.internalIP});
-            return;
-          }
-        }
       }
     }).catch(() => {});
   }
@@ -195,12 +173,10 @@ class DeployAppModal extends React.Component {
   }
 
   renderResult() {
-    const {result, nodeIP} = this.state;
+    const {result} = this.state;
     if (!result) {return null;}
     const svc = result.service;
-    const accessUrls = svc && nodeIP
-      ? (svc.ports ?? []).filter(p => p.nodePort).map(p => `http://${nodeIP}:${p.nodePort}`)
-      : [];
+    const access = getServiceAccessInfo(svc);
     return (
       <Alert
         type="success"
@@ -211,19 +187,21 @@ class DeployAppModal extends React.Component {
             <div>
               Deployment <Text code>{result.deployment.name}</Text> {t("appStore:Deployment started")}
             </div>
-            {accessUrls.length > 0 && (
+            {access.urls.length > 0 && (
               <div style={{marginTop: 6}}>
                 Access URL:
-                {accessUrls.map((url, i) => (
+                {access.urls.map((url, i) => (
                   <a key={i} href={url} target="_blank" rel="noopener noreferrer" style={{marginLeft: 8}}>
                     {url}
                   </a>
                 ))}
               </div>
             )}
-            {svc && accessUrls.length === 0 && (
+            {svc && access.urls.length === 0 && (
               <div style={{marginTop: 6}}>
-                {t("appStore:Service info prefix")} <Text code>{svc.name}</Text> {t("appStore:Service info suffix")}
+                {access.message || (
+                  <span>{t("appStore:Service info prefix")} <Text code>{svc.name}</Text> {t("appStore:Service info suffix")}</span>
+                )}
                 {svc.ports?.map(p => (
                   <Tag key={p.name} style={{marginLeft: 4}}>{svc.name}:{p.port}</Tag>
                 ))}

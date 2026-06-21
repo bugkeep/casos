@@ -43,6 +43,7 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	port := beego.AppConfig.DefaultInt("httpport", 9000)
 
 	readyCh, err := server.Start(ctx, srvCfg)
 	if err != nil {
@@ -69,6 +70,9 @@ func main() {
 			if err := server.StartControllerManager(ctx, srvCfg); err != nil {
 				logs.Warning("start controller-manager: %v", err)
 			}
+			if err := server.StartLocalNodePortProxyManager(ctx, adminCfg, fmt.Sprintf("http://127.0.0.1:%d", port)); err != nil {
+				logs.Warning("start local nodeport proxy manager: %v", err)
+			}
 		case <-ctx.Done():
 		}
 	}()
@@ -89,7 +93,6 @@ func main() {
 	beego.BConfig.WebConfig.Session.SessionProviderConfig = "./tmp"
 	beego.BConfig.WebConfig.Session.SessionGCMaxLifetime = 3600 * 24 * 365
 
-	port := beego.AppConfig.DefaultInt("httpport", 9000)
 	logs.Info("casos listening on :%d", port)
 	beego.Run(fmt.Sprintf(":%v", port))
 }

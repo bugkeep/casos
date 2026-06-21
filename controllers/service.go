@@ -1,16 +1,26 @@
 package controllers
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/portforward"
+	"k8s.io/client-go/transport/spdy"
 
 	"github.com/casosorg/casos/object"
+	"github.com/casosorg/casos/server"
 )
 
 type portSummary struct {
@@ -29,6 +39,9 @@ type serviceSummary struct {
 	ExternalName    string            `json:"externalName"`
 	Selector        map[string]string `json:"selector"`
 	Ports           []portSummary     `json:"ports"`
+	AccessReady     bool              `json:"accessReady"`
+	AccessURL       string            `json:"accessUrl"`
+	AccessMessage   string            `json:"accessMessage"`
 	CreatedAt       string            `json:"createdAt"`
 	ResourceVersion string            `json:"resourceVersion"`
 }
@@ -57,6 +70,37 @@ func toSvcSummary(svc corev1.Service) serviceSummary {
 	}
 }
 
+func toServiceAccessStatus(summary *serviceSummary, hasEndpoints bool) {
+	if summary == nil {
+		return
+	}
+	if summary.Type != string(corev1.ServiceTypeNodePort) && summary.Type != string(corev1.ServiceTypeLoadBalancer) {
+		return
+	}
+	if !hasEndpoints {
+		summary.AccessReady = false
+		summary.AccessMessage = "No ready endpoints behind this Service"
+		return
+	}
+	for _, p := range summary.Ports {
+		if p.NodePort > 0 {
+			if accessURL, ok := server.LocalNodePortAccessURL(p.NodePort); ok {
+				summary.AccessReady = true
+				summary.AccessURL = accessURL
+				summary.AccessMessage = ""
+				return
+			}
+		}
+		if p.Port > 0 {
+			summary.AccessReady = true
+			summary.AccessURL = fmt.Sprintf("/api/proxy-service/%s/%s/%d/", summary.Namespace, summary.Name, p.Port)
+			summary.AccessMessage = ""
+			return
+		}
+	}
+	summary.AccessMessage = "Service has no routable ports"
+}
+
 // GetServices
 // @router /api/get-services [get]
 func (c *ApiController) GetServices() {
@@ -73,7 +117,18 @@ func (c *ApiController) GetServices() {
 	}
 	result := make([]serviceSummary, 0, len(svcs))
 	for _, svc := range svcs {
-		result = append(result, toSvcSummary(svc))
+		summary := toSvcSummary(svc)
+		hasEndpoints := false
+		if ep, err := object.GetEndpoints(cfg, svc.Namespace, svc.Name); err == nil {
+			hasEndpoints = endpointsHasAddresses(ep)
+		} else if apierrors.IsNotFound(err) {
+			summary.AccessReady = false
+			summary.AccessMessage = "This Service has no Endpoints object"
+		}
+		if summary.AccessMessage == "" {
+			toServiceAccessStatus(&summary, hasEndpoints)
+		}
+		result = append(result, summary)
 	}
 	c.ResponseOk(result)
 }
@@ -93,7 +148,14 @@ func (c *ApiController) GetService() {
 		c.ResponseError(err.Error())
 		return
 	}
-	c.ResponseOk(toSvcSummary(*svc))
+	summary := toSvcSummary(*svc)
+	if ep, err := object.GetEndpoints(cfg, svc.Namespace, svc.Name); err == nil {
+		toServiceAccessStatus(&summary, endpointsHasAddresses(ep))
+	} else if apierrors.IsNotFound(err) {
+		summary.AccessReady = false
+		summary.AccessMessage = "This Service has no Endpoints object"
+	}
+	c.ResponseOk(summary)
 }
 
 type portRequest struct {
@@ -267,4 +329,170 @@ func (c *ApiController) DeleteService() {
 		return
 	}
 	c.ResponseOk()
+}
+
+func endpointsHasAddresses(ep *corev1.Endpoints) bool {
+	if ep == nil {
+		return false
+	}
+	for _, subset := range ep.Subsets {
+		if len(subset.Addresses) > 0 || len(subset.NotReadyAddresses) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// ProxyService
+// @router /api/proxy-service/:namespace/:name/:port [get]
+func (c *ApiController) ProxyService() {
+	cfg := getAdminRestConfig()
+	if cfg == nil {
+		c.ResponseError("apiserver not ready")
+		return
+	}
+	namespace := c.Ctx.Input.Param(":namespace")
+	name := c.Ctx.Input.Param(":name")
+	portValue := c.Ctx.Input.Param(":port")
+	if namespace == "" || name == "" || portValue == "" {
+		c.CustomAbort(400, "missing service proxy parameters")
+		return
+	}
+	port, err := strconv.Atoi(portValue)
+	if err != nil || port <= 0 {
+		c.CustomAbort(400, "invalid service port")
+		return
+	}
+	service, err := object.GetService(cfg, namespace, name)
+	if err != nil {
+		c.CustomAbort(404, err.Error())
+		return
+	}
+	endpoints, err := object.GetEndpoints(cfg, namespace, name)
+	if err != nil || !endpointsHasAddresses(endpoints) {
+		c.CustomAbort(503, "service has no ready endpoints")
+		return
+	}
+	targetPort := int32(port)
+	for _, p := range service.Spec.Ports {
+		if p.Port == int32(port) {
+			if p.TargetPort.IntValue() > 0 {
+				targetPort = int32(p.TargetPort.IntValue())
+			}
+			break
+		}
+	}
+	podName, podPort := firstEndpointTargetPod(endpoints, targetPort)
+	if podName == "" || podPort == 0 {
+		c.CustomAbort(503, "service endpoints do not expose the requested port")
+		return
+	}
+
+	localPort, stopChan, err := startPodPortForward(cfg, namespace, podName, podPort)
+	if err != nil {
+		c.CustomAbort(502, err.Error())
+		return
+	}
+	defer close(stopChan)
+
+	proxyPath := strings.TrimPrefix(c.Ctx.Request.URL.Path, fmt.Sprintf("/api/proxy-service/%s/%s/%d", namespace, name, port))
+	if proxyPath == "" {
+		proxyPath = "/"
+	}
+	targetURL := fmt.Sprintf("http://127.0.0.1:%d%s", localPort, proxyPath)
+	if rawQuery := c.Ctx.Request.URL.RawQuery; rawQuery != "" {
+		targetURL += "?" + rawQuery
+	}
+	req, err := http.NewRequest(c.Ctx.Request.Method, targetURL, c.Ctx.Request.Body)
+	if err != nil {
+		c.CustomAbort(502, err.Error())
+		return
+	}
+	copyHeaders(req.Header, c.Ctx.Request.Header)
+	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	if err != nil {
+		c.CustomAbort(502, err.Error())
+		return
+	}
+	defer resp.Body.Close()
+	copyHeaders(c.Ctx.ResponseWriter.Header(), resp.Header)
+	c.Ctx.ResponseWriter.WriteHeader(resp.StatusCode)
+	_, _ = io.Copy(c.Ctx.ResponseWriter, resp.Body)
+}
+
+func firstEndpointTargetPod(ep *corev1.Endpoints, targetPort int32) (string, int32) {
+	for _, subset := range ep.Subsets {
+		portMatched := false
+		for _, p := range subset.Ports {
+			if p.Port == targetPort {
+				portMatched = true
+				break
+			}
+		}
+		if !portMatched {
+			continue
+		}
+		for _, addr := range subset.Addresses {
+			if addr.TargetRef != nil && addr.TargetRef.Kind == "Pod" && addr.TargetRef.Name != "" {
+				return addr.TargetRef.Name, targetPort
+			}
+		}
+		for _, addr := range subset.NotReadyAddresses {
+			if addr.TargetRef != nil && addr.TargetRef.Kind == "Pod" && addr.TargetRef.Name != "" {
+				return addr.TargetRef.Name, targetPort
+			}
+		}
+	}
+	return "", 0
+}
+
+func startPodPortForward(cfg *rest.Config, namespace, podName string, remotePort int32) (uint16, chan struct{}, error) {
+	transport, upgrader, err := spdy.RoundTripperFor(cfg)
+	if err != nil {
+		return 0, nil, err
+	}
+	serverURL := cfg.Host + fmt.Sprintf("/api/v1/namespaces/%s/pods/%s/portforward", namespace, podName)
+	url, err := url.Parse(serverURL)
+	if err != nil {
+		return 0, nil, err
+	}
+	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, http.MethodPost, url)
+	stopChan := make(chan struct{}, 1)
+	readyChan := make(chan struct{})
+	out := &bytes.Buffer{}
+	errOut := &bytes.Buffer{}
+	forwarder, err := portforward.New(dialer, []string{fmt.Sprintf("0:%d", remotePort)}, stopChan, readyChan, out, errOut)
+	if err != nil {
+		return 0, nil, err
+	}
+	go func() {
+		_ = forwarder.ForwardPorts()
+	}()
+	select {
+	case <-readyChan:
+	case <-time.After(10 * time.Second):
+		close(stopChan)
+		if errOut.Len() > 0 {
+			return 0, nil, fmt.Errorf("%s", strings.TrimSpace(errOut.String()))
+		}
+		return 0, nil, fmt.Errorf("timed out waiting for pod port-forward")
+	}
+	ports, err := forwarder.GetPorts()
+	if err != nil {
+		close(stopChan)
+		return 0, nil, err
+	}
+	if len(ports) == 0 {
+		close(stopChan)
+		return 0, nil, fmt.Errorf("port-forward did not allocate a local port")
+	}
+	return ports[0].Local, stopChan, nil
+}
+
+func copyHeaders(dst, src http.Header) {
+	for key, values := range src {
+		for _, value := range values {
+			dst.Add(key, value)
+		}
+	}
 }

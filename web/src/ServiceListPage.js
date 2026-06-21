@@ -1,15 +1,16 @@
 import React from "react";
 import {
-  Alert, Button, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tag
+  Alert, Button, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tag, Typography
 } from "antd";
 import {DeleteOutlined, EditOutlined, MinusCircleOutlined, PlusOutlined, ReloadOutlined} from "@ant-design/icons";
 import * as ServiceBackend from "./backend/ServiceBackend";
 import * as NamespaceBackend from "./backend/NamespaceBackend";
-import * as NodeBackend from "./backend/NodeBackend";
 import * as Setting from "./Setting";
+import {getServiceAccessInfo} from "./K8sAccess";
 
 const SERVICE_TYPES = ["ClusterIP", "NodePort", "LoadBalancer", "ExternalName"];
 const PROTOCOLS = ["TCP", "UDP", "SCTP"];
+const {Text} = Typography;
 
 const typeColor = {
   ClusterIP: "blue",
@@ -65,7 +66,6 @@ class ServiceListPage extends React.Component {
     this.state = {
       services: [],
       namespaces: [],
-      nodes: [],
       loading: true,
       error: null,
       modalVisible: false,
@@ -79,7 +79,6 @@ class ServiceListPage extends React.Component {
   componentDidMount() {
     this.fetchServices();
     this.fetchNamespaces();
-    this.fetchNodes();
   }
 
   fetchNamespaces() {
@@ -88,29 +87,6 @@ class ServiceListPage extends React.Component {
         this.setState({namespaces: res.data ?? []});
       }
     }).catch(() => {});
-  }
-
-  fetchNodes() {
-    NodeBackend.getNodes().then(res => {
-      if (res.status === "ok") {
-        this.setState({nodes: res.data ?? []});
-      }
-    }).catch(() => {});
-  }
-
-  getNodeIP() {
-    const {nodes} = this.state;
-    for (const n of nodes) {
-      if (n.externalIP) {
-        return n.externalIP;
-      }
-    }
-    for (const n of nodes) {
-      if (n.internalIP) {
-        return n.internalIP;
-      }
-    }
-    return null;
   }
 
   fetchServices() {
@@ -221,7 +197,6 @@ class ServiceListPage extends React.Component {
 
   render() {
     const {services, namespaces, loading, error, modalVisible, modalMode, submitting} = this.state;
-    const nodeIP = this.getNodeIP();
     const currentType = this.formRef.current?.getFieldValue("type") || "ClusterIP";
     const isExternalName = currentType === "ExternalName";
 
@@ -257,17 +232,15 @@ class ServiceListPage extends React.Component {
         title: "Access URL",
         key: "accessUrl",
         render: (_, record) => {
-          if (record.type !== "NodePort" || !nodeIP) {
-            return null;
+          const {urls, message} = getServiceAccessInfo(record);
+          if (urls.length === 0) {
+            return message ? <Text type="secondary">{message}</Text> : null;
           }
-          return (record.ports ?? []).filter(p => p.nodePort).map((p, i) => {
-            const url = `http://${nodeIP}:${p.nodePort}`;
-            return (
-              <a key={i} href={url} target="_blank" rel="noopener noreferrer" style={{display: "block"}}>
-                {url}
-              </a>
-            );
-          });
+          return urls.map((url, i) => (
+            <a key={i} href={url} target="_blank" rel="noopener noreferrer" style={{display: "block"}}>
+              {url}
+            </a>
+          ));
         },
       },
       {title: "Created", dataIndex: "createdAt", key: "createdAt", width: 180},

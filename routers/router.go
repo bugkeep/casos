@@ -58,6 +58,8 @@ func InitAPI() {
 	beego.Router("/api/add-service", &controllers.ApiController{}, "POST:AddService")
 	beego.Router("/api/update-service", &controllers.ApiController{}, "POST:UpdateService")
 	beego.Router("/api/delete-service", &controllers.ApiController{}, "POST:DeleteService")
+	beego.Router("/api/proxy-service/:namespace/:name/:port", &controllers.ApiController{}, "GET:ProxyService")
+	beego.Router("/api/proxy-service/:namespace/:name/:port/*", &controllers.ApiController{}, "GET:ProxyService")
 
 	beego.Router("/api/get-rolebindings", &controllers.ApiController{}, "GET:GetRoleBindings")
 	beego.Router("/api/get-rolebinding", &controllers.ApiController{}, "GET:GetRoleBinding")
