@@ -19,14 +19,37 @@ type statefulSetSummary struct {
 	ReadyReplicas   int32           `json:"readyReplicas"`
 	Image           string          `json:"image"`
 	EnvVars         []envVarSummary `json:"envVars"`
+	VolumeName      string          `json:"volumeName"`
+	PvcName         string          `json:"pvcName"`
+	MountPath       string          `json:"mountPath"`
+	ReadOnly        bool            `json:"readOnly"`
 	CreatedAt       string          `json:"createdAt"`
 	ResourceVersion string          `json:"resourceVersion"`
 }
 
 func toStatefulSetSummary(sts appsv1.StatefulSet) statefulSetSummary {
 	image := ""
+	volumeName := ""
+	pvcName := ""
+	mountPath := ""
+	readOnly := false
 	if len(sts.Spec.Template.Spec.Containers) > 0 {
 		image = sts.Spec.Template.Spec.Containers[0].Image
+		if len(sts.Spec.Template.Spec.Containers[0].VolumeMounts) > 0 {
+			mount := sts.Spec.Template.Spec.Containers[0].VolumeMounts[0]
+			volumeName = mount.Name
+			mountPath = mount.MountPath
+			readOnly = mount.ReadOnly
+		}
+	}
+	for _, vol := range sts.Spec.Template.Spec.Volumes {
+		if vol.Name == volumeName && vol.PersistentVolumeClaim != nil {
+			pvcName = vol.PersistentVolumeClaim.ClaimName
+			if !readOnly {
+				readOnly = vol.PersistentVolumeClaim.ReadOnly
+			}
+			break
+		}
 	}
 	replicas := int32(1)
 	if sts.Spec.Replicas != nil {
@@ -40,6 +63,10 @@ func toStatefulSetSummary(sts appsv1.StatefulSet) statefulSetSummary {
 		ReadyReplicas:   sts.Status.ReadyReplicas,
 		Image:           image,
 		EnvVars:         extractEnvVars(sts.Spec.Template.Spec.Containers),
+		VolumeName:      volumeName,
+		PvcName:         pvcName,
+		MountPath:       mountPath,
+		ReadOnly:        readOnly,
 		CreatedAt:       sts.CreationTimestamp.UTC().Format("2006-01-02 15:04:05"),
 		ResourceVersion: sts.ResourceVersion,
 	}
@@ -55,6 +82,10 @@ type statefulSetRequest struct {
 	CpuRequest      string          `json:"cpuRequest"`
 	MemoryRequest   string          `json:"memoryRequest"`
 	EnvVars         []envVarRequest `json:"envVars"`
+	VolumeName      string          `json:"volumeName"`
+	PvcName         string          `json:"pvcName"`
+	MountPath       string          `json:"mountPath"`
+	ReadOnly        bool            `json:"readOnly"`
 	ResourceVersion string          `json:"resourceVersion"`
 }
 
@@ -76,6 +107,28 @@ func buildStatefulSet(req statefulSetRequest) *appsv1.StatefulSet {
 		Name:  containerName,
 		Image: req.Image,
 		Env:   buildEnvVars(req.EnvVars),
+	}
+	volumes := []corev1.Volume{}
+
+	if req.PvcName != "" && req.MountPath != "" {
+		volumeName := req.VolumeName
+		if volumeName == "" {
+			volumeName = "storage"
+		}
+		volumes = append(volumes, corev1.Volume{
+			Name: volumeName,
+			VolumeSource: corev1.VolumeSource{
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+					ClaimName: req.PvcName,
+					ReadOnly:  req.ReadOnly,
+				},
+			},
+		})
+		container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
+			Name:      volumeName,
+			MountPath: req.MountPath,
+			ReadOnly:  req.ReadOnly,
+		})
 	}
 
 	if req.CpuRequest != "" || req.MemoryRequest != "" {
@@ -106,6 +159,7 @@ func buildStatefulSet(req statefulSetRequest) *appsv1.StatefulSet {
 					Labels: map[string]string{"app": req.Name},
 				},
 				Spec: corev1.PodSpec{
+					Volumes:    volumes,
 					Containers: []corev1.Container{container},
 				},
 			},
@@ -217,6 +271,29 @@ func (c *ApiController) UpdateStatefulSet() {
 			Image: req.Image,
 			Env:   buildEnvVars(req.EnvVars),
 		}}
+	}
+	if req.PvcName != "" && req.MountPath != "" {
+		volumeName := req.VolumeName
+		if volumeName == "" {
+			volumeName = "storage"
+		}
+		existing.Spec.Template.Spec.Volumes = []corev1.Volume{{
+			Name: volumeName,
+			VolumeSource: corev1.VolumeSource{
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+					ClaimName: req.PvcName,
+					ReadOnly:  req.ReadOnly,
+				},
+			},
+		}}
+		existing.Spec.Template.Spec.Containers[0].VolumeMounts = []corev1.VolumeMount{{
+			Name:      volumeName,
+			MountPath: req.MountPath,
+			ReadOnly:  req.ReadOnly,
+		}}
+	} else {
+		existing.Spec.Template.Spec.Volumes = nil
+		existing.Spec.Template.Spec.Containers[0].VolumeMounts = nil
 	}
 	existing.ResourceVersion = req.ResourceVersion
 

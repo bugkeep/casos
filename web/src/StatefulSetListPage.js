@@ -1,12 +1,13 @@
 import React from "react";
 import {
-  Alert, Button, Divider, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Typography
+  Alert, Button, Checkbox, Divider, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Typography
 } from "antd";
 import {DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined} from "@ant-design/icons";
 import * as StatefulSetBackend from "./backend/StatefulSetBackend";
 import * as NamespaceBackend from "./backend/NamespaceBackend";
 import * as ConfigMapBackend from "./backend/ConfigMapBackend";
 import * as SecretBackend from "./backend/SecretBackend";
+import * as PvcBackend from "./backend/PvcBackend";
 import * as Setting from "./Setting";
 import EnvVarEditor, {ENV_SOURCE_CONFIGMAP, ENV_SOURCE_PLAIN, ENV_SOURCE_SECRET} from "./EnvVarEditor";
 import ReplicasControl from "./ReplicasControl";
@@ -47,6 +48,7 @@ class StatefulSetListPage extends React.Component {
       namespaces: [],
       configMaps: [],
       secrets: [],
+      pvcs: [],
       loading: true,
       error: null,
       modalVisible: false,
@@ -96,6 +98,9 @@ class StatefulSetListPage extends React.Component {
     SecretBackend.getSecrets(namespace).then(res => {
       if (res.status === "ok") {this.setState({secrets: res.data ?? []});}
     }).catch(() => {});
+    PvcBackend.getPvcs(namespace).then(res => {
+      if (res.status === "ok") {this.setState({pvcs: res.data ?? []});}
+    }).catch(() => {});
   }
 
   openAddModal() {
@@ -103,7 +108,16 @@ class StatefulSetListPage extends React.Component {
     this.setState({modalVisible: true, modalMode: "add", editingSts: null, envVars: []}, () => {
       setTimeout(() => {
         this.formRef.current?.setFieldsValue({
-          namespace: defaultNs, name: "", serviceName: "", replicas: 1, image: "", containerName: "",
+          namespace: defaultNs,
+          name: "",
+          serviceName: "",
+          replicas: 1,
+          image: "",
+          containerName: "",
+          volumeName: "storage",
+          pvcName: undefined,
+          mountPath: "",
+          readOnly: false,
         });
         this.fetchConfigMapsAndSecrets(defaultNs);
       }, 0);
@@ -121,6 +135,10 @@ class StatefulSetListPage extends React.Component {
             serviceName: sts.serviceName,
             replicas: sts.replicas,
             image: sts.image,
+            volumeName: sts.volumeName || "storage",
+            pvcName: sts.pvcName || undefined,
+            mountPath: sts.mountPath || "",
+            readOnly: sts.readOnly ?? false,
           });
           this.fetchConfigMapsAndSecrets(sts.namespace);
         }, 0);
@@ -142,6 +160,10 @@ class StatefulSetListPage extends React.Component {
         image: values.image,
         containerName: values.containerName ?? "",
         envVars: editorRowsToPayload(this.state.envVars),
+        volumeName: values.volumeName ?? "storage",
+        pvcName: values.pvcName ?? "",
+        mountPath: values.mountPath ?? "",
+        readOnly: values.readOnly ?? false,
       };
 
       this.setState({submitting: true});
@@ -188,15 +210,29 @@ class StatefulSetListPage extends React.Component {
   }
 
   render() {
-    const {statefulsets, namespaces, configMaps, secrets, loading, error, modalVisible, modalMode, submitting, envVars} = this.state;
+    const {statefulsets, namespaces, configMaps, secrets, pvcs, loading, error, modalVisible, modalMode, submitting, envVars} = this.state;
 
     const nsOptions = namespaces.map(ns => ({label: ns.name, value: ns.name}));
+    const pvcOptions = pvcs.map(pvc => ({label: `${pvc.name} (${pvc.storage || "-"})`, value: pvc.name}));
 
     const columns = [
       {title: "Namespace", dataIndex: "namespace", key: "namespace", width: 160},
       {title: "Name", dataIndex: "name", key: "name"},
       {title: "Service Name", dataIndex: "serviceName", key: "serviceName", width: 160},
       {title: "Image", dataIndex: "image", key: "image", ellipsis: true},
+      {
+        title: "Storage",
+        key: "storage",
+        width: 260,
+        render: (_, record) => record.pvcName ? (
+          <div>
+            <div>{record.pvcName}</div>
+            <Text type="secondary" style={{fontSize: 12}}>
+              {record.mountPath}{record.readOnly ? " (read-only)" : ""}
+            </Text>
+          </div>
+        ) : null,
+      },
       {
         title: "Replicas",
         key: "replicas",
@@ -314,6 +350,41 @@ class StatefulSetListPage extends React.Component {
               configMaps={configMaps}
               secrets={secrets}
             />
+
+            <Divider orientation="left" orientationMargin={0} style={{marginTop: 16, marginBottom: 12}}>
+              <Text style={{fontSize: 13}}>Storage</Text>
+            </Divider>
+
+            <Form.Item label="PVC" name="pvcName">
+              <Select
+                allowClear
+                options={pvcOptions}
+                placeholder="Select a PVC in the namespace"
+                showSearch
+              />
+            </Form.Item>
+            <Form.Item
+              label="Mount Path"
+              name="mountPath"
+              rules={[
+                ({getFieldValue}) => ({
+                  validator(_, value) {
+                    if (!getFieldValue("pvcName") || value) {
+                      return Promise.resolve();
+                    }
+                    return Promise.reject(new Error("Mount path is required when a PVC is selected"));
+                  },
+                }),
+              ]}
+            >
+              <Input placeholder="/var/lib/mysql" />
+            </Form.Item>
+            <Form.Item label="Volume Name" name="volumeName" tooltip="Defaults to storage when left empty">
+              <Input placeholder="storage" />
+            </Form.Item>
+            <Form.Item name="readOnly" valuePropName="checked">
+              <Checkbox>Read-only mount</Checkbox>
+            </Form.Item>
           </Form>
         </Modal>
       </div>
