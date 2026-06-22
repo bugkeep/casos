@@ -69,6 +69,12 @@ func main() {
 			if err := server.StartControllerManager(ctx, srvCfg); err != nil {
 				logs.Warning("start controller-manager: %v", err)
 			}
+			if err := server.StartManagedNodeTaskRunner(ctx, adminCfg, srvCfg); err != nil {
+				logs.Warning("start managed node task runner: %v", err)
+			}
+			if err := server.StartManagedNodeReconciler(ctx, adminCfg, srvCfg); err != nil {
+				logs.Warning("start managed node reconciler: %v", err)
+			}
 		case <-ctx.Done():
 		}
 	}()

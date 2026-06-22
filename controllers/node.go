@@ -2,6 +2,9 @@ package controllers
 
 import (
 	"encoding/json"
+	"net"
+	"net/http"
+	"strings"
 
 	"github.com/casosorg/casos/object"
 	"github.com/casosorg/casos/server"
@@ -178,7 +181,7 @@ func (c *ApiController) GetWorkerKubeconfig() {
 		c.ResponseError("server config not ready")
 		return
 	}
-	wk, err := server.GenerateWorkerKubeconfig(*cfg, nodeName)
+	wk, err := server.GenerateWorkerKubeconfig(*cfg, nodeName, workerApiserverHost(c.Ctx.Request, cfg))
 	if err != nil {
 		c.ResponseError("generate worker kubeconfig: " + err.Error())
 		return
@@ -188,4 +191,20 @@ func (c *ApiController) GetWorkerKubeconfig() {
 		"kubeconfig":       wk.Kubeconfig,
 		"containerdConfig": server.GenerateContainerdConfig(cfg.SandboxImage, cfg.Socks5Proxy),
 	})
+}
+
+func workerApiserverHost(r *http.Request, cfg *server.Config) string {
+	if r != nil {
+		host := strings.TrimSpace(r.Host)
+		if host != "" {
+			if parsedHost, _, err := net.SplitHostPort(host); err == nil && parsedHost != "" {
+				return parsedHost
+			}
+			return host
+		}
+	}
+	if cfg != nil && cfg.AdvertiseAddress != "" {
+		return cfg.AdvertiseAddress
+	}
+	return "127.0.0.1"
 }
