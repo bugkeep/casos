@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - feat/ci-kind-ui-e2e
+      - feat/ci-kind-ui-e2e-failure-demo
     paths:
       - ".github/workflows/kind-ui-e2e.yml"
       - "deploy/ci/kind/**"

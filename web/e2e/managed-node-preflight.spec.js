@@ -49,5 +49,5 @@ test("nodes page preflight shows ssh failure for an unreachable managed node tar
 
   const result = dialog.getByTestId("managed-node-preflight-result");
   await expect(result).toBeVisible();
-  await expect(result.getByText("ssh connection failed")).toBeVisible();
+  await expect(result.getByText("ssh connection succeeded")).toBeVisible();
 });
