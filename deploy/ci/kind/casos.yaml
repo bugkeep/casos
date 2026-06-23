@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: casos
+  labels:
+    app: casos
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: casos
+  template:
+    metadata:
+      labels:
+        app: casos
+    spec:
+      initContainers:
+        - name: wait-for-mysql
+          image: mysql:8.0
+          command:
+            - sh
+            - -c
+            - until mysqladmin ping -h mysql -uroot -p123456 --silent; do sleep 2; done
+      containers:
+        - name: casos
+          image: casos-ci:kind
+          imagePullPolicy: Never
+          env:
+            - name: BEEGO_CONFIG_PATH
+              value: /etc/casos/app.conf
+            - name: CASOS_TEST_LOGIN_ENABLED
+              value: "1"
+          ports:
+            - containerPort: 9000
+              name: http
+            - containerPort: 6443
+              name: apiserver
+            - containerPort: 9443
+              name: webhook
+          readinessProbe:
+            httpGet:
+              path: /api/get-built-in-site
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 12
+          startupProbe:
+            httpGet:
+              path: /api/get-built-in-site
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 60
+          volumeMounts:
+            - name: app-config
+              mountPath: /etc/casos
+              readOnly: true
+            - name: data-dir
+              mountPath: /var/lib/casos
+      volumes:
+        - name: app-config
+          configMap:
+            name: casos-app-config
+        - name: data-dir
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: casos
+  labels:
+    app: casos
+spec:
+  selector:
+    app: casos
+  ports:
+    - name: http
+      port: 9000
+      targetPort: http

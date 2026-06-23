@@ -51,6 +51,20 @@ function isPreflightSuccessful(result) {
   );
 }
 
+const testIds = {
+  clusterNodesTable: "cluster-nodes-table",
+  managedNodesTable: "managed-nodes-table",
+  autoDeployButton: "managed-node-auto-deploy-button",
+  autoDeployModal: "managed-node-auto-deploy-modal",
+  autoDeployNameInput: "managed-node-name-input",
+  autoDeployHostInput: "managed-node-host-input",
+  autoDeployPortInput: "managed-node-port-input",
+  autoDeployUsernameInput: "managed-node-username-input",
+  autoDeployPasswordInput: "managed-node-password-input",
+  autoDeployPreflightButton: "managed-node-preflight-button",
+  autoDeployPreflightResult: "managed-node-preflight-result",
+};
+
 class NodeListPage extends React.Component {
   constructor(props) {
     super(props);
@@ -609,29 +623,31 @@ class NodeListPage extends React.Component {
           />
         )}
 
-        <Table
-          rowKey="name"
-          columns={nodeColumns}
-          dataSource={nodes}
-          loading={loading}
-          size="middle"
-          pagination={{pageSize: 20}}
-          locale={{emptyText: "No nodes registered. Start kubelet on a worker to join the cluster."}}
-          title={() => (
-            <div>
-              <span style={{fontWeight: 600}}>Cluster Nodes</span>
-              &nbsp;&nbsp;&nbsp;&nbsp;
-              <Button
-                icon={<ReloadOutlined />}
-                onClick={() => this.fetchNodes()}
-                loading={loading}
-                size="small"
-              >
-                Refresh
-              </Button>
-            </div>
-          )}
-        />
+        <div data-testid={testIds.clusterNodesTable}>
+          <Table
+            rowKey="name"
+            columns={nodeColumns}
+            dataSource={nodes}
+            loading={loading}
+            size="middle"
+            pagination={{pageSize: 20}}
+            locale={{emptyText: "No nodes registered. Start kubelet on a worker to join the cluster."}}
+            title={() => (
+              <div>
+                <span style={{fontWeight: 600}}>Cluster Nodes</span>
+                &nbsp;&nbsp;&nbsp;&nbsp;
+                <Button
+                  icon={<ReloadOutlined />}
+                  onClick={() => this.fetchNodes()}
+                  loading={loading}
+                  size="small"
+                >
+                  Refresh
+                </Button>
+              </div>
+            )}
+          />
+        </div>
 
         <div style={{height: 24}} />
 
@@ -645,39 +661,42 @@ class NodeListPage extends React.Component {
           />
         )}
 
-        <Table
-          rowKey="id"
-          columns={managedColumns}
-          dataSource={managedNodes}
-          loading={managedLoading}
-          size="middle"
-          scroll={{x: getManagedNodesTableScrollX()}}
-          pagination={{pageSize: 10}}
-          locale={{emptyText: "No managed nodes yet. Use Auto Deploy to bootstrap a worker host."}}
-          title={() => (
-            <div style={{display: "flex", justifyContent: "space-between", alignItems: "center"}}>
-              <span style={{fontWeight: 600}}>Managed Nodes</span>
-              <Space>
-                <Button
-                  icon={<ReloadOutlined />}
-                  onClick={() => this.fetchManagedNodes()}
-                  loading={managedLoading}
-                  size="small"
-                >
-                  Refresh
-                </Button>
-                <Button
-                  type="primary"
-                  icon={<PlusOutlined />}
-                  onClick={() => this.openDeployModal()}
-                  size="small"
-                >
-                  Auto Deploy
-                </Button>
-              </Space>
-            </div>
-          )}
-        />
+        <div data-testid={testIds.managedNodesTable}>
+          <Table
+            rowKey="id"
+            columns={managedColumns}
+            dataSource={managedNodes}
+            loading={managedLoading}
+            size="middle"
+            scroll={{x: getManagedNodesTableScrollX()}}
+            pagination={{pageSize: 10}}
+            locale={{emptyText: "No managed nodes yet. Use Auto Deploy to bootstrap a worker host."}}
+            title={() => (
+              <div style={{display: "flex", justifyContent: "space-between", alignItems: "center"}}>
+                <span style={{fontWeight: 600}}>Managed Nodes</span>
+                <Space>
+                  <Button
+                    icon={<ReloadOutlined />}
+                    onClick={() => this.fetchManagedNodes()}
+                    loading={managedLoading}
+                    size="small"
+                  >
+                    Refresh
+                  </Button>
+                  <Button
+                    type="primary"
+                    icon={<PlusOutlined />}
+                    onClick={() => this.openDeployModal()}
+                    size="small"
+                    data-testid={testIds.autoDeployButton}
+                  >
+                    Auto Deploy
+                  </Button>
+                </Space>
+              </div>
+            )}
+          />
+        </div>
 
         <Modal
           title={`Edit Labels - ${this.state.editingNode?.name ?? ""}`}
@@ -764,7 +783,12 @@ class NodeListPage extends React.Component {
           confirmLoading={deploySubmitting}
           okText="Deploy"
           footer={[
-            <Button key="preflight" onClick={() => this.runPreflight()} loading={preflightSubmitting}>
+            <Button
+              key="preflight"
+              onClick={() => this.runPreflight()}
+              loading={preflightSubmitting}
+              data-testid={testIds.autoDeployPreflightButton}
+            >
               Preflight
             </Button>,
             <Button key="cancel" onClick={() => this.closeDeployModal()}>
@@ -777,60 +801,84 @@ class NodeListPage extends React.Component {
           width={620}
           destroyOnHidden
         >
-          <Form ref={this.deployFormRef} layout="vertical">
-            <Form.Item name="name" label="Node Name" rules={[{required: true, message: "Node name is required"}]}>
-              <Input placeholder="worker-01" />
-            </Form.Item>
-            <Form.Item name="host" label="Host IP / DNS" rules={[{required: true, message: "Host is required"}]}>
-              <Input placeholder="192.168.1.20" />
-            </Form.Item>
-            <Form.Item name="port" label="SSH Port" rules={[{required: true, message: "Port is required"}]}>
-              <InputNumber min={1} max={65535} style={{width: "100%"}} />
-            </Form.Item>
-            <Form.Item name="username" label="SSH Username" rules={[{required: true, message: "Username is required"}]}>
-              <Input placeholder="root" />
-            </Form.Item>
-            <Form.Item name="password" label="SSH Password" rules={[{required: true, message: "Password is required"}]}>
-              <Input.Password placeholder="root password" />
-            </Form.Item>
-            <Form.Item name="labelsJson" label="Node Labels JSON">
-              <Input.TextArea autoSize={{minRows: 3, maxRows: 6}} />
-            </Form.Item>
-            <Form.Item name="unschedulable" label="Disable Scheduling" valuePropName="checked">
-              <Switch />
-            </Form.Item>
-          </Form>
-          {preflightResult && (
-            <Alert
-              style={{marginTop: 12}}
-              type={isPreflightSuccessful(preflightResult) ? "success" : "warning"}
-              message="Preflight Result"
-              description={
-                <div>
-                  <div>{preflightResult.message}</div>
-                  <div style={{marginTop: 8}}>
-                    <Space wrap>
-                      <Tag color={preflightResult.reachable ? "green" : "red"}>SSH</Tag>
-                      <Tag color={preflightResult.isRoot ? "green" : "red"}>root</Tag>
-                      <Tag color={preflightResult.supportsOs ? "green" : "red"}>{preflightResult.os || "unknown os"}</Tag>
-                      <Tag color={preflightResult.supportsArch ? "green" : "red"}>{preflightResult.arch || "unknown arch"}</Tag>
-                      <Tag color={preflightResult.hasSystemd ? "green" : "red"}>systemd</Tag>
-                      {preflightResult.initProcess && <Tag color={preflightResult.hasSystemd ? "green" : "orange"}>PID 1: {preflightResult.initProcess}</Tag>}
-                      {preflightResult.systemdState && <Tag color={preflightResult.hasSystemd ? "green" : "orange"}>systemd: {preflightResult.systemdState}</Tag>}
-                      {preflightResult.isWsl && <Tag color="blue">WSL</Tag>}
-                      {preflightResult.isWsl && (
-                        <Tag color={preflightResult.windowsHost ? "cyan" : "red"}>
-                          Windows host: {preflightResult.windowsHost || "unresolved"}
-                        </Tag>
-                      )}
-                      {preflightResult.version && <Tag>{preflightResult.version}</Tag>}
-                    </Space>
-                  </div>
+          <div data-testid={testIds.autoDeployModal}>
+            <Form ref={this.deployFormRef} layout="vertical">
+              <Form.Item label="Node Name" required>
+                <div data-testid={testIds.autoDeployNameInput}>
+                  <Form.Item name="name" noStyle rules={[{required: true, message: "Node name is required"}]}>
+                    <Input placeholder="worker-01" />
+                  </Form.Item>
                 </div>
-              }
-              showIcon
-            />
-          )}
+              </Form.Item>
+              <Form.Item label="Host IP / DNS" required>
+                <div data-testid={testIds.autoDeployHostInput}>
+                  <Form.Item name="host" noStyle rules={[{required: true, message: "Host is required"}]}>
+                    <Input placeholder="192.168.1.20" />
+                  </Form.Item>
+                </div>
+              </Form.Item>
+              <Form.Item label="SSH Port" required>
+                <div data-testid={testIds.autoDeployPortInput}>
+                  <Form.Item name="port" noStyle rules={[{required: true, message: "Port is required"}]}>
+                    <InputNumber min={1} max={65535} style={{width: "100%"}} />
+                  </Form.Item>
+                </div>
+              </Form.Item>
+              <Form.Item label="SSH Username" required>
+                <div data-testid={testIds.autoDeployUsernameInput}>
+                  <Form.Item name="username" noStyle rules={[{required: true, message: "Username is required"}]}>
+                    <Input placeholder="root" />
+                  </Form.Item>
+                </div>
+              </Form.Item>
+              <Form.Item label="SSH Password" required>
+                <div data-testid={testIds.autoDeployPasswordInput}>
+                  <Form.Item name="password" noStyle rules={[{required: true, message: "Password is required"}]}>
+                    <Input.Password placeholder="root password" />
+                  </Form.Item>
+                </div>
+              </Form.Item>
+              <Form.Item name="labelsJson" label="Node Labels JSON">
+                <Input.TextArea autoSize={{minRows: 3, maxRows: 6}} />
+              </Form.Item>
+              <Form.Item name="unschedulable" label="Disable Scheduling" valuePropName="checked">
+                <Switch />
+              </Form.Item>
+            </Form>
+            {preflightResult && (
+              <div data-testid={testIds.autoDeployPreflightResult}>
+                <Alert
+                  style={{marginTop: 12}}
+                  type={isPreflightSuccessful(preflightResult) ? "success" : "warning"}
+                  message="Preflight Result"
+                  description={
+                    <div>
+                      <div>{preflightResult.message}</div>
+                      <div style={{marginTop: 8}}>
+                        <Space wrap>
+                          <Tag color={preflightResult.reachable ? "green" : "red"}>SSH</Tag>
+                          <Tag color={preflightResult.isRoot ? "green" : "red"}>root</Tag>
+                          <Tag color={preflightResult.supportsOs ? "green" : "red"}>{preflightResult.os || "unknown os"}</Tag>
+                          <Tag color={preflightResult.supportsArch ? "green" : "red"}>{preflightResult.arch || "unknown arch"}</Tag>
+                          <Tag color={preflightResult.hasSystemd ? "green" : "red"}>systemd</Tag>
+                          {preflightResult.initProcess && <Tag color={preflightResult.hasSystemd ? "green" : "orange"}>PID 1: {preflightResult.initProcess}</Tag>}
+                          {preflightResult.systemdState && <Tag color={preflightResult.hasSystemd ? "green" : "orange"}>systemd: {preflightResult.systemdState}</Tag>}
+                          {preflightResult.isWsl && <Tag color="blue">WSL</Tag>}
+                          {preflightResult.isWsl && (
+                            <Tag color={preflightResult.windowsHost ? "cyan" : "red"}>
+                              Windows host: {preflightResult.windowsHost || "unresolved"}
+                            </Tag>
+                          )}
+                          {preflightResult.version && <Tag>{preflightResult.version}</Tag>}
+                        </Space>
+                      </div>
+                    </div>
+                  }
+                  showIcon
+                />
+              </div>
+            )}
+          </div>
         </Modal>
 
         <Drawer

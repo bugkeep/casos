@@ -1,0 +1,160 @@
+name: Kind UI E2E
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/ci-kind-ui-e2e
+    paths:
+      - ".github/workflows/kind-ui-e2e.yml"
+      - "deploy/ci/kind/**"
+      - "web/e2e/**"
+      - "web/playwright.config.js"
+      - "web/package.json"
+      - "web/yarn.lock"
+      - "web/src/NodeListPage.js"
+      - "web/src/backend/NodeBackend.js"
+      - "web/src/managedNodeRefreshPlan.js"
+      - "web/src/managedNodeTableLayout.js"
+      - "web/src/managedNodeUtils.js"
+      - "controllers/managed_node.go"
+      - "controllers/test_session.go"
+      - "object/managed_node.go"
+      - "object/ormer.go"
+      - "routers/router.go"
+      - "routers/test_routes.go"
+      - "main.go"
+      - "server/managed_node_deployer.go"
+      - "server/managed_node_security.go"
+      - "server/ssh_runner.go"
+      - "server/worker.go"
+      - ".dockerignore"
+
+jobs:
+  kind-ui-e2e:
+    name: Kind UI E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.0"
+          cache-dependency-path: ./go.mod
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: ./web/yarn.lock
+
+      - name: Build frontend assets
+        run: |
+          yarn install --frozen-lockfile
+          CI=false yarn build
+        working-directory: ./web
+
+      - name: Build Linux backend binary
+        run: |
+          mkdir -p dist
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/casos .
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+        working-directory: ./web
+
+      - name: Create kind cluster
+        uses: helm/kind-action@v1.14.0
+        with:
+          cluster_name: casos-ci
+          wait: 120s
+
+      - name: Build CasOS image
+        run: docker build -f deploy/ci/kind/Dockerfile -t casos-ci:kind .
+
+      - name: Load CasOS image into kind
+        run: kind load docker-image casos-ci:kind --name casos-ci
+
+      - name: Deploy CasOS into kind
+        run: kubectl apply -k deploy/ci/kind
+
+      - name: Wait for MySQL
+        run: kubectl wait --for=condition=available deployment/mysql -n casos-ci --timeout=5m
+
+      - name: Wait for CasOS
+        run: kubectl wait --for=condition=available deployment/casos -n casos-ci --timeout=10m
+
+      - name: Show deployment status
+        run: |
+          kubectl get pods -n casos-ci -o wide
+          kubectl get svc -n casos-ci
+
+      - name: Port-forward CasOS UI
+        shell: bash
+        run: |
+          set -euo pipefail
+          kubectl -n casos-ci port-forward service/casos 9000:9000 >"$RUNNER_TEMP/casos-port-forward.log" 2>&1 &
+          echo $! >"$RUNNER_TEMP/casos-port-forward.pid"
+          for _ in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:9000/api/get-built-in-site >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "timed out waiting for CasOS port-forward" >&2
+          cat "$RUNNER_TEMP/casos-port-forward.log" >&2 || true
+          exit 1
+
+      - name: Run Playwright managed-node UI test
+        env:
+          CI: "true"
+          PLAYWRIGHT_BASE_URL: http://127.0.0.1:9000
+        run: yarn test:e2e e2e/managed-node-preflight.spec.js
+        working-directory: ./web
+
+      - name: Collect Kubernetes diagnostics
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/k8s-debug"
+          kubectl get all -A -o wide >"$RUNNER_TEMP/k8s-debug/get-all.txt" || true
+          kubectl get events -A --sort-by=.lastTimestamp >"$RUNNER_TEMP/k8s-debug/events.txt" || true
+          kubectl describe deployment/mysql deployment/casos -n casos-ci >"$RUNNER_TEMP/k8s-debug/deployments.txt" || true
+          kubectl describe pods -n casos-ci >"$RUNNER_TEMP/k8s-debug/pods.txt" || true
+          kubectl logs deployment/mysql -n casos-ci >"$RUNNER_TEMP/k8s-debug/mysql.log" || true
+          kubectl logs deployment/casos -n casos-ci >"$RUNNER_TEMP/k8s-debug/casos.log" || true
+          if [[ -f "$RUNNER_TEMP/casos-port-forward.log" ]]; then
+            cp "$RUNNER_TEMP/casos-port-forward.log" "$RUNNER_TEMP/k8s-debug/port-forward.log"
+          fi
+          kind export logs "$RUNNER_TEMP/kind-logs" --name casos-ci || true
+
+      - name: Upload Playwright artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-kind-ui-e2e-${{ github.run_id }}
+          path: |
+            ./web/playwright-report
+            ./web/test-results
+          if-no-files-found: ignore
+
+      - name: Upload Kubernetes diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kind-ui-e2e-k8s-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/k8s-debug
+            ${{ runner.temp }}/kind-logs
+          if-no-files-found: ignore
+
+      - name: Stop port-forward
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f "$RUNNER_TEMP/casos-port-forward.pid" ]]; then
+            kill "$(cat "$RUNNER_TEMP/casos-port-forward.pid")" || true
+          fi
