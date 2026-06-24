@@ -13,7 +13,7 @@
 
 **Official Website: [https://www.casos.net](https://www.casos.net)**
 
-**Live Demo: [https://casos.casnode.com](https://casos.casnode.com)**
+**Live Demo: [https://demo.casos.net](https://demo.casos.net)**
 
 </div>
 
