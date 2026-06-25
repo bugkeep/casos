@@ -138,6 +138,21 @@ func fetchIndexFile(repoURL string) (*repo.IndexFile, error) {
 	if err := yaml.Unmarshal(data, &idx); err != nil {
 		return nil, fmt.Errorf("parse index: %w", err)
 	}
+	// Filter out entries with nil Metadata to prevent nil-pointer panics in
+	// Helm's SortEntries (which dereferences ChartVersion.Metadata.Version).
+	for name, versions := range idx.Entries {
+		filtered := versions[:0]
+		for _, v := range versions {
+			if v != nil && v.Metadata != nil {
+				filtered = append(filtered, v)
+			}
+		}
+		if len(filtered) == 0 {
+			delete(idx.Entries, name)
+		} else {
+			idx.Entries[name] = filtered
+		}
+	}
 	return &idx, nil
 }
 
