@@ -12,14 +12,15 @@ import (
 )
 
 type daemonSetSummary struct {
-	Namespace              string          `json:"namespace"`
-	Name                   string          `json:"name"`
-	Image                  string          `json:"image"`
-	DesiredNumberScheduled int32           `json:"desiredNumberScheduled"`
-	NumberReady            int32           `json:"numberReady"`
-	EnvVars                []envVarSummary `json:"envVars"`
-	CreatedAt              string          `json:"createdAt"`
-	ResourceVersion        string          `json:"resourceVersion"`
+	Namespace              string            `json:"namespace"`
+	Name                   string            `json:"name"`
+	Image                  string            `json:"image"`
+	DesiredNumberScheduled int32             `json:"desiredNumberScheduled"`
+	NumberReady            int32             `json:"numberReady"`
+	Selector               map[string]string `json:"selector"`
+	EnvVars                []envVarSummary   `json:"envVars"`
+	CreatedAt              string            `json:"createdAt"`
+	ResourceVersion        string            `json:"resourceVersion"`
 }
 
 func toDaemonSetSummary(ds appsv1.DaemonSet) daemonSetSummary {
@@ -27,12 +28,17 @@ func toDaemonSetSummary(ds appsv1.DaemonSet) daemonSetSummary {
 	if len(ds.Spec.Template.Spec.Containers) > 0 {
 		image = ds.Spec.Template.Spec.Containers[0].Image
 	}
+	selector := map[string]string{}
+	if ds.Spec.Selector != nil {
+		selector = ds.Spec.Selector.MatchLabels
+	}
 	return daemonSetSummary{
 		Namespace:              ds.Namespace,
 		Name:                   ds.Name,
 		Image:                  image,
 		DesiredNumberScheduled: ds.Status.DesiredNumberScheduled,
 		NumberReady:            ds.Status.NumberReady,
+		Selector:               selector,
 		EnvVars:                extractEnvVars(ds.Spec.Template.Spec.Containers),
 		CreatedAt:              ds.CreationTimestamp.UTC().Format("2006-01-02 15:04:05"),
 		ResourceVersion:        ds.ResourceVersion,

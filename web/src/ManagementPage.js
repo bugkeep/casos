@@ -52,6 +52,7 @@ import AdmissionPolicyPage from "./AdmissionPolicyPage";
 import AuthorizationPolicyPage from "./AuthorizationPolicyPage";
 import TrivyScanPage from "./TrivyScanPage";
 import LogSearchPage from "./LogSearchPage";
+import TopologyPage from "./TopologyPage";
 import i18next from "i18next";
 
 const {Header, Footer, Content, Sider} = Layout;
@@ -60,7 +61,7 @@ function getMenuParentKey(uri) {
   if (!uri) {return null;}
   if (uri === "/dashboard" || uri === "/app-store") {return null;}
   if (uri.includes("/pods") || uri.includes("/deployments") || uri.includes("/statefulsets") || uri.includes("/daemonsets") || uri.includes("/jobs") || uri.includes("/cronjobs")) {return "/workloads";}
-  if (uri.includes("/log-search")) {return "/observability";}
+  if (uri.includes("/log-search") || uri.includes("/topology")) {return "/observability";}
   if (uri.includes("/nodes") || uri.includes("/namespaces") || uri.includes("/serviceaccounts")) {return "/cluster";}
   if (uri.includes("/configmaps") || uri.includes("/secrets") || uri.includes("/pvcs") || uri.includes("/resourcequotas") || uri.includes("/hpas")) {return "/configuration";}
   if (uri.includes("/ingresses") || uri.includes("/networkpolicies")) {return "/networking";}
@@ -237,6 +238,7 @@ function ManagementPage(props) {
       ]),
       Setting.getItem(<Link to="/log-search">{i18next.t("general:Observability")}</Link>, "/observability", <FundViewOutlined />, [
         Setting.getItem(<Link to="/log-search">{i18next.t("general:Log Search")}</Link>, "/log-search"),
+        Setting.getItem(<Link to="/topology">{i18next.t("general:Resource Topology")}</Link>, "/topology"),
       ]),
       Setting.getItem(<Link to="/machines">{i18next.t("general:Infrastructure")}</Link>, "/infrastructure", <ClusterOutlined />, [
         Setting.getItem(<Link to="/machines">{i18next.t("general:Machines")}</Link>, "/machines"),
@@ -262,6 +264,7 @@ function ManagementPage(props) {
         <Route exact path="/cronjobs" render={(props) => <CronJobListPage {...props} />} />
         <Route exact path="/hpas" render={(props) => <HPAListPage {...props} />} />
         <Route exact path="/log-search" render={(props) => <LogSearchPage {...props} />} />
+        <Route exact path="/topology" render={(props) => <TopologyPage {...props} />} />
         <Route exact path="/nodes" render={(props) => <NodeListPage {...props} />} />
         <Route exact path="/namespaces" render={(props) => <NamespaceListPage {...props} />} />
         <Route exact path="/serviceaccounts" render={(props) => <ServiceAccountListPage {...props} />} />
