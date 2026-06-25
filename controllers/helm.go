@@ -221,12 +221,14 @@ func (c *ApiController) InstallHelmChartStream() {
 	if cfg == nil {
 		c.Ctx.ResponseWriter.ResponseWriter.Header().Set("Content-Type", "text/event-stream")
 		fmt.Fprintf(c.Ctx.ResponseWriter.ResponseWriter, "data: ERROR: cluster not ready\n\n")
+		c.StopRun()
 		return
 	}
 	var req helmInstallReq
 	if err := json.Unmarshal(c.Ctx.Input.RequestBody, &req); err != nil {
 		c.Ctx.ResponseWriter.ResponseWriter.Header().Set("Content-Type", "text/event-stream")
 		fmt.Fprintf(c.Ctx.ResponseWriter.ResponseWriter, "data: ERROR: %s\n\n", err.Error())
+		c.StopRun()
 		return
 	}
 
@@ -247,6 +249,7 @@ func (c *ApiController) InstallHelmChartStream() {
 			flusher.Flush()
 		}
 	}
+	c.StopRun()
 }
 
 // UpgradeHelmRelease upgrades an existing Helm release.

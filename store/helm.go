@@ -372,8 +372,7 @@ func InstallHelmChartStream(ctx context.Context, cfg *rest.Config, releaseName, 
 		install.ReleaseName = releaseName
 		install.Namespace = namespace
 		install.CreateNamespace = true
-		install.Wait = true
-		install.Timeout = 5 * time.Minute
+		install.Wait = false
 		if _, err = install.RunWithContext(ctx, helmChart, vals); err != nil {
 			if ctx.Err() != nil {
 				send("ABORTED")
