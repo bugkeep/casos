@@ -24,6 +24,7 @@
     "Content": "Content",
     "Content desc": "Page content configuration",
     "Cron Jobs": "Cron Jobs",
+    "Daemon Sets": "Daemon Sets",
     "Dashboard": "Dashboard",
     "Delete": "Delete",
     "Deployments": "Deployments",

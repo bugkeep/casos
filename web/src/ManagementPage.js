@@ -35,6 +35,7 @@ import ClusterRoleBindingListPage from "./ClusterRoleBindingListPage";
 import RoleBindingListPage from "./RoleBindingListPage";
 import PvcListPage from "./PvcListPage";
 import IngressListPage from "./IngressListPage";
+import DaemonSetListPage from "./DaemonSetListPage";
 import StatefulSetListPage from "./StatefulSetListPage";
 import CronJobListPage from "./CronJobListPage";
 import ResourceQuotaListPage from "./ResourceQuotaListPage";
@@ -57,7 +58,7 @@ const {Header, Footer, Content, Sider} = Layout;
 function getMenuParentKey(uri) {
   if (!uri) {return null;}
   if (uri === "/dashboard" || uri === "/app-store") {return null;}
-  if (uri.includes("/pods") || uri.includes("/deployments") || uri.includes("/statefulsets") || uri.includes("/cronjobs") || uri.includes("/hpas") || uri.includes("/log-search")) {return "/workloads";}
+  if (uri.includes("/pods") || uri.includes("/deployments") || uri.includes("/statefulsets") || uri.includes("/daemonsets") || uri.includes("/cronjobs") || uri.includes("/hpas") || uri.includes("/log-search")) {return "/workloads";}
   if (uri.includes("/nodes") || uri.includes("/namespaces") || uri.includes("/serviceaccounts")) {return "/cluster";}
   if (uri.includes("/configmaps") || uri.includes("/secrets") || uri.includes("/pvcs") || uri.includes("/resourcequotas")) {return "/configuration";}
   if (uri.includes("/ingresses") || uri.includes("/networkpolicies")) {return "/networking";}
@@ -203,6 +204,7 @@ function ManagementPage(props) {
       Setting.getItem(<Link to="/pods">{i18next.t("general:Workloads")}</Link>, "/workloads", <AppstoreOutlined />, [
         Setting.getItem(<Link to="/deployments">{i18next.t("general:Deployments")}</Link>, "/deployments"),
         Setting.getItem(<Link to="/statefulsets">{i18next.t("general:Stateful Sets")}</Link>, "/statefulsets"),
+        Setting.getItem(<Link to="/daemonsets">{i18next.t("general:Daemon Sets")}</Link>, "/daemonsets"),
         Setting.getItem(<Link to="/pods">{i18next.t("general:Pods")}</Link>, "/pods"),
         Setting.getItem(<Link to="/cronjobs">{i18next.t("general:Cron Jobs")}</Link>, "/cronjobs"),
         Setting.getItem(<Link to="/hpas">{i18next.t("general:Horizontal Pod Autoscaler")}</Link>, "/hpas"),
@@ -249,6 +251,7 @@ function ManagementPage(props) {
         <Route exact path="/app-store" render={(props) => <AppStorePage {...props} />} />
         <Route exact path="/deployments" render={(props) => <DeploymentListPage {...props} />} />
         <Route exact path="/statefulsets" render={(props) => <StatefulSetListPage {...props} />} />
+        <Route exact path="/daemonsets" render={(props) => <DaemonSetListPage {...props} />} />
         <Route exact path="/pods" render={(props) => <PodListPage {...props} />} />
         <Route exact path="/cronjobs" render={(props) => <CronJobListPage {...props} />} />
         <Route exact path="/hpas" render={(props) => <HPAListPage {...props} />} />

@@ -109,6 +109,12 @@ func InitAPI() {
 	beego.Router("/api/add-pvc", &controllers.ApiController{}, "POST:AddPersistentVolumeClaim")
 	beego.Router("/api/delete-pvc", &controllers.ApiController{}, "POST:DeletePersistentVolumeClaim")
 
+	beego.Router("/api/get-daemonsets", &controllers.ApiController{}, "GET:GetDaemonSets")
+	beego.Router("/api/get-daemonset", &controllers.ApiController{}, "GET:GetDaemonSet")
+	beego.Router("/api/add-daemonset", &controllers.ApiController{}, "POST:AddDaemonSet")
+	beego.Router("/api/update-daemonset", &controllers.ApiController{}, "POST:UpdateDaemonSet")
+	beego.Router("/api/delete-daemonset", &controllers.ApiController{}, "POST:DeleteDaemonSet")
+
 	beego.Router("/api/get-statefulsets", &controllers.ApiController{}, "GET:GetStatefulSets")
 	beego.Router("/api/get-statefulset", &controllers.ApiController{}, "GET:GetStatefulSet")
 	beego.Router("/api/add-statefulset", &controllers.ApiController{}, "POST:AddStatefulSet")
