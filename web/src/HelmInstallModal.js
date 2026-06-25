@@ -37,7 +37,11 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
       setValuesYAML("");
       HelmBackend.getHelmChartValues(chart.chartName, chart.repoURL, chart.version ?? "")
         .then(res => {
-          if (res.status === "ok") {setValuesYAML(res.data ?? "");}
+          if (res.status === "ok") {
+            setValuesYAML(res.data ?? "");
+          } else {
+            setError(res.msg);
+          }
         })
         .finally(() => setValuesLoading(false));
     }

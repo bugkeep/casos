@@ -23,6 +23,7 @@ import (
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 
 	"gopkg.in/yaml.v3"
+	sigsyaml "sigs.k8s.io/yaml"
 )
 
 // ---------- Types ----------
@@ -134,12 +135,14 @@ func fetchIndexFile(repoURL string) (*repo.IndexFile, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Use sigs.k8s.io/yaml (YAML→JSON→struct) so that embedded pointer fields
+	// like *chart.Metadata inside ChartVersion are properly allocated. Plain
+	// gopkg.in/yaml.v3 leaves those pointers nil, causing panics in SortEntries.
 	var idx repo.IndexFile
-	if err := yaml.Unmarshal(data, &idx); err != nil {
+	if err := sigsyaml.Unmarshal(data, &idx); err != nil {
 		return nil, fmt.Errorf("parse index: %w", err)
 	}
-	// Filter out entries with nil Metadata to prevent nil-pointer panics in
-	// Helm's SortEntries (which dereferences ChartVersion.Metadata.Version).
+	// Safety: drop any entry whose Metadata is still nil.
 	for name, versions := range idx.Entries {
 		filtered := versions[:0]
 		for _, v := range versions {
