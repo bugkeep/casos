@@ -7,6 +7,7 @@ import * as AccountBackend from "./backend/AccountBackend";
 import * as SiteBackend from "./backend/SiteBackend";
 import * as Conf from "./Conf";
 import {getShadcnThemeComponents, getShadcnThemeToken} from "./shadcnTheme";
+import Loading from "./common/Loading";
 import ManagementPage from "./ManagementPage";
 import AuthCallback from "./AuthCallback";
 import SigninPage from "./SigninPage";
@@ -15,6 +16,7 @@ class App extends Component {
   constructor(props) {
     super(props);
     Setting.initServerUrl();
+    Setting.initWebConfig();
     Setting.initCasdoorSdk(Conf.AuthConfig);
 
     let storageThemeAlgorithm = ["default"];
@@ -35,7 +37,7 @@ class App extends Component {
     };
   }
 
-  UNSAFE_componentWillMount() {
+  componentDidMount() {
     this.getAccount();
     this.loadSite();
   }
@@ -74,8 +76,13 @@ class App extends Component {
 
   getAccount() {
     AccountBackend.getAccount().then((res) => {
-      const account = res.data;
-      this.setState({account: account});
+      if (res.status === "ok") {
+        this.setState({account: res.data});
+      } else {
+        this.setState({account: null});
+      }
+    }).catch(() => {
+      this.setState({account: null});
     });
   }
 
@@ -106,7 +113,10 @@ class App extends Component {
   };
 
   renderHomeIfSignedIn(component) {
-    if (this.state.account !== null && this.state.account !== undefined) {
+    if (this.state.account === undefined) {
+      return <Loading type="page" />;
+    }
+    if (this.state.account !== null) {
       return <Redirect to="/" />;
     }
     return component;
@@ -117,7 +127,7 @@ class App extends Component {
       sessionStorage.setItem("from", window.location.pathname);
       return <Redirect to="/signin" />;
     } else if (this.state.account === undefined) {
-      return null;
+      return <Loading type="page" />;
     }
     return component;
   }

@@ -12,15 +12,16 @@ import (
 )
 
 type statefulSetSummary struct {
-	Namespace       string          `json:"namespace"`
-	Name            string          `json:"name"`
-	ServiceName     string          `json:"serviceName"`
-	Replicas        int32           `json:"replicas"`
-	ReadyReplicas   int32           `json:"readyReplicas"`
-	Image           string          `json:"image"`
-	EnvVars         []envVarSummary `json:"envVars"`
-	CreatedAt       string          `json:"createdAt"`
-	ResourceVersion string          `json:"resourceVersion"`
+	Namespace       string            `json:"namespace"`
+	Name            string            `json:"name"`
+	ServiceName     string            `json:"serviceName"`
+	Replicas        int32             `json:"replicas"`
+	ReadyReplicas   int32             `json:"readyReplicas"`
+	Image           string            `json:"image"`
+	Selector        map[string]string `json:"selector"`
+	EnvVars         []envVarSummary   `json:"envVars"`
+	CreatedAt       string            `json:"createdAt"`
+	ResourceVersion string            `json:"resourceVersion"`
 }
 
 func toStatefulSetSummary(sts appsv1.StatefulSet) statefulSetSummary {
@@ -32,6 +33,10 @@ func toStatefulSetSummary(sts appsv1.StatefulSet) statefulSetSummary {
 	if sts.Spec.Replicas != nil {
 		replicas = *sts.Spec.Replicas
 	}
+	selector := map[string]string{}
+	if sts.Spec.Selector != nil {
+		selector = sts.Spec.Selector.MatchLabels
+	}
 	return statefulSetSummary{
 		Namespace:       sts.Namespace,
 		Name:            sts.Name,
@@ -39,6 +44,7 @@ func toStatefulSetSummary(sts appsv1.StatefulSet) statefulSetSummary {
 		Replicas:        replicas,
 		ReadyReplicas:   sts.Status.ReadyReplicas,
 		Image:           image,
+		Selector:        selector,
 		EnvVars:         extractEnvVars(sts.Spec.Template.Spec.Containers),
 		CreatedAt:       sts.CreationTimestamp.UTC().Format("2006-01-02 15:04:05"),
 		ResourceVersion: sts.ResourceVersion,

@@ -110,12 +110,39 @@ func IsDemoMode() bool {
 	return strings.ToLower(GetConfigString("isDemoMode")) == "true"
 }
 
+func IsE2ETestMode() bool {
+	return GetConfigBool("e2eTestMode") && !IsProductionMode()
+}
+
+func IsProductionMode() bool {
+	runmode := strings.ToLower(GetConfigString("runmode"))
+	return runmode == "prod" || runmode == "production"
+}
+
 func GetConfigBatchSize() int {
 	res, err := strconv.Atoi(GetConfigString("batchSize"))
 	if err != nil {
 		res = 100
 	}
 	return res
+}
+
+type WebConfig struct {
+	AuthConfig struct {
+		ServerURL        string `json:"serverUrl"`
+		ClientID         string `json:"clientId"`
+		AppName          string `json:"appName"`
+		OrganizationName string `json:"organizationName"`
+	} `json:"authConfig"`
+}
+
+func GetWebConfig() *WebConfig {
+	config := &WebConfig{}
+	config.AuthConfig.ServerURL = GetConfigString("casdoorEndpoint")
+	config.AuthConfig.ClientID = GetConfigString("clientId")
+	config.AuthConfig.AppName = GetConfigString("casdoorApplication")
+	config.AuthConfig.OrganizationName = GetConfigString("casdoorOrganization")
+	return config
 }
 
 func GetConfigRealDataSourceName(driverName string) string {
