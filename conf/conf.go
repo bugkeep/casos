@@ -110,6 +110,15 @@ func IsDemoMode() bool {
 	return strings.ToLower(GetConfigString("isDemoMode")) == "true"
 }
 
+func IsE2ETestMode() bool {
+	return GetConfigBool("e2eTestMode") && !IsProductionMode()
+}
+
+func IsProductionMode() bool {
+	runmode := strings.ToLower(GetConfigString("runmode"))
+	return runmode == "prod" || runmode == "production"
+}
+
 func GetConfigBatchSize() int {
 	res, err := strconv.Atoi(GetConfigString("batchSize"))
 	if err != nil {
