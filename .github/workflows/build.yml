@@ -7,6 +7,8 @@ on:
   push:
     branches:
       - master
+      - feat/ci-ui-tests-fork-experiment
+      - feat/ci-ui-tests-failure-fork-experiment
   pull_request:
 
 jobs:
