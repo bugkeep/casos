@@ -1,206 +1,372 @@
-import React, {useEffect, useState} from "react";
-import {Alert, Button, Card, Col, Input, Row, Spin, Tag, Typography} from "antd";
-import {ReloadOutlined, RocketOutlined} from "@ant-design/icons";
+import React, {useCallback, useEffect, useRef, useState} from "react";
+import {Alert, Button, Card, Col, Divider, Form, Input, Modal, Popconfirm, Row, Spin, Tag, Tooltip, Typography} from "antd";
+import {DeleteOutlined, PlusOutlined, ReloadOutlined, RocketOutlined, ShopOutlined} from "@ant-design/icons";
 import {useTranslation} from "react-i18next";
-import * as AppBackend from "./backend/AppBackend";
-import DeployAppModal from "./DeployAppModal";
+import {Link} from "react-router-dom";
+import * as HelmBackend from "./backend/HelmBackend";
+import HelmInstallModal from "./HelmInstallModal";
 
-const {Title, Paragraph, Text} = Typography;
+const {Text, Paragraph, Title} = Typography;
 
-function AppCard({template, onDeploy}) {
+const PRESET_REPOS = [
+  {name: "ArtifactHub", url: null, desc: "artifacthub.io — 8 000+ charts"},
+  {name: "Bitnami", url: "https://charts.bitnami.com/bitnami", desc: "~200 curated charts"},
+  {name: "Rancher", url: "https://charts.rancher.io", desc: "Rancher Charts"},
+  {name: "ingress-nginx", url: "https://kubernetes.github.io/ingress-nginx", desc: "Official ingress-nginx"},
+];
+
+function ChartIcon({icon, name, size = 40}) {
+  const [err, setErr] = useState(false);
+  if (!err && icon) {
+    return (
+      <img
+        src={icon}
+        alt={name}
+        style={{width: size, height: size, objectFit: "contain"}}
+        onError={() => setErr(true)}
+      />
+    );
+  }
+  return (
+    <div style={{
+      width: size, height: size,
+      background: "#f0f0f0", borderRadius: 8,
+      display: "flex", alignItems: "center", justifyContent: "center",
+      fontSize: 18, fontWeight: 600, color: "#888",
+    }}>
+      {(name || "?")[0].toUpperCase()}
+    </div>
+  );
+}
+
+function ChartCard({chart, onInstall}) {
   const {t} = useTranslation();
-  const [imgErr, setImgErr] = useState(false);
-  const category = template.categories?.[0] ?? "";
-
   return (
     <Card
       hoverable
-      styles={{body: {padding: "16px"}}}
-      style={{height: "100%", display: "flex", flexDirection: "column"}}
+      size="small"
+      style={{height: "100%"}}
+      styles={{body: {padding: 12}}}
     >
-      <div style={{display: "flex", alignItems: "flex-start", gap: 12}}>
-        <div style={{
-          width: 48, height: 48, flexShrink: 0,
-          display: "flex", alignItems: "center", justifyContent: "center",
-          borderRadius: 10, background: "#f5f5f5", overflow: "hidden",
-        }}>
-          {!imgErr && template.icon ? (
-            <img
-              src={template.icon}
-              alt={template.title}
-              style={{width: 36, height: 36, objectFit: "contain"}}
-              onError={() => setImgErr(true)}
-            />
-          ) : (
-            <Text strong style={{fontSize: 20}}>{(template.title || "?")[0]}</Text>
-          )}
-        </div>
+      <div style={{display: "flex", gap: 10, alignItems: "flex-start"}}>
+        <ChartIcon icon={chart.icon || chart.logo_url} name={chart.display_name || chart.name} />
         <div style={{flex: 1, minWidth: 0}}>
-          <div style={{display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap"}}>
-            <Text strong style={{fontSize: 15}}>{template.title}</Text>
-            {category && <Tag style={{margin: 0}}>{category}</Tag>}
-          </div>
+          <Text strong style={{fontSize: 13}}>{chart.display_name || chart.name}</Text>
+          {chart.version && (
+            <Tag style={{marginLeft: 6, fontSize: 11}}>{chart.version}</Tag>
+          )}
           <Paragraph
             ellipsis={{rows: 2}}
-            style={{marginTop: 4, marginBottom: 0, fontSize: 13, color: "rgba(0,0,0,0.55)"}}
+            style={{marginTop: 3, marginBottom: 6, fontSize: 12, color: "rgba(0,0,0,0.5)"}}
           >
-            {template.description || ""}
+            {chart.description || ""}
           </Paragraph>
+          <div style={{display: "flex", justifyContent: "flex-end"}}>
+            <Button type="primary" size="small" icon={<RocketOutlined />} onClick={() => onInstall(chart)}>
+              {t("helm:Install")}
+            </Button>
+          </div>
         </div>
-      </div>
-
-      {template.ports?.length > 0 && (
-        <div style={{marginTop: 10, display: "flex", gap: 4, flexWrap: "wrap"}}>
-          {template.ports.map(p => (
-            <Tag key={p} style={{fontSize: 11}}>:{p}</Tag>
-          ))}
-        </div>
-      )}
-
-      <div style={{marginTop: 12, textAlign: "right"}}>
-        <Button type="primary" size="small" icon={<RocketOutlined />} onClick={() => onDeploy(template)}>
-          {t("appStore:Deploy")}
-        </Button>
       </div>
     </Card>
   );
 }
 
-function AppStorePage() {
+function AddRepoModal({open, onClose, onAdded}) {
   const {t} = useTranslation();
-  const [templates, setTemplates] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [search, setSearch] = useState("");
-  const [activeCategory, setActiveCategory] = useState(null);
-  const [deployTarget, setDeployTarget] = useState(null);
+  const [form] = Form.useForm();
+  const [loading, setLoading] = useState(false);
 
-  const fetchTemplates = () => {
-    setLoading(true);
-    setError(null);
-    AppBackend.getAppTemplates()
-      .then(res => {
-        if (res.status === "ok") {
-          setTemplates(res.data ?? []);
-        } else {
-          setError(res.msg);
-        }
-      })
-      .catch(e => setError(e.message))
-      .finally(() => setLoading(false));
-  };
-
-  useEffect(() => {
-    fetchTemplates();
-  }, []);
-
-  const allCategories = [...new Set(
-    templates.flatMap(t => t.categories ?? []).filter(Boolean)
-  )].sort();
-
-  const filtered = templates.filter(tpl => {
-    const matchSearch = !search
-      || tpl.title?.toLowerCase().includes(search.toLowerCase())
-      || tpl.description?.toLowerCase().includes(search.toLowerCase())
-      || tpl.name?.toLowerCase().includes(search.toLowerCase());
-    const matchCat = !activeCategory || (tpl.categories ?? []).includes(activeCategory);
-    return matchSearch && matchCat;
-  });
+  function handleOk() {
+    form.validateFields().then(values => {
+      setLoading(true);
+      HelmBackend.addHelmRepo(values)
+        .then(res => {
+          if (res.status === "ok") {
+            form.resetFields();
+            onAdded();
+            onClose();
+          } else {
+            Modal.error({title: t("helm:Add repo failed"), content: res.msg});
+          }
+        })
+        .finally(() => setLoading(false));
+    });
+  }
 
   return (
-    <div style={{padding: "24px"}}>
-      <div style={{marginBottom: 20}}>
-        <Title level={4} style={{marginBottom: 4}}>{t("general:App Store")}</Title>
-        <Paragraph style={{marginBottom: 0, color: "rgba(0,0,0,0.55)"}}>
-          {t("appStore:App Store desc")}
-          {!loading && templates.length > 0 && (
-            <span> {t("appStore:app count", {count: templates.length})}</span>
-          )}
-        </Paragraph>
-      </div>
+    <Modal
+      title={t("helm:Add Helm Repo")}
+      open={open}
+      onOk={handleOk}
+      onCancel={onClose}
+      confirmLoading={loading}
+      destroyOnHidden
+    >
+      <Form form={form} layout="vertical">
+        <Form.Item name="name" label={t("helm:Repo name")} rules={[{required: true}]}>
+          <Input placeholder="my-charts" />
+        </Form.Item>
+        <Form.Item name="url" label={t("helm:Repo URL")} rules={[{required: true, type: "url"}]}>
+          <Input placeholder="https://example.com/charts" />
+        </Form.Item>
+      </Form>
+    </Modal>
+  );
+}
 
-      {error && (
-        <Alert
-          type="error"
-          message={t("appStore:Load failed")}
-          description={error}
-          showIcon
-          style={{marginBottom: 16}}
-          action={
-            <Button size="small" icon={<ReloadOutlined />} onClick={fetchTemplates}>
-              {t("appStore:Retry")}
-            </Button>
-          }
-        />
-      )}
+export default function AppStorePage() {
+  const {t} = useTranslation();
+  const [source, setSource] = useState(PRESET_REPOS[0]);
+  const [query, setQuery] = useState("");
+  const [charts, setCharts] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+  const [customRepos, setCustomRepos] = useState([]);
+  const [addRepoOpen, setAddRepoOpen] = useState(false);
+  const [installTarget, setInstallTarget] = useState(null);
 
-      {!error && (
-        <div style={{display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap", alignItems: "center"}}>
-          <Input.Search
-            placeholder={t("appStore:Search placeholder")}
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            style={{width: 220}}
-            allowClear
-          />
-          {allCategories.length > 0 && (
-            <div style={{display: "flex", gap: 6, flexWrap: "wrap"}}>
-              <Tag
-                color={!activeCategory ? "blue" : "default"}
-                style={{cursor: "pointer", padding: "2px 10px"}}
-                onClick={() => setActiveCategory(null)}
-              >
-                {t("appStore:All")}
-              </Tag>
-              {allCategories.map(cat => (
-                <Tag
-                  key={cat}
-                  color={activeCategory === cat ? "blue" : "default"}
-                  style={{cursor: "pointer", padding: "2px 10px"}}
-                  onClick={() => setActiveCategory(activeCategory === cat ? null : cat)}
-                >
-                  {cat}
-                </Tag>
-              ))}
+  const queryRef = useRef(query);
+  const sourceRef = useRef(source);
+  queryRef.current = query;
+  sourceRef.current = source;
+
+  const loadCustomRepos = () => {
+    HelmBackend.getHelmRepos().then(res => {
+      if (res.status === "ok") {setCustomRepos(res.data ?? []);}
+    });
+  };
+
+  useEffect(() => {loadCustomRepos();}, []);
+
+  const fetchCharts = useCallback((s, q, p) => {
+    setLoading(true);
+    setError(null);
+
+    const isAH = !s.url;
+    const promise = isAH
+      ? HelmBackend.searchArtifactHub(q, p)
+      : HelmBackend.getRepoCharts(s.url);
+
+    promise.then(res => {
+      if (res.status !== "ok") {
+        setError(res.msg);
+        return;
+      }
+      const data = res.data ?? [];
+      if (isAH) {
+        setCharts(p === 1 ? data : prev => [...prev, ...data]);
+        setHasMore(data.length === 20);
+      } else {
+        setCharts(data);
+        setHasMore(false);
+      }
+    }).catch(e => setError(e.message)).finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    setCharts([]);
+    setPage(1);
+    setHasMore(true);
+    fetchCharts(source, query, 1);
+  }, [source, query, fetchCharts]);
+
+  useEffect(() => {
+    if (page > 1) {fetchCharts(source, query, page);}
+  }, [page, fetchCharts, source, query]);
+
+  const isAH = !source.url;
+
+  const filteredCharts = isAH ? charts : charts.filter(c => {
+    const q = query.toLowerCase();
+    return !q || (c.name || "").toLowerCase().includes(q) || (c.description || "").toLowerCase().includes(q);
+  });
+
+  const getChartInstallInfo = (chart) => {
+    if (isAH) {
+      return {
+        chartName: chart.name,
+        repoURL: chart.repository?.url ?? "",
+        version: chart.version ?? "",
+        displayName: chart.display_name || chart.name,
+        icon: chart.logo_image_id
+          ? `https://artifacthub.io/image/${chart.logo_image_id}`
+          : null,
+      };
+    }
+    return {
+      chartName: chart.name,
+      repoURL: source.url,
+      version: chart.version ?? "",
+      displayName: chart.name,
+      icon: chart.icon,
+    };
+  };
+
+  const deleteCustomRepo = (id) => {
+    HelmBackend.deleteHelmRepo(id).then(res => {
+      if (res.status === "ok") {
+        loadCustomRepos();
+        if (source.id === id) {setSource(PRESET_REPOS[0]);}
+      }
+    });
+  };
+
+  return (
+    <div style={{display: "flex", height: "100%", overflow: "hidden"}}>
+      {/* Sidebar */}
+      <div style={{
+        width: 200, flexShrink: 0, borderRight: "1px solid rgba(0,0,0,0.06)",
+        padding: "16px 0", overflowY: "auto", background: "#fafafa",
+      }}>
+        <div style={{padding: "0 12px 8px", fontSize: 11, fontWeight: 600, color: "rgba(0,0,0,0.4)", textTransform: "uppercase", letterSpacing: 1}}>
+          {t("helm:Sources")}
+        </div>
+        {PRESET_REPOS.map(repo => (
+          <Tooltip key={repo.name} title={repo.desc} placement="right">
+            <div
+              onClick={() => {setSource(repo); setQuery("");}}
+              style={{
+                padding: "7px 12px", cursor: "pointer", fontSize: 13,
+                borderRadius: 4, margin: "1px 8px",
+                background: source.name === repo.name ? "#e6f4ff" : "transparent",
+                color: source.name === repo.name ? "#1677ff" : "inherit",
+                fontWeight: source.name === repo.name ? 500 : 400,
+              }}
+            >
+              {repo.name}
             </div>
-          )}
-          <Button size="small" icon={<ReloadOutlined />} onClick={fetchTemplates} loading={loading}>
-            {t("appStore:Refresh")}
+          </Tooltip>
+        ))}
+
+        {customRepos.length > 0 && (
+          <>
+            <Divider style={{margin: "8px 0"}} />
+            <div style={{padding: "0 12px 6px", fontSize: 11, fontWeight: 600, color: "rgba(0,0,0,0.4)", textTransform: "uppercase", letterSpacing: 1}}>
+              {t("helm:My Repos")}
+            </div>
+            {customRepos.map(repo => (
+              <div
+                key={repo.id}
+                style={{
+                  display: "flex", alignItems: "center", padding: "7px 12px",
+                  margin: "1px 8px", borderRadius: 4, cursor: "pointer",
+                  background: source.id === repo.id ? "#e6f4ff" : "transparent",
+                  color: source.id === repo.id ? "#1677ff" : "inherit",
+                }}
+              >
+                <div
+                  style={{flex: 1, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"}}
+                  onClick={() => {setSource({...repo, url: repo.url}); setQuery("");}}
+                >
+                  {repo.name}
+                </div>
+                <Popconfirm
+                  title={t("helm:Delete repo?")}
+                  onConfirm={() => deleteCustomRepo(repo.id)}
+                  okText={t("general:Delete")}
+                  cancelText={t("general:Cancel")}
+                >
+                  <DeleteOutlined style={{fontSize: 11, color: "rgba(0,0,0,0.35)"}} onClick={e => e.stopPropagation()} />
+                </Popconfirm>
+              </div>
+            ))}
+          </>
+        )}
+
+        <div style={{padding: "8px 12px"}}>
+          <Button
+            size="small"
+            icon={<PlusOutlined />}
+            type="dashed"
+            block
+            onClick={() => setAddRepoOpen(true)}
+          >
+            {t("helm:Add Repo")}
           </Button>
         </div>
-      )}
+      </div>
 
-      {loading ? (
-        <div style={{textAlign: "center", padding: "80px 0"}}>
-          <Spin size="large" />
-          <div style={{marginTop: 16, color: "rgba(0,0,0,0.45)"}}>
-            {t("appStore:Loading")}
-          </div>
+      {/* Main */}
+      <div style={{flex: 1, padding: 20, overflowY: "auto"}}>
+        <div style={{display: "flex", alignItems: "center", gap: 12, marginBottom: 16}}>
+          <ShopOutlined style={{fontSize: 20}} />
+          <Title level={4} style={{margin: 0}}>{source.name}</Title>
+          <div style={{flex: 1}} />
+          <Link to="/helm-releases">
+            <Button size="small">{t("helm:My Releases")} →</Button>
+          </Link>
         </div>
-      ) : (
-        <Row gutter={[16, 16]}>
-          {filtered.map(tpl => (
-            <Col key={tpl.name} xs={24} sm={12} lg={8} xl={6}>
-              <AppCard template={tpl} onDeploy={t2 => setDeployTarget(t2)} />
-            </Col>
-          ))}
-          {filtered.length === 0 && (
-            <Col span={24}>
-              <Paragraph style={{color: "rgba(0,0,0,0.4)", textAlign: "center", padding: "48px 0"}}>
-                {t("appStore:No results")}
-              </Paragraph>
-            </Col>
-          )}
-        </Row>
-      )}
 
-      <DeployAppModal
-        open={!!deployTarget}
-        template={deployTarget}
-        onClose={() => setDeployTarget(null)}
+        <div style={{display: "flex", gap: 8, marginBottom: 16}}>
+          <Input.Search
+            placeholder={t("helm:Search charts")}
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            onSearch={v => setQuery(v)}
+            style={{width: 280}}
+            allowClear
+          />
+          <Button icon={<ReloadOutlined />} onClick={() => {setCharts([]); setPage(1); fetchCharts(source, query, 1);}} loading={loading}>
+            {t("general:Refresh")}
+          </Button>
+        </div>
+
+        {error && (
+          <Alert type="error" message={error} showIcon style={{marginBottom: 16}} />
+        )}
+
+        <Row gutter={[12, 12]}>
+          {filteredCharts.map((chart, i) => {
+            const info = getChartInstallInfo(chart);
+            return (
+              <Col key={`${info.chartName}-${i}`} xs={24} sm={12} lg={8} xl={6}>
+                <ChartCard
+                  chart={{
+                    ...chart,
+                    icon: info.icon || chart.icon,
+                    display_name: info.displayName,
+                  }}
+                  onInstall={() => setInstallTarget(info)}
+                />
+              </Col>
+            );
+          })}
+        </Row>
+
+        {loading && (
+          <div style={{textAlign: "center", padding: "40px 0"}}>
+            <Spin />
+          </div>
+        )}
+
+        {!loading && isAH && hasMore && filteredCharts.length > 0 && (
+          <div style={{textAlign: "center", marginTop: 20}}>
+            <Button onClick={() => setPage(p => p + 1)}>{t("helm:Load more")}</Button>
+          </div>
+        )}
+
+        {!loading && filteredCharts.length === 0 && !error && (
+          <div style={{textAlign: "center", color: "rgba(0,0,0,0.4)", padding: "60px 0"}}>
+            {t("helm:No charts found")}
+          </div>
+        )}
+      </div>
+
+      <AddRepoModal
+        open={addRepoOpen}
+        onClose={() => setAddRepoOpen(false)}
+        onAdded={loadCustomRepos}
+      />
+
+      <HelmInstallModal
+        open={!!installTarget}
+        chart={installTarget}
+        onClose={() => setInstallTarget(null)}
+        onInstalled={() => setInstallTarget(null)}
       />
     </div>
   );
 }
-
-export default AppStorePage;

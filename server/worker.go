@@ -15,6 +15,21 @@ import (
 	"time"
 )
 
+// tryParsePrivateKey attempts RSA (PKCS#1) first, then falls back to PKCS#8
+// and EC, matching whatever format ensureCerts wrote.
+func tryParsePrivateKey(der []byte) (interface{}, error) {
+	if k, err := x509.ParsePKCS1PrivateKey(der); err == nil {
+		return k, nil
+	}
+	if k, err := x509.ParsePKCS8PrivateKey(der); err == nil {
+		return k, nil
+	}
+	if k, err := x509.ParseECPrivateKey(der); err == nil {
+		return k, nil
+	}
+	return nil, fmt.Errorf("unsupported private key format")
+}
+
 // WorkerKubeconfig holds the kubeconfig content and the node cert files for a
 // worker node, all as PEM strings (base64-encoded inside the kubeconfig).
 type WorkerKubeconfig struct {
@@ -28,6 +43,13 @@ type WorkerKubeconfig struct {
 //
 // The returned kubeconfig is intended for kubelet's --kubeconfig flag.
 func GenerateWorkerKubeconfig(cfg Config, nodeName string) (*WorkerKubeconfig, error) {
+	apiserverURL := fmt.Sprintf("https://127.0.0.1:%d", cfg.ApiserverPort)
+	return GenerateWorkerKubeconfigForServer(cfg, nodeName, apiserverURL)
+}
+
+// GenerateWorkerKubeconfigForServer signs a node client certificate and embeds
+// the provided apiserver URL as the cluster server endpoint.
+func GenerateWorkerKubeconfigForServer(cfg Config, nodeName, apiserverURL string) (*WorkerKubeconfig, error) {
 	certDir := filepath.Join(cfg.DataDir, "tls")
 
 	// Load cluster CA.
@@ -41,7 +63,7 @@ func GenerateWorkerKubeconfig(cfg Config, nodeName string) (*WorkerKubeconfig, e
 	}
 
 	block, _ := pem.Decode(caKeyPEM)
-	caKey, err := x509.ParseECPrivateKey(block.Bytes)
+	caKeyRaw, err := tryParsePrivateKey(block.Bytes)
 	if err != nil {
 		return nil, fmt.Errorf("parse ca.key: %w", err)
 	}
@@ -67,7 +89,7 @@ func GenerateWorkerKubeconfig(cfg Config, nodeName string) (*WorkerKubeconfig, e
 		KeyUsage:    x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
 		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
 	}
-	nodeCertDER, err := x509.CreateCertificate(rand.Reader, nodeTemplate, caCert, &nodeKey.PublicKey, caKey)
+	nodeCertDER, err := x509.CreateCertificate(rand.Reader, nodeTemplate, caCert, &nodeKey.PublicKey, caKeyRaw)
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +102,6 @@ func GenerateWorkerKubeconfig(cfg Config, nodeName string) (*WorkerKubeconfig, e
 	nodeCertPEM := pemEncode("CERTIFICATE", nodeCertDER)
 	nodeKeyPEM := pemEncode("EC PRIVATE KEY", nodeKeyDER)
 
-	apiserverURL := fmt.Sprintf("https://127.0.0.1:%d", cfg.ApiserverPort)
 	kubeconfig := fmt.Sprintf(`apiVersion: v1
 kind: Config
 preferences: {}

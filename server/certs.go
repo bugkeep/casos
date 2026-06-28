@@ -31,7 +31,19 @@ func ensureCerts(dir, ip, advertiseIP string) error {
 	kubeletKeyFile := filepath.Join(dir, "apiserver-kubelet-client.key")
 	kubeletCrtFile := filepath.Join(dir, "apiserver-kubelet-client.crt")
 
-	var caKey *ecdsa.PrivateKey
+	// kube-apiserver fails ECDSA signature verification on self-signed ECDSA CAs.
+	// If the existing CA key is ECDSA, remove all derived certs so they are
+	// regenerated as RSA below.
+	if fileExists(caKeyFile) && caKeyIsECDSA(caKeyFile) {
+		for _, f := range []string{
+			caKeyFile, caCertFile, srvKeyFile, srvCrtFile,
+			admKeyFile, admCrtFile, kubeletKeyFile, kubeletCrtFile,
+		} {
+			_ = os.Remove(f)
+		}
+	}
+
+	var caKey *rsa.PrivateKey
 	var caCert *x509.Certificate
 	if fileExists(caCertFile) && fileExists(caKeyFile) {
 		keyPEM, err := os.ReadFile(caKeyFile)
@@ -39,7 +51,7 @@ func ensureCerts(dir, ip, advertiseIP string) error {
 			return err
 		}
 		block, _ := pem.Decode(keyPEM)
-		caKey, err = x509.ParseECPrivateKey(block.Bytes)
+		caKey, err = x509.ParsePKCS1PrivateKey(block.Bytes)
 		if err != nil {
 			return err
 		}
@@ -54,7 +66,7 @@ func ensureCerts(dir, ip, advertiseIP string) error {
 		}
 	} else {
 		var err error
-		caKey, err = ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		caKey, err = rsa.GenerateKey(rand.Reader, 4096)
 		if err != nil {
 			return err
 		}
@@ -74,8 +86,8 @@ func ensureCerts(dir, ip, advertiseIP string) error {
 		if err := writePEM(caCertFile, "CERTIFICATE", caDER); err != nil {
 			return err
 		}
-		caKeyDER, _ := x509.MarshalECPrivateKey(caKey)
-		if err := writePEM(caKeyFile, "EC PRIVATE KEY", caKeyDER); err != nil {
+		caKeyDER := x509.MarshalPKCS1PrivateKey(caKey)
+		if err := writePEM(caKeyFile, "RSA PRIVATE KEY", caKeyDER); err != nil {
 			return err
 		}
 		caCert, _ = x509.ParseCertificate(caDER)
@@ -185,7 +197,7 @@ func EnsureWebhookCert(certDir string) error {
 		return fmt.Errorf("read ca.key: %w", err)
 	}
 	block, _ := pem.Decode(caKeyPEM)
-	caKey, err := x509.ParseECPrivateKey(block.Bytes)
+	caKey, err := x509.ParsePKCS1PrivateKey(block.Bytes)
 	if err != nil {
 		return fmt.Errorf("parse ca key: %w", err)
 	}
@@ -199,7 +211,7 @@ func EnsureWebhookCert(certDir string) error {
 		return fmt.Errorf("parse ca cert: %w", err)
 	}
 
-	whKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	whKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return err
 	}
@@ -219,8 +231,8 @@ func EnsureWebhookCert(certDir string) error {
 	if err := writePEM(certFile, "CERTIFICATE", whDER); err != nil {
 		return err
 	}
-	whKeyDER, _ := x509.MarshalECPrivateKey(whKey)
-	return writePEM(keyFile, "EC PRIVATE KEY", whKeyDER)
+	whKeyDER := x509.MarshalPKCS1PrivateKey(whKey)
+	return writePEM(keyFile, "RSA PRIVATE KEY", whKeyDER)
 }
 
 // EnsureAuthzWebhookConfig writes (once) the kubeconfig that the apiserver
@@ -419,6 +431,18 @@ func webhookCertValidUnderCA(certFile, caFile string) bool {
 	}
 	_, err = cert.Verify(x509.VerifyOptions{Roots: pool, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}})
 	return err == nil
+}
+
+// caKeyIsECDSA reports whether the PEM key file at path contains an EC private
+// key. Used to detect legacy ECDSA CAs that must be replaced with RSA to avoid
+// kube-apiserver x509 ECDSA verification failures on self-signed CA certs.
+func caKeyIsECDSA(path string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	block, _ := pem.Decode(data)
+	return block != nil && block.Type == "EC PRIVATE KEY"
 }
 
 // allInterfaceIPs returns all unicast IP addresses assigned to local network
