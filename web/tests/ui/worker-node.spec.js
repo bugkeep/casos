@@ -359,3 +359,8 @@ workerNodeTest("starts worker node repair from the machines page", async({page, 
   await createMachineFromUi(page, machineName, createdMachines);
   await startWorkerNodeRepair(page, machineName, E2E_APISERVER_URL);
 });
+
+workerNodeTest("intentionally fails to verify UI test failure reporting", async({page}) => {
+  await page.goto("/machines");
+  await expect(page.getByText("INTENTIONAL_UI_TEST_FAILURE_MARKER", {exact: true})).toBeVisible({timeout: 1000});
+});
