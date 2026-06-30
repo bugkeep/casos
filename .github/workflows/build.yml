@@ -50,7 +50,7 @@ jobs:
     permissions:
       contents: read
       actions: write
-    timeout-minutes: 30
+    timeout-minutes: 60
     services:
       mysql:
         image: mysql:8
@@ -113,31 +113,110 @@ jobs:
           else
             git diff-tree --no-commit-id --name-only -r HEAD > web/ui-changed-files.txt
           fi
-          node web/scripts/select-ui-tests.js web/ui-changed-files.txt > web/ui-regression-tests.txt
+          node web/scripts/select-ui-tests.js --split web/ui-changed-files.txt web/ui-regression-tests.txt web/ui-standard-regression-tests.txt web/ui-app-store-access-tests.txt
           echo "Changed files considered for UI regression:"
           cat web/ui-changed-files.txt
           echo "Selected UI regression tests:"
           if [[ -s web/ui-regression-tests.txt ]]; then
             cat web/ui-regression-tests.txt
-            echo "has_tests=true" >> "$GITHUB_OUTPUT"
           else
             echo "(none; fixed smoke already ran)"
-            echo "has_tests=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Standard UI regression tests:"
+          if [[ -s web/ui-standard-regression-tests.txt ]]; then
+            cat web/ui-standard-regression-tests.txt
+            echo "has_standard_tests=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "(none)"
+            echo "has_standard_tests=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "App Store Access URL regression tests:"
+          if [[ -s web/ui-app-store-access-tests.txt ]]; then
+            cat web/ui-app-store-access-tests.txt
+            echo "has_app_store_access_tests=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "(none)"
+            echo "has_app_store_access_tests=false" >> "$GITHUB_OUTPUT"
           fi
       - name: Run UI regression tests
-        if: steps.ui-regression-tests.outputs.has_tests == 'true'
+        if: steps.ui-regression-tests.outputs.has_standard_tests == 'true'
         working-directory: ./web
         shell: bash
         run: |
           set -o pipefail
-          mapfile -t ui_test_files < ui-regression-tests.txt
+          mapfile -t ui_test_files < ui-standard-regression-tests.txt
           yarn run ui:test:regression -- "${ui_test_files[@]}" 2>&1 | tee ui-test.log
       - name: Skip UI regression tests
-        if: steps.ui-regression-tests.outputs.has_tests != 'true'
+        if: steps.ui-regression-tests.outputs.has_standard_tests != 'true'
         working-directory: ./web
         shell: bash
         run: |
-          echo "No changed-path UI regression tests selected; fixed smoke already ran." | tee ui-test.log
+          echo "No standard changed-path UI regression tests selected; fixed smoke already ran." | tee ui-test.log
+      - name: Prepare local SSH worker target
+        if: steps.ui-regression-tests.outputs.has_app_store_access_tests == 'true'
+        id: ssh-setup
+        continue-on-error: true
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::debug::Updating package lists..."
+          sudo apt-get update
+          echo "::debug::Installing openssh-server..."
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssh-server
+          key_path="$RUNNER_TEMP/casos-worker-key"
+          echo "::debug::Generating SSH key pair..."
+          ssh-keygen -t ed25519 -N "" -f "$key_path"
+          echo "::debug::Configuring SSH authorized_keys..."
+          sudo mkdir -p /root/.ssh
+          sudo cp "$key_path.pub" /root/.ssh/authorized_keys
+          sudo chown -R root:root /root/.ssh
+          sudo mkdir -p /etc/ssh/sshd_config.d
+          sudo chmod 700 /root/.ssh
+          sudo chmod 600 /root/.ssh/authorized_keys
+          echo "PermitRootLogin prohibit-password" | sudo tee /etc/ssh/sshd_config.d/casos-worker.conf >/dev/null
+          sudo systemctl enable --now ssh
+          echo "::debug::Starting SSH service..."
+          sudo systemctl restart ssh
+          ssh_ready=false
+          for i in {1..30}; do
+            echo "SSH connectivity check: attempt $i/30..." >&2
+            if ssh -o StrictHostKeyChecking=no -i "$key_path" root@127.0.0.1 "true" 2>/dev/null; then
+              ssh_ready=true
+              echo "SSH connectivity check: succeeded on attempt $i/30" >&2
+              break
+            fi
+            sleep 2
+          done
+          if [[ "$ssh_ready" != "true" ]]; then
+            echo "SSH worker did not become ready after 30 attempts" >&2
+            exit 1
+          fi
+          echo "E2E_APP_STORE_SSH_HOST=127.0.0.1" >> "$GITHUB_ENV"
+          echo "E2E_APP_STORE_SSH_PORT=22" >> "$GITHUB_ENV"
+          echo "E2E_APP_STORE_SSH_USER=root" >> "$GITHUB_ENV"
+          echo "E2E_APP_STORE_SSH_KEY_PATH=$key_path" >> "$GITHUB_ENV"
+          echo "ssh_worker_ready=true" >> "$GITHUB_OUTPUT"
+      - name: Run App Store Access URL UI test
+        if: steps.ui-regression-tests.outputs.has_app_store_access_tests == 'true' && steps.ssh-setup.outputs.ssh_worker_ready == 'true'
+        working-directory: ./web
+        shell: bash
+        run: |
+          set -o pipefail
+          mapfile -t ui_test_files < ui-app-store-access-tests.txt
+          yarn playwright test --grep-invert @smoke --workers=1 "${ui_test_files[@]}" 2>&1 | tee ui-app-store-access-test.log
+      - name: Skip App Store Access URL UI test (no target)
+        if: steps.ui-regression-tests.outputs.has_app_store_access_tests != 'true'
+        working-directory: ./web
+        shell: bash
+        run: |
+          echo "No App Store Access URL UI regression tests selected." | tee ui-app-store-access-test.log
+      - name: Skip App Store Access URL UI test (SSH setup not ready)
+        if: steps.ui-regression-tests.outputs.has_app_store_access_tests == 'true' && steps.ssh-setup.outputs.ssh_worker_ready != 'true'
+        working-directory: ./web
+        shell: bash
+        run: |
+          echo "Skipping App Store Access URL UI test: SSH worker setup did not complete successfully (check the 'Prepare local SSH worker target' step logs)." | tee ui-app-store-access-test.log
       - name: Upload Playwright artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -148,8 +227,11 @@ jobs:
             ./web/test-results
             ./web/ui-changed-files.txt
             ./web/ui-regression-tests.txt
+            ./web/ui-standard-regression-tests.txt
+            ./web/ui-app-store-access-tests.txt
             ./web/ui-smoke-test.log
             ./web/ui-test.log
+            ./web/ui-app-store-access-test.log
           if-no-files-found: ignore
 
   backend:
