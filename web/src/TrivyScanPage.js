@@ -215,7 +215,7 @@ class TrivyScanPage extends React.Component {
           </Button>
           <Tooltip title={i18next.t("trivy:Refresh tooltip")}>
             <Button icon={<ReloadOutlined />} onClick={() => this.loadResults()}>
-              {i18next.t("appStore:Refresh")}
+              {i18next.t("general:Refresh")}
             </Button>
           </Tooltip>
         </Space>
@@ -249,7 +249,7 @@ class TrivyScanPage extends React.Component {
             <Form.Item
               name="image"
               label={i18next.t("trivy:Image name")}
-              rules={[{required: true, message: i18next.t("appStore:Image required")}]}
+              rules={[{required: true, message: i18next.t("trivy:Image required")}]}
             >
               <Input placeholder="e.g. nginx:1.25 or docker.io/library/nginx:latest" autoFocus />
             </Form.Item>

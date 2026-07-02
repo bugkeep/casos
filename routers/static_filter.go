@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/beego/beego/context"
+	"github.com/beego/beego/logs"
+	"github.com/casosorg/casos/util"
 )
 
 func StaticFilter(ctx *context.Context) {
@@ -25,9 +27,17 @@ func StaticFilter(ctx *context.Context) {
 	}
 
 	if fileExists(path) {
+		if urlPath == "/" {
+			if err := util.AppendWebConfigCookie(ctx); err != nil {
+				logs.Error("AppendWebConfigCookie() error: %s", err.Error())
+			}
+		}
 		http.ServeFile(ctx.ResponseWriter, ctx.Request, path)
 	} else if filepath.Ext(urlPath) == "" {
 		// Unknown path without extension — let React router handle it.
+		if err := util.AppendWebConfigCookie(ctx); err != nil {
+			logs.Error("AppendWebConfigCookie() error: %s", err.Error())
+		}
 		http.ServeFile(ctx.ResponseWriter, ctx.Request, "web/build/index.html")
 	}
 }

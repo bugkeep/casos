@@ -1,4 +1,5 @@
 import {Tooltip, message, theme} from "antd";
+import * as Conf from "./Conf";
 import {QuestionCircleOutlined} from "@ant-design/icons";
 import React from "react";
 import Sdk from "casdoor-js-sdk";
@@ -14,8 +15,38 @@ export function initServerUrl() {
   }
 }
 
+export function initWebConfig() {
+  const cookies = Object.fromEntries(
+    document.cookie.split("; ").filter(Boolean).map(c => {
+      const idx = c.indexOf("=");
+      return [c.slice(0, idx), c.slice(idx + 1)];
+    })
+  );
+  if (cookies["jsonWebConfig"] && cookies["jsonWebConfig"] !== "null") {
+    try {
+      const decoded = decodeURIComponent(cookies["jsonWebConfig"].replace(/\+/g, " "));
+      const config = JSON.parse(decoded);
+      Conf.setConfig(config);
+    } catch (_) {
+      // malformed cookie — proceed with defaults
+    }
+  }
+}
+
 export function initCasdoorSdk(config) {
   CasdoorSdk = new Sdk(config);
+}
+
+export function getWebSocketUrl(path, params = {}) {
+  const baseUrl = ServerUrl || window.location.origin;
+  const url = new URL(path, baseUrl);
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== null && value !== undefined) {
+      url.searchParams.set(key, value);
+    }
+  });
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  return url.toString();
 }
 
 export function getSigninUrl() {

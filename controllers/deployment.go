@@ -13,16 +13,17 @@ import (
 )
 
 type deploymentSummary struct {
-	Namespace         string          `json:"namespace"`
-	Name              string          `json:"name"`
-	Replicas          int32           `json:"replicas"`
-	ReadyReplicas     int32           `json:"readyReplicas"`
-	AvailableReplicas int32           `json:"availableReplicas"`
-	Image             string          `json:"image"`
-	EnvVars           []envVarSummary `json:"envVars"`
-	Volumes           []volumeSummary `json:"volumes"`
-	CreatedAt         string          `json:"createdAt"`
-	ResourceVersion   string          `json:"resourceVersion"`
+	Namespace         string            `json:"namespace"`
+	Name              string            `json:"name"`
+	Replicas          int32             `json:"replicas"`
+	ReadyReplicas     int32             `json:"readyReplicas"`
+	AvailableReplicas int32             `json:"availableReplicas"`
+	Image             string            `json:"image"`
+	Selector          map[string]string `json:"selector"`
+	EnvVars           []envVarSummary   `json:"envVars"`
+	Volumes           []volumeSummary   `json:"volumes"`
+	CreatedAt         string            `json:"createdAt"`
+	ResourceVersion   string            `json:"resourceVersion"`
 }
 
 func toDeploymentSummary(d appsv1.Deployment) deploymentSummary {
@@ -34,6 +35,10 @@ func toDeploymentSummary(d appsv1.Deployment) deploymentSummary {
 	if d.Spec.Replicas != nil {
 		replicas = *d.Spec.Replicas
 	}
+	selector := map[string]string{}
+	if d.Spec.Selector != nil {
+		selector = d.Spec.Selector.MatchLabels
+	}
 	return deploymentSummary{
 		Namespace:         d.Namespace,
 		Name:              d.Name,
@@ -41,6 +46,7 @@ func toDeploymentSummary(d appsv1.Deployment) deploymentSummary {
 		ReadyReplicas:     d.Status.ReadyReplicas,
 		AvailableReplicas: d.Status.AvailableReplicas,
 		Image:             image,
+		Selector:          selector,
 		EnvVars:           extractEnvVars(d.Spec.Template.Spec.Containers),
 		Volumes:           extractVolumes(d),
 		CreatedAt:         d.CreationTimestamp.UTC().Format("2006-01-02 15:04:05"),
