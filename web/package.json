@@ -26,6 +26,7 @@
     "build": "craco build",
     "ui:test": "playwright test",
     "ui:test:selector:check": "node scripts/select-ui-tests-check.js",
+    "ui:test:access-url-diagnostics:check": "node tests/ui/access-url-diagnostics-check.js && node tests/ui/access-url-gate-check.js && node tests/ui/app-store-access-url-probe-check.js && node tests/ui/app-store-access-url-visual-evidence-check.js",
     "ui:test:smoke": "playwright test --grep @smoke",
     "ui:test:regression": "playwright test --grep-invert @smoke",
     "ui:test:headed": "playwright test --headed",

@@ -7,12 +7,42 @@ const ALL_REGRESSION_TESTS = [
   "tests/ui/worker-node.spec.js",
 ];
 
-const WORKER_NODE_PATTERNS = [
-  /^controllers\/machine(_node_deploy)?\.go$/,
-  /^object\/machine(_node_deploy)?\.go$/,
+const APP_STORE_ACCESS_TEST = "tests/ui/app-store-access-url.spec.js";
+const HEAVY_TESTS = [APP_STORE_ACCESS_TEST];
+const ALL_TESTS = [...ALL_REGRESSION_TESTS, ...HEAVY_TESTS];
+
+const WORKER_NODE_UI_PATTERNS = [
+  /^controllers\/machine\.go$/,
+  /^object\/machine\.go$/,
   /^web\/src\/Machine(ListPage|EditPage|NodeDeployPanel)\.js$/,
-  /^web\/src\/backend\/Machine(NodeDeploy)?Backend\.js$/,
+  /^web\/src\/backend\/MachineBackend\.js$/,
   /^web\/tests\/ui\/worker-node\.spec\.js$/,
+];
+
+const WORKER_NODE_DEPLOY_PATTERNS = [
+  /^controllers\/machine_node_deploy\.go$/,
+  /^object\/machine_node_deploy\.go$/,
+  /^deploy\/(cni|containerd_config|executor|init|installer|key|kubeconfig|kubelet|kubeproxy|node_bootstrap|preflight|service|types)\.go$/,
+  /^web\/src\/backend\/MachineNodeDeployBackend\.js$/,
+];
+
+const APP_STORE_ACCESS_PATTERNS = [
+  /^controllers\/helm\.go$/,
+  /^controllers\/node\.go$/,
+  /^controllers\/service\.go$/,
+  /^store\/helm\.go$/,
+  /^web\/src\/AppStorePage\.js$/,
+  /^web\/src\/Helm(InstallModal|ReleasePage)\.js$/,
+  /^web\/src\/backend\/HelmBackend\.js$/,
+  /^web\/src\/backend\/NodeBackend\.js$/,
+  /^web\/src\/backend\/ServiceBackend\.js$/,
+  /^web\/src\/DeploymentListPage\.js$/,
+  /^web\/src\/ServiceListPage\.js$/,
+  /^web\/tests\/ui\/app-store-access-url\.spec\.js$/,
+  /^web\/tests\/ui\/app-store-access-url-[^/]+\.js$/,
+  /^web\/tests\/ui\/access-url-diagnostics\.js$/,
+  /^web\/tests\/ui\/access-url-diagnostics-check\.js$/,
+  /^web\/tests\/ui\/access-url-gate-check\.js$/,
 ];
 
 const SMOKE_COVERED_PATTERNS = [
@@ -28,15 +58,23 @@ const SITE_PATTERNS = [
 ];
 
 const FULL_REGRESSION_PATTERNS = [
-  /^\.github\/workflows\//,
   /^conf\/app\.conf$/,
   /^routers\/router\.go$/,
   /^web\/package\.json$/,
   /^web\/playwright\.config\.js$/,
   /^web\/src\/(Conf|Setting)\.js$/,
   /^web\/src\/locales\//,
-  /^web\/tests\/ui\/e2e-helpers\.js$/,
   /^web\/yarn\.lock$/,
+];
+
+const FULL_HEAVY_REGRESSION_PATTERNS = [
+  /^\.github\/workflows\//,
+  /^web\/tests\/ui\/e2e-helpers\.js$/,
+  /^web\/scripts\/access-url-diagnostics\.js$/,
+  /^web\/scripts\/app-store-access-url-gate\.js$/,
+  /^web\/scripts\/app-store-access-url-summary\.js$/,
+  /^web\/scripts\/select-ui-tests\.js$/,
+  /^web\/scripts\/select-ui-tests-check\.js$/,
 ];
 
 const DOCS_ONLY_PATTERNS = [
@@ -82,23 +120,41 @@ function normalizeChangedFiles(changedFiles) {
 
 function selectRegressionTestsFromNormalized(normalizedFiles) {
   if (normalizedFiles.length === 0) {
-    return [...ALL_REGRESSION_TESTS];
+    return ALL_TESTS;
   }
 
   const selectedTests = new Set();
   let runAllRegression = false;
+  let runAllHeavyRegression = false;
 
-  // Ordering matters: skip docs, honor all-regression triggers, then apply targeted and smoke-covered matches.
+  // Ordering matters: skip docs, honor heavy all-regression triggers (CI/test infra),
+  // then standard all-regression triggers (config/routing), then targeted and smoke-covered matches.
+  // If a file matching a standard all-regression trigger appears later in the iteration than
+  // a file matching a targeted heavy pattern, the heavy test is retained via selectedTests.has().
   for (const filePath of normalizedFiles) {
     if (matchesAny(filePath, DOCS_ONLY_PATTERNS)) {
+      continue;
+    }
+    if (matchesAny(filePath, FULL_HEAVY_REGRESSION_PATTERNS)) {
+      runAllRegression = true;
+      runAllHeavyRegression = true;
       continue;
     }
     if (matchesAny(filePath, FULL_REGRESSION_PATTERNS)) {
       runAllRegression = true;
       continue;
     }
-    if (matchesAny(filePath, WORKER_NODE_PATTERNS)) {
+    if (matchesAny(filePath, WORKER_NODE_DEPLOY_PATTERNS)) {
       selectedTests.add("tests/ui/worker-node.spec.js");
+      selectedTests.add(APP_STORE_ACCESS_TEST);
+      continue;
+    }
+    if (matchesAny(filePath, WORKER_NODE_UI_PATTERNS)) {
+      selectedTests.add("tests/ui/worker-node.spec.js");
+      continue;
+    }
+    if (matchesAny(filePath, APP_STORE_ACCESS_PATTERNS)) {
+      selectedTests.add(APP_STORE_ACCESS_TEST);
       continue;
     }
     if (matchesAny(filePath, SITE_PATTERNS)) {
@@ -114,10 +170,14 @@ function selectRegressionTestsFromNormalized(normalizedFiles) {
   }
 
   if (runAllRegression) {
-    return [...ALL_REGRESSION_TESTS];
+    // Include the heavy test when a full-heavy trigger was hit, or when a targeted
+    // worker/app-store match already selected it before a later full-regression trigger.
+    return (runAllHeavyRegression || selectedTests.has(APP_STORE_ACCESS_TEST))
+      ? ALL_TESTS
+      : ALL_REGRESSION_TESTS;
   }
 
-  return ALL_REGRESSION_TESTS.filter(testFile => selectedTests.has(testFile));
+  return ALL_TESTS.filter(testFile => selectedTests.has(testFile));
 }
 
 // Selects non-smoke UI regression specs for repository-relative changed paths.
@@ -125,13 +185,47 @@ function selectRegressionTests(changedFiles) {
   return selectRegressionTestsFromNormalized(normalizeChangedFiles(changedFiles));
 }
 
+function splitHeavyRegressionTests(testFiles) {
+  const standard = [];
+  const heavy = [];
+  for (const testFile of testFiles) {
+    if (HEAVY_TESTS.includes(testFile)) {
+      heavy.push(testFile);
+    } else {
+      standard.push(testFile);
+    }
+  }
+  return {standard, heavy};
+}
+
+function writeTestFiles(outputPath, testFiles) {
+  try {
+    // Empty output files are intentional: the workflow uses Bash `-s` to test whether any spec was selected.
+    fs.writeFileSync(outputPath, testFiles.length > 0 ? `${testFiles.join("\n")}\n` : "");
+  } catch (error) {
+    process.stderr.write(`Error writing selected UI test file: ${outputPath}: ${error.message}\n`);
+    process.exitCode = 1;
+    return false;
+  }
+  return true;
+}
+
 function main(argv) {
-  const changedFilesPath = argv[2];
-  if (!changedFilesPath) {
-    process.stderr.write("Usage: node scripts/select-ui-tests.js <changed-files.txt>\n");
+  const args = argv.slice(2);
+  const splitMode = args[0] === "--split";
+  const usage = splitMode
+    ? "Usage: node scripts/select-ui-tests.js --split <changed-files.txt> <combined-output.txt> <standard-output.txt> <heavy-output.txt>\n"
+    : "Usage: node scripts/select-ui-tests.js <changed-files.txt>\n";
+  if (args.length === 0 || (splitMode && args.length !== 5) || (!splitMode && args.length !== 1)) {
+    process.stderr.write(usage);
     process.exitCode = 1;
     return;
   }
+
+  const changedFilesPath = splitMode ? args[1] : args[0];
+  const combinedOutputPath = splitMode ? args[2] : null;
+  const standardOutputPath = splitMode ? args[3] : null;
+  const heavyOutputPath = splitMode ? args[4] : null;
 
   const repoRoot = path.resolve(__dirname, "..", "..");
   let resolvedChangedFilesPath;
@@ -165,6 +259,15 @@ function main(argv) {
     process.stderr.write("Warning: no changed files detected; falling back to all regression tests.\n");
   }
   const tests = selectRegressionTestsFromNormalized(normalizedFiles);
+  if (splitMode) {
+    const {standard, heavy} = splitHeavyRegressionTests(tests);
+    if (!writeTestFiles(combinedOutputPath, tests) ||
+        !writeTestFiles(standardOutputPath, standard) ||
+        !writeTestFiles(heavyOutputPath, heavy)) {
+      return;
+    }
+    return;
+  }
   process.stdout.write(tests.length > 0 ? `${tests.join("\n")}\n` : "");
 }
 
@@ -174,5 +277,8 @@ if (require.main === module) {
 
 module.exports = {
   ALL_REGRESSION_TESTS,
+  APP_STORE_ACCESS_TEST,
+  HEAVY_TESTS,
   selectRegressionTests,
+  splitHeavyRegressionTests,
 };
