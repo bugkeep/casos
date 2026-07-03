@@ -5,14 +5,19 @@ const path = require("path");
 const ALL_REGRESSION_TESTS = [
   "tests/ui/site-e2e.spec.js",
   "tests/ui/worker-node.spec.js",
+  "tests/ui/worker-node-ready.spec.js",
 ];
 
 const WORKER_NODE_PATTERNS = [
   /^controllers\/machine(_node_deploy)?\.go$/,
+  /^controllers\/node\.go$/,
   /^object\/machine(_node_deploy)?\.go$/,
+  /^object\/node\.go$/,
   /^web\/src\/Machine(ListPage|EditPage|NodeDeployPanel)\.js$/,
-  /^web\/src\/backend\/Machine(NodeDeploy)?Backend\.js$/,
-  /^web\/tests\/ui\/worker-node\.spec\.js$/,
+  /^web\/src\/NodeListPage\.js$/,
+  /^web\/src\/backend\/(Machine(NodeDeploy)?|Node)Backend\.js$/,
+  /^web\/tests\/ui\/worker-node(-ready)?\.spec\.js$/,
+  /^web\/tests\/ui\/worker-node-helpers\.js$/,
 ];
 
 const SMOKE_COVERED_PATTERNS = [
@@ -99,6 +104,7 @@ function selectRegressionTestsFromNormalized(normalizedFiles) {
     }
     if (matchesAny(filePath, WORKER_NODE_PATTERNS)) {
       selectedTests.add("tests/ui/worker-node.spec.js");
+      selectedTests.add("tests/ui/worker-node-ready.spec.js");
       continue;
     }
     if (matchesAny(filePath, SITE_PATTERNS)) {
