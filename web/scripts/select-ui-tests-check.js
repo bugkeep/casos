@@ -2,7 +2,16 @@ const assert = require("assert");
 const {execFileSync} = require("child_process");
 const fs = require("fs");
 const path = require("path");
-const {ALL_REGRESSION_TESTS, selectRegressionTests} = require("./select-ui-tests");
+const {
+  ALL_REGRESSION_TESTS,
+  REAL_WORKER_REGRESSION_TESTS,
+  selectRegressionTests,
+} = require("./select-ui-tests");
+
+const ALL_WITH_REAL_WORKER_REGRESSION_TESTS = [
+  ...ALL_REGRESSION_TESTS,
+  ...REAL_WORKER_REGRESSION_TESTS,
+];
 
 function expectSelection(name, changedFiles, expectedTests) {
   assert.deepStrictEqual(selectRegressionTests(changedFiles), expectedTests, name);
@@ -11,13 +20,43 @@ function expectSelection(name, changedFiles, expectedTests) {
 expectSelection(
   "worker node UI changes select worker node regression",
   ["web/src/MachineNodeDeployPanel.js"],
-  ["tests/ui/worker-node.spec.js"]
+  ["tests/ui/worker-node.spec.js", "tests/ui/worker-node-real.spec.js"]
 );
 
 expectSelection(
   "worker node backend changes select worker node regression once",
   ["controllers/machine.go", "object/machine_node_deploy.go", "web/src/MachineListPage.js"],
-  ["tests/ui/worker-node.spec.js"]
+  ["tests/ui/worker-node.spec.js", "tests/ui/worker-node-real.spec.js"]
+);
+
+expectSelection(
+  "worker node deploy changes select real worker regression",
+  ["object/machine_node_deploy.go"],
+  ["tests/ui/worker-node.spec.js", "tests/ui/worker-node-real.spec.js"]
+);
+
+expectSelection(
+  "real worker helper changes select real worker regression",
+  ["web/tests/ui/real-worker-helpers.js"],
+  ["tests/ui/worker-node-real.spec.js"]
+);
+
+expectSelection(
+  "real worker VM setup script changes select real worker regression",
+  [".github/scripts/prepare-real-worker-vm.sh"],
+  ["tests/ui/worker-node-real.spec.js"]
+);
+
+expectSelection(
+  "real worker VM diagnostics script changes select real worker regression",
+  [".github/scripts/collect-real-worker-vm-diagnostics.sh"],
+  ["tests/ui/worker-node-real.spec.js"]
+);
+
+expectSelection(
+  "UI test infrastructure with real worker changes keeps real worker regression",
+  ["web/tests/ui/e2e-helpers.js", "web/tests/ui/worker-node-real.spec.js"],
+  [...ALL_REGRESSION_TESTS, "tests/ui/worker-node-real.spec.js"]
 );
 
 expectSelection(
@@ -45,6 +84,18 @@ expectSelection(
 );
 
 expectSelection(
+  "build workflow changes run all regression tests including real worker regression",
+  [".github/workflows/build.yml"],
+  ALL_WITH_REAL_WORKER_REGRESSION_TESTS
+);
+
+expectSelection(
+  "workflow changes run all regression tests including real worker regression",
+  [".github/workflows/other.yml"],
+  ALL_WITH_REAL_WORKER_REGRESSION_TESTS
+);
+
+expectSelection(
   "unknown frontend code changes run all regression tests",
   ["web/src/DeploymentListPage.js"],
   ALL_REGRESSION_TESTS
@@ -68,7 +119,11 @@ try {
   const output = execFileSync(process.execPath, [path.join(__dirname, "select-ui-tests.js"), cliInputPath], {
     encoding: "utf8",
   });
-  assert.strictEqual(output, "tests/ui/worker-node.spec.js\n", "CLI prints selected regression tests");
+  assert.strictEqual(
+    output,
+    "tests/ui/worker-node.spec.js\ntests/ui/worker-node-real.spec.js\n",
+    "CLI prints selected regression tests"
+  );
 } finally {
   fs.rmSync(cliInputPath, {force: true});
 }

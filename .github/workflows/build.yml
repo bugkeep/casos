@@ -50,7 +50,7 @@ jobs:
     permissions:
       contents: read
       actions: write
-    timeout-minutes: 30
+    timeout-minutes: 60
     services:
       mysql:
         image: mysql:8
@@ -72,6 +72,8 @@ jobs:
       E2E_APISERVER_PORT: 16443
       E2E_WEBHOOK_PORT: 19443
       E2E_TEST_TOKEN: casos-e2e-${{ github.run_id }}-${{ github.run_attempt }}
+      E2E_REAL_WORKER_TIMEOUT_MS: 360000
+      E2E_REAL_WORKER_TEST_TIMEOUT_MS: 480000
     steps:
       - uses: actions/checkout@v4
         with:
@@ -124,6 +126,16 @@ jobs:
             echo "(none; fixed smoke already ran)"
             echo "has_tests=false" >> "$GITHUB_OUTPUT"
           fi
+          if grep -Fxq "tests/ui/worker-node-real.spec.js" web/ui-regression-tests.txt; then
+            echo "has_real_worker_tests=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_real_worker_tests=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Prepare QEMU Ubuntu worker VM
+        if: steps.ui-regression-tests.outputs.has_real_worker_tests == 'true'
+        timeout-minutes: 15
+        shell: bash
+        run: bash .github/scripts/prepare-real-worker-vm.sh
       - name: Run UI regression tests
         if: steps.ui-regression-tests.outputs.has_tests == 'true'
         working-directory: ./web
@@ -131,13 +143,27 @@ jobs:
         run: |
           set -o pipefail
           mapfile -t ui_test_files < ui-regression-tests.txt
-          yarn run ui:test:regression -- "${ui_test_files[@]}" 2>&1 | tee ui-test.log
+          playwright_args=()
+          if [[ "${{ steps.ui-regression-tests.outputs.has_real_worker_tests }}" == "true" ]]; then
+            playwright_args+=(--workers=1 --retries=0)
+          fi
+          yarn run ui:test:regression -- "${playwright_args[@]}" "${ui_test_files[@]}" 2>&1 | tee ui-test.log
       - name: Skip UI regression tests
         if: steps.ui-regression-tests.outputs.has_tests != 'true'
         working-directory: ./web
         shell: bash
         run: |
           echo "No changed-path UI regression tests selected; fixed smoke already ran." | tee ui-test.log
+      - name: Collect QEMU Ubuntu worker diagnostics
+        if: always() && steps.ui-regression-tests.outputs.has_real_worker_tests == 'true'
+        timeout-minutes: 2
+        shell: bash
+        run: bash .github/scripts/collect-real-worker-vm-diagnostics.sh
+      - name: Cleanup QEMU Ubuntu worker VM
+        if: always() && steps.ui-regression-tests.outputs.has_real_worker_tests == 'true'
+        timeout-minutes: 5
+        shell: bash
+        run: bash .github/scripts/cleanup-real-worker-vm.sh
       - name: Upload Playwright artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -150,6 +176,8 @@ jobs:
             ./web/ui-regression-tests.txt
             ./web/ui-smoke-test.log
             ./web/ui-test.log
+            ${{ runner.temp }}/casos-worker-vm/serial.log
+            ${{ runner.temp }}/casos-worker-vm/diagnostics
           if-no-files-found: ignore
 
   backend:

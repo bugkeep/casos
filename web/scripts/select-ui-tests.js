@@ -7,12 +7,27 @@ const ALL_REGRESSION_TESTS = [
   "tests/ui/worker-node.spec.js",
 ];
 
+const REAL_WORKER_REGRESSION_TESTS = [
+  "tests/ui/worker-node-real.spec.js",
+];
+
 const WORKER_NODE_PATTERNS = [
   /^controllers\/machine(_node_deploy)?\.go$/,
   /^object\/machine(_node_deploy)?\.go$/,
   /^web\/src\/Machine(ListPage|EditPage|NodeDeployPanel)\.js$/,
   /^web\/src\/backend\/Machine(NodeDeploy)?Backend\.js$/,
   /^web\/tests\/ui\/worker-node\.spec\.js$/,
+];
+
+const REAL_WORKER_PATTERNS = [
+  /^\.github\/scripts\/(prepare|cleanup)-real-worker-vm\.sh$/,
+  /^\.github\/scripts\/collect-real-worker-vm-diagnostics\.sh$/,
+  /^controllers\/machine_node_deploy\.go$/,
+  /^object\/machine_node_deploy\.go$/,
+  /^web\/src\/MachineNodeDeployPanel\.js$/,
+  /^web\/src\/backend\/MachineNodeDeployBackend\.js$/,
+  /^web\/tests\/ui\/real-worker-helpers\.js$/,
+  /^web\/tests\/ui\/worker-node-real\.spec\.js$/,
 ];
 
 const SMOKE_COVERED_PATTERNS = [
@@ -27,8 +42,12 @@ const SITE_PATTERNS = [
   /^web\/tests\/ui\/site-e2e\.spec\.js$/,
 ];
 
-const FULL_REGRESSION_PATTERNS = [
+const WORKFLOW_PATTERNS = [
   /^\.github\/workflows\//,
+];
+
+const FULL_REGRESSION_PATTERNS = [
+  ...WORKFLOW_PATTERNS,
   /^conf\/app\.conf$/,
   /^routers\/router\.go$/,
   /^web\/package\.json$/,
@@ -87,18 +106,29 @@ function selectRegressionTestsFromNormalized(normalizedFiles) {
 
   const selectedTests = new Set();
   let runAllRegression = false;
+  let runRealWorkerRegression = false;
 
   // Ordering matters: skip docs, honor all-regression triggers, then apply targeted and smoke-covered matches.
   for (const filePath of normalizedFiles) {
     if (matchesAny(filePath, DOCS_ONLY_PATTERNS)) {
       continue;
     }
+    const matchesWorkerNode = matchesAny(filePath, WORKER_NODE_PATTERNS);
+    const matchesRealWorker = matchesAny(filePath, REAL_WORKER_PATTERNS);
     if (matchesAny(filePath, FULL_REGRESSION_PATTERNS)) {
       runAllRegression = true;
+      if (matchesRealWorker || matchesAny(filePath, WORKFLOW_PATTERNS)) {
+        runRealWorkerRegression = true;
+      }
       continue;
     }
-    if (matchesAny(filePath, WORKER_NODE_PATTERNS)) {
+    if (matchesWorkerNode) {
       selectedTests.add("tests/ui/worker-node.spec.js");
+    }
+    if (matchesRealWorker) {
+      selectedTests.add("tests/ui/worker-node-real.spec.js");
+    }
+    if (matchesWorkerNode || matchesRealWorker) {
       continue;
     }
     if (matchesAny(filePath, SITE_PATTERNS)) {
@@ -113,11 +143,19 @@ function selectRegressionTestsFromNormalized(normalizedFiles) {
     }
   }
 
+  const regressionOrder = [...ALL_REGRESSION_TESTS, ...REAL_WORKER_REGRESSION_TESTS];
   if (runAllRegression) {
-    return [...ALL_REGRESSION_TESTS];
+    for (const testFile of ALL_REGRESSION_TESTS) {
+      selectedTests.add(testFile);
+    }
+  }
+  if (runRealWorkerRegression) {
+    for (const testFile of REAL_WORKER_REGRESSION_TESTS) {
+      selectedTests.add(testFile);
+    }
   }
 
-  return ALL_REGRESSION_TESTS.filter(testFile => selectedTests.has(testFile));
+  return regressionOrder.filter(testFile => selectedTests.has(testFile));
 }
 
 // Selects non-smoke UI regression specs for repository-relative changed paths.
@@ -174,5 +212,6 @@ if (require.main === module) {
 
 module.exports = {
   ALL_REGRESSION_TESTS,
+  REAL_WORKER_REGRESSION_TESTS,
   selectRegressionTests,
 };
