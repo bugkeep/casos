@@ -6,6 +6,7 @@ const ALL_REGRESSION_TESTS = [
   "tests/ui/site-e2e.spec.js",
   "tests/ui/worker-node.spec.js",
   "tests/ui/worker-node-ready.spec.js",
+  "tests/ui/app-store.spec.js",
 ];
 
 const WORKER_NODE_PATTERNS = [
@@ -30,6 +31,20 @@ const SITE_PATTERNS = [
   /^web\/src\/SiteListPage\.js$/,
   /^web\/src\/backend\/SiteBackend\.js$/,
   /^web\/tests\/ui\/site-e2e\.spec\.js$/,
+];
+
+const APP_STORE_PATTERNS = [
+  /^controllers\/helm\.go$/,
+  /^object\/helm_repo\.go$/,
+  /^store\/helm\.go$/,
+  /^web\/src\/AppStorePage\.js$/,
+  /^web\/src\/HelmInstallModal\.js$/,
+  /^web\/src\/HelmReleasePage\.js$/,
+  /^web\/src\/DeploymentListPage\.js$/,
+  /^web\/src\/ServiceListPage\.js$/,
+  /^web\/src\/backend\/HelmBackend\.js$/,
+  /^web\/tests\/ui\/app-store\.spec\.js$/,
+  /^web\/tests\/ui\/app-store-helpers\.js$/,
 ];
 
 const FULL_REGRESSION_PATTERNS = [
@@ -109,6 +124,10 @@ function selectRegressionTestsFromNormalized(normalizedFiles) {
     }
     if (matchesAny(filePath, SITE_PATTERNS)) {
       selectedTests.add("tests/ui/site-e2e.spec.js");
+      continue;
+    }
+    if (matchesAny(filePath, APP_STORE_PATTERNS)) {
+      selectedTests.add("tests/ui/app-store.spec.js");
       continue;
     }
     if (matchesAny(filePath, SMOKE_COVERED_PATTERNS)) {

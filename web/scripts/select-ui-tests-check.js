@@ -45,8 +45,14 @@ expectSelection(
 );
 
 expectSelection(
+  "app store UI and access URL changes select app store regression",
+  ["web/src/AppStorePage.js", "web/src/DeploymentListPage.js", "web/src/ServiceListPage.js", "controllers/helm.go"],
+  ["tests/ui/app-store.spec.js"]
+);
+
+expectSelection(
   "unknown frontend code changes run all regression tests",
-  ["web/src/DeploymentListPage.js"],
+  ["web/src/PodListPage.js"],
   ALL_REGRESSION_TESTS
 );
 
