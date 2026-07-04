@@ -100,7 +100,7 @@ async function openChartInstallModal(page, {repoName, chartName}) {
   await expect(page).toHaveURL(/\/app-store$/);
 
   await page.getByText(repoName, {exact: true}).click();
-  const chartCard = page.locator(".ant-card").filter({has: page.getByText(chartName, {exact: true})});
+  const chartCard = page.locator(".ant-row .ant-col .ant-card").filter({has: page.getByText(chartName, {exact: true})});
   await expect(chartCard).toBeVisible({timeout: 30_000});
   await chartCard.getByRole("button", {name: "Install"}).click();
 
