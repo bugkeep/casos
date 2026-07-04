@@ -51,7 +51,7 @@ export function installHelmChart(payload) {
 }
 
 // installHelmChartStream posts the payload then reads the SSE response line-by-line.
-// onLine(line) is called for each log line; returns a promise that resolves on "DONE" or rejects on "ERROR: ...".
+// onLine(line) is called for each log line; returns "DONE" or "ABORTED", and rejects on "ERROR: ...".
 // Pass an AbortSignal to cancel mid-install (sends abort to the server, stops the wait loop).
 export async function installHelmChartStream(payload, onLine, signal) {
   const resp = await fetch(`${Setting.ServerUrl}/api/install-helm-chart-stream`, {
@@ -71,10 +71,11 @@ export async function installHelmChartStream(payload, onLine, signal) {
       if (line) {
         onLine(line);
         if (line.startsWith("ERROR: ")) {throw new Error(line.slice(7));}
-        if (line === "DONE" || line === "ABORTED") {return;}
+        if (line === "DONE" || line === "ABORTED") {return line;}
       }
     }
   }
+  throw new Error("helm install stream ended before completion");
 }
 
 export function upgradeHelmRelease(payload) {
