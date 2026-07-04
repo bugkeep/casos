@@ -113,7 +113,6 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
       )
         .then(() => {
           setDone(true);
-          onInstalled?.();
         })
         .catch(e => {
           if (e.name !== "AbortError") {
