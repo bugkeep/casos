@@ -13,6 +13,11 @@ import (
 	"k8s.io/client-go/rest"
 )
 
+type nodeBootstrapState struct {
+	podCIDR string
+	ready   bool
+}
+
 type NodeDeployer struct {
 	config     Config
 	restConfig *rest.Config
@@ -93,26 +98,34 @@ func (d *NodeDeployer) Deploy(ctx context.Context, opts NodeDeployOptions) (*Nod
 	}
 
 	d.logStep(nodeDeployPhaseWaiting, "Waiting for node registration")
-	podCIDR, err := d.waitForNodePodCIDR(ctx, opts.NodeName)
+	bootstrapState, err := d.waitForNodeBootstrapState(ctx, opts.NodeName)
 	if err != nil {
 		return nil, err
 	}
 
-	d.logStep(nodeDeployPhaseConfiguring, "Writing node CNI config")
-	if err = runner.WriteFileContext(ctx, "/etc/cni/net.d/10-casos-bridge.conflist", bridgeCNIConfig(podCIDR), "0644"); err != nil {
-		return nil, fmt.Errorf("write /etc/cni/net.d/10-casos-bridge.conflist: %w", err)
-	}
-	if _, err = runner.RunRootContext(ctx, "systemctl restart kubelet"); err != nil {
-		return nil, fmt.Errorf("restart kubelet: %w", err)
+	if bootstrapState.podCIDR != "" {
+		d.logStep(nodeDeployPhaseConfiguring, "Writing node CNI config")
+		if err = runner.WriteFileContext(ctx, "/etc/cni/net.d/10-casos-bridge.conflist", bridgeCNIConfig(bootstrapState.podCIDR), "0644"); err != nil {
+			return nil, fmt.Errorf("write /etc/cni/net.d/10-casos-bridge.conflist: %w", err)
+		}
+		if _, err = runner.RunRootContext(ctx, "systemctl restart kubelet"); err != nil {
+			return nil, fmt.Errorf("restart kubelet: %w", err)
+		}
+	} else if bootstrapState.ready {
+		d.logStep(nodeDeployPhaseConfiguring, "Node became Ready before PodCIDR assignment; reusing existing node CNI config")
 	}
 
 	if err = d.startKubeProxy(ctx, runner); err != nil {
 		return nil, err
 	}
 
-	d.logStep(nodeDeployPhaseWaiting, "Waiting for Node Ready")
-	if err = d.waitForNodeReady(ctx, opts.NodeName); err != nil {
-		return nil, err
+	if !bootstrapState.ready {
+		d.logStep(nodeDeployPhaseWaiting, "Waiting for Node Ready")
+		if err = d.waitForNodeReady(ctx, opts.NodeName); err != nil {
+			return nil, err
+		}
+	} else {
+		d.logStep(nodeDeployPhaseWaiting, "Node is already Ready")
 	}
 
 	d.logStep(nodeDeployPhaseConfiguring, "Writing CasOS managed SSH key")
@@ -138,13 +151,13 @@ func newRunnerForMachine(machine NodeDeployMachine) (*NodeDeploySSHRunner, error
 	})
 }
 
-func (d *NodeDeployer) waitForNodePodCIDR(ctx context.Context, nodeName string) (string, error) {
+func (d *NodeDeployer) waitForNodeBootstrapState(ctx context.Context, nodeName string) (*nodeBootstrapState, error) {
 	if d.restConfig == nil {
-		return "", fmt.Errorf("apiserver rest config is required")
+		return nil, fmt.Errorf("apiserver rest config is required")
 	}
 	client, err := kubernetes.NewForConfig(d.restConfig)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	deadlineTimer, deadline := deploymentWaitDeadline(ctx)
 	ticker := time.NewTicker(3 * time.Second)
@@ -153,19 +166,23 @@ func (d *NodeDeployer) waitForNodePodCIDR(ctx context.Context, nodeName string) 
 	for {
 		select {
 		case <-ctx.Done():
-			return "", ctx.Err()
+			return nil, ctx.Err()
 		case <-deadline:
-			return "", fmt.Errorf("timed out waiting for node PodCIDR")
+			return nil, fmt.Errorf("timed out waiting for node registration")
 		case <-ticker.C:
 			node, err := client.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 			if err != nil {
 				if !apierrors.IsNotFound(err) {
-					return "", err
+					return nil, err
 				}
 				continue
 			}
-			if node.Spec.PodCIDR != "" {
-				return node.Spec.PodCIDR, nil
+			state := &nodeBootstrapState{
+				podCIDR: node.Spec.PodCIDR,
+				ready:   isNodeReady(node),
+			}
+			if state.podCIDR != "" || state.ready {
+				return state, nil
 			}
 		}
 	}
@@ -197,13 +214,23 @@ func (d *NodeDeployer) waitForNodeReady(ctx context.Context, nodeName string) er
 				}
 				continue
 			}
-			for _, condition := range node.Status.Conditions {
-				if condition.Type == corev1.NodeReady && condition.Status == corev1.ConditionTrue {
-					return nil
-				}
+			if isNodeReady(node) {
+				return nil
 			}
 		}
 	}
+}
+
+func isNodeReady(node *corev1.Node) bool {
+	if node == nil {
+		return false
+	}
+	for _, condition := range node.Status.Conditions {
+		if condition.Type == corev1.NodeReady && condition.Status == corev1.ConditionTrue {
+			return true
+		}
+	}
+	return false
 }
 
 func (d *NodeDeployer) apiserverVersion() (string, error) {
