@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -35,17 +36,29 @@ func ensureCerts(dir, ip, advertiseIP string) error {
 	admCrtFile := filepath.Join(dir, "admin.crt")
 	kubeletKeyFile := filepath.Join(dir, "apiserver-kubelet-client.key")
 	kubeletCrtFile := filepath.Join(dir, "apiserver-kubelet-client.crt")
+	dependentFiles := []string{
+		caKeyFile, caCertFile, srvKeyFile, srvCrtFile,
+		admKeyFile, admCrtFile, kubeletKeyFile, kubeletCrtFile,
+		filepath.Join(dir, "webhook.crt"),
+		filepath.Join(dir, "webhook.key"),
+		filepath.Join(dir, "authz-webhook.kubeconfig"),
+		filepath.Join(dir, "controller-manager.kubeconfig"),
+		filepath.Join(dir, "scheduler.kubeconfig"),
+	}
 
 	// kube-apiserver fails ECDSA signature verification on self-signed ECDSA CAs.
 	// If the existing CA key is ECDSA, remove all derived certs so they are
 	// regenerated as RSA below.
 	if fileExists(caKeyFile) && caKeyIsECDSA(caKeyFile) {
-		for _, f := range []string{
-			caKeyFile, caCertFile, srvKeyFile, srvCrtFile,
-			admKeyFile, admCrtFile, kubeletKeyFile, kubeletCrtFile,
-		} {
-			_ = os.Remove(f)
-		}
+		removeAllIfExists(dependentFiles...)
+	}
+
+	// If the CA cert and key drift out of sync, every newly signed client/server
+	// cert will be unverifiable even though all files still parse successfully.
+	// In that case remove the CA and all dependent artifacts so startup can
+	// regenerate a consistent chain.
+	if !existingCACertKeyUsable(caCertFile, caKeyFile) {
+		removeAllIfExists(dependentFiles...)
 	}
 
 	var caKey *rsa.PrivateKey
@@ -415,6 +428,57 @@ func removeIfExists(path string) error {
 		return err
 	}
 	return nil
+}
+
+func removeAllIfExists(paths ...string) {
+	for _, path := range paths {
+		_ = os.Remove(path)
+	}
+}
+
+func existingCACertKeyUsable(certFile, keyFile string) bool {
+	if !fileExists(certFile) && !fileExists(keyFile) {
+		return true
+	}
+	if !fileExists(certFile) || !fileExists(keyFile) {
+		return false
+	}
+
+	keyPEM, err := os.ReadFile(keyFile)
+	if err != nil {
+		return false
+	}
+	keyBlock, _ := pem.Decode(keyPEM)
+	if keyBlock == nil {
+		return false
+	}
+	key, err := x509.ParsePKCS1PrivateKey(keyBlock.Bytes)
+	if err != nil {
+		return false
+	}
+
+	certPEM, err := os.ReadFile(certFile)
+	if err != nil {
+		return false
+	}
+	certBlock, _ := pem.Decode(certPEM)
+	if certBlock == nil {
+		return false
+	}
+	cert, err := x509.ParseCertificate(certBlock.Bytes)
+	if err != nil || !cert.IsCA {
+		return false
+	}
+
+	certPubDER, err := x509.MarshalPKIXPublicKey(cert.PublicKey)
+	if err != nil {
+		return false
+	}
+	keyPubDER, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
+	if err != nil {
+		return false
+	}
+	return bytes.Equal(certPubDER, keyPubDER)
 }
 
 func uniqueIPs(addrs ...string) []net.IP {
