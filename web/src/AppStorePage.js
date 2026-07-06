@@ -15,6 +15,15 @@ const PRESET_REPOS = [
   {name: "ingress-nginx", url: "https://kubernetes.github.io/ingress-nginx", desc: "Official ingress-nginx"},
 ];
 
+function isSupportedHelmRepoURL(value) {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:" || parsed.protocol === "oci:";
+  } catch {
+    return false;
+  }
+}
+
 function ChartIcon({icon, name, size = 40}) {
   const [err, setErr] = useState(false);
   if (!err && icon) {
@@ -107,8 +116,22 @@ function AddRepoModal({open, onClose, onAdded}) {
         <Form.Item name="name" label={t("helm:Repo name")} rules={[{required: true}]}>
           <Input placeholder="my-charts" />
         </Form.Item>
-        <Form.Item name="url" label={t("helm:Repo URL")} rules={[{required: true, type: "url"}]}>
-          <Input placeholder="https://example.com/charts" />
+        <Form.Item
+          name="url"
+          label={t("helm:Repo URL")}
+          rules={[
+            {required: true},
+            {
+              validator: (_, value) => {
+                if (!value || isSupportedHelmRepoURL(value)) {
+                  return Promise.resolve();
+                }
+                return Promise.reject(new Error("Use http(s)://... or oci://... with an explicit tag or digest"));
+              },
+            },
+          ]}
+        >
+          <Input placeholder="https://example.com/charts or oci://registry/chart:tag" />
         </Form.Item>
       </Form>
     </Modal>

@@ -21,7 +21,8 @@ const E2E_NAMESPACE = "default";
 const APP_STORE_INSTALL_TIMEOUT_MS = Number(process.env.E2E_APP_INSTALL_TIMEOUT_MS) || 15 * 60 * 1000;
 // Official OCI-hosted chart for Casdoor, the identity/SSO provider this project itself
 // authenticates against (see controllers/e2e.go's casdoorsdk usage).
-const CASDOOR_OCI_REPO_URL = "oci://registry-1.docker.io/casbin/casdoor-helm-charts";
+const CASDOOR_CHART_VERSION = "3.108.0";
+const CASDOOR_OCI_REPO_URL = `oci://registry-1.docker.io/casbin/casdoor-helm-charts:${CASDOOR_CHART_VERSION}`;
 const CASDOOR_CHART_NAME = "casdoor-helm-charts";
 
 function nodePortValues(releaseName) {

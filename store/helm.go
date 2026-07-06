@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	semver "github.com/Masterminds/semver/v3"
 	"helm.sh/helm/v3/pkg/action"
 	"helm.sh/helm/v3/pkg/chart"
 	"helm.sh/helm/v3/pkg/chart/loader"
@@ -283,8 +282,8 @@ func newOCIRegistryClient() (*registry.Client, error) {
 	return registry.NewClient(registry.ClientOptHTTPClient(proxypkg.ProxyHttpClient))
 }
 
-// pullOCIChart pulls the chart hosted at repoURL, resolving to the newest published
-// semver tag when version is empty.
+// pullOCIChart pulls the chart hosted at repoURL. OCI chart references must
+// include an explicit tag or digest unless the caller provides version.
 func pullOCIChart(repoURL, version string) (*registry.PullResult, error) {
 	ref, resolvedVersion := resolveOCIChartRef(repoURL, version)
 
@@ -293,20 +292,8 @@ func pullOCIChart(repoURL, version string) (*registry.PullResult, error) {
 		return nil, fmt.Errorf("oci registry client: %w", err)
 	}
 
-	if resolvedVersion == "" {
-		if !strings.Contains(ref, "@") {
-			tags, err := rc.Tags(ref)
-			if err != nil {
-				return nil, fmt.Errorf("list oci tags: %w", err)
-			}
-			if len(tags) == 0 {
-				return nil, fmt.Errorf("no tags found for %s", repoURL)
-			}
-			resolvedVersion = latestOCISemverTag(tags)
-			if resolvedVersion == "" {
-				return nil, fmt.Errorf("no semver tags found for %s", repoURL)
-			}
-		}
+	if resolvedVersion == "" && !strings.Contains(ref, "@") {
+		return nil, fmt.Errorf("oci chart reference %q requires an explicit tag or digest, for example %q or %q", repoURL, repoURL+":latest", repoURL+":3.108.0")
 	}
 
 	pullRef := ref
@@ -322,30 +309,6 @@ func pullOCIChart(repoURL, version string) (*registry.PullResult, error) {
 		return nil, fmt.Errorf("pull oci chart: %w", err)
 	}
 	return pull, nil
-}
-
-func latestOCISemverTag(tags []string) string {
-	type versionedTag struct {
-		tag     string
-		version *semver.Version
-	}
-
-	versionedTags := make([]versionedTag, 0, len(tags))
-	for _, tag := range tags {
-		version, err := semver.NewVersion(tag)
-		if err != nil {
-			continue
-		}
-		versionedTags = append(versionedTags, versionedTag{tag: tag, version: version})
-	}
-	if len(versionedTags) == 0 {
-		return ""
-	}
-
-	sort.SliceStable(versionedTags, func(i, j int) bool {
-		return versionedTags[i].version.GreaterThan(versionedTags[j].version)
-	})
-	return versionedTags[0].tag
 }
 
 func loadOCIChart(repoURL, version string) (*chart.Chart, error) {
