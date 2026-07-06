@@ -136,7 +136,7 @@ func (c *ApiController) GetRepoCharts() {
 
 // ---------- Chart values (via store/Helm SDK) ----------
 
-// GetHelmChartValues fetches the default values.yaml for a chart.
+// GetHelmChartValues fetches the values.yaml shown in the App Store install dialog.
 // @router /api/get-helm-chart-values [get]
 func (c *ApiController) GetHelmChartValues() {
 	if c.RequireSignedIn() {
@@ -149,7 +149,7 @@ func (c *ApiController) GetHelmChartValues() {
 		c.ResponseError("chart and repo are required")
 		return
 	}
-	values, err := store.GetHelmChartDefaultValues(chartName, repoURL, version)
+	values, err := store.GetHelmChartInstallValues(chartName, repoURL, version)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return

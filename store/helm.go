@@ -1030,3 +1030,105 @@ func GetHelmChartDefaultValues(chartName, repoURL, version string) (string, erro
 	}
 	return string(data), nil
 }
+
+// GetHelmChartInstallValues returns the values.yaml content shown in the App Store
+// install dialog. For selected charts, this layers CasOS-oriented recommended
+// install values on top of the upstream chart defaults so the first-run install
+// path is usable without manual edits.
+func GetHelmChartInstallValues(chartName, repoURL, version string) (string, error) {
+	ch, err := loadChart(chartName, repoURL, version)
+	if err != nil {
+		return "", err
+	}
+	values := ch.Values
+	if values == nil {
+		values = map[string]interface{}{}
+	} else {
+		values = cloneHelmValues(values)
+	}
+	applyRecommendedInstallValues(chartName, repoURL, values)
+	data, err := yaml.Marshal(values)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func applyRecommendedInstallValues(chartName, repoURL string, values map[string]interface{}) {
+	overrides := recommendedInstallValues(chartName, repoURL)
+	if len(overrides) == 0 {
+		return
+	}
+	mergeHelmValues(values, overrides)
+}
+
+func recommendedInstallValues(chartName, repoURL string) map[string]interface{} {
+	switch {
+	case strings.EqualFold(chartName, "casdoor-helm-charts") &&
+		strings.EqualFold(strings.TrimRight(repoURL, "/"), "oci://registry-1.docker.io/casbin/casdoor-helm-charts"):
+		return map[string]interface{}{
+			"service": map[string]interface{}{
+				"type": "NodePort",
+				"port": 8000,
+			},
+			"config": `appname = casdoor
+httpport = {{ .Values.service.port }}
+runmode = dev
+SessionOn = true
+copyrequestbody = true
+driverName = sqlite
+dataSourceName = /tmp/casdoor.db
+dbName = {{ include "casdoor.dbName" . }}
+redisEndpoint =
+defaultStorageProvider =
+isCloudIntranet = false
+authState = "casdoor"
+socks5Proxy = ""
+verificationCodeTimeout = 10
+initScore = 0
+logPostOnly = true
+origin =
+enableGzip = true
+ldapServerPort = 10389
+initDataFile = ""
+`,
+		}
+	default:
+		return nil
+	}
+}
+
+func mergeHelmValues(dst, src map[string]interface{}) {
+	for key, value := range src {
+		srcMap, srcIsMap := value.(map[string]interface{})
+		dstMap, dstIsMap := dst[key].(map[string]interface{})
+		if srcIsMap && dstIsMap {
+			mergeHelmValues(dstMap, srcMap)
+			continue
+		}
+		dst[key] = value
+	}
+}
+
+func cloneHelmValues(src map[string]interface{}) map[string]interface{} {
+	cloned := make(map[string]interface{}, len(src))
+	for key, value := range src {
+		cloned[key] = cloneHelmValue(value)
+	}
+	return cloned
+}
+
+func cloneHelmValue(value interface{}) interface{} {
+	switch typed := value.(type) {
+	case map[string]interface{}:
+		return cloneHelmValues(typed)
+	case []interface{}:
+		cloned := make([]interface{}, len(typed))
+		for i, item := range typed {
+			cloned[i] = cloneHelmValue(item)
+		}
+		return cloned
+	default:
+		return typed
+	}
+}
