@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -15,10 +16,16 @@ import (
 	"helm.sh/helm/v3/pkg/registry"
 	"helm.sh/helm/v3/pkg/release"
 	"helm.sh/helm/v3/pkg/repo"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 
 	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/discovery/cached/memory"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/restmapper"
 	"k8s.io/client-go/tools/clientcmd"
@@ -28,6 +35,17 @@ import (
 	sigsyaml "sigs.k8s.io/yaml"
 
 	proxypkg "github.com/casosorg/casos/proxy"
+)
+
+const (
+	helmOperationTimeout       = 5 * time.Minute
+	helmInstallTimeout         = 10 * time.Minute
+	helmDiagnosticsTimeout     = 15 * time.Second
+	helmDiagnosticsMaxEvents   = 20
+	helmDiagnosticsMaxLogBytes = 4000
+	helmDiagnosticsMessageLen  = 240
+	helmDiagnosticsEventLen    = 360
+	helmDiagnosticsTailLines   = int64(80)
 )
 
 // ---------- Types ----------
@@ -216,6 +234,52 @@ func isOCIRepo(repoURL string) bool {
 	return strings.HasPrefix(repoURL, fmt.Sprintf("%s://", registry.OCIScheme))
 }
 
+func resolveOCIChartRef(repoURL, version string) (string, string) {
+	ref := strings.TrimPrefix(repoURL, fmt.Sprintf("%s://", registry.OCIScheme))
+	ref, taggedVersion := splitOCIChartTag(ref)
+	if version != "" {
+		return ref, version
+	}
+	return ref, taggedVersion
+}
+
+func splitOCIChartTag(ref string) (string, string) {
+	if strings.Contains(ref, "@") {
+		return ref, ""
+	}
+	lastSlashIdx := strings.LastIndex(ref, "/")
+	tagIdx := strings.LastIndex(ref, ":")
+	if lastSlashIdx < 0 || tagIdx <= lastSlashIdx {
+		return ref, ""
+	}
+	tag := ref[tagIdx+1:]
+	repoAndTag := ref[lastSlashIdx+1 : tagIdx]
+	if strings.Contains(repoAndTag, ":") || !isOCIChartTag(tag) {
+		return ref, ""
+	}
+	return ref[:tagIdx], tag
+}
+
+func isOCIChartTag(tag string) bool {
+	if len(tag) == 0 || len(tag) > 128 {
+		return false
+	}
+	for i := 0; i < len(tag); i++ {
+		ch := tag[i]
+		isAlphaNum := (ch >= '0' && ch <= '9') || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z')
+		if i == 0 {
+			if !isAlphaNum {
+				return false
+			}
+			continue
+		}
+		if !isAlphaNum && ch != '_' && ch != '.' && ch != '-' {
+			return false
+		}
+	}
+	return true
+}
+
 func newOCIRegistryClient() (*registry.Client, error) {
 	return registry.NewClient(registry.ClientOptHTTPClient(proxypkg.ProxyHttpClient))
 }
@@ -223,26 +287,35 @@ func newOCIRegistryClient() (*registry.Client, error) {
 // pullOCIChart pulls the chart hosted at repoURL, resolving to the newest published
 // semver tag when version is empty.
 func pullOCIChart(repoURL, version string) (*registry.PullResult, error) {
-	ref := strings.TrimPrefix(repoURL, fmt.Sprintf("%s://", registry.OCIScheme))
+	ref, resolvedVersion := resolveOCIChartRef(repoURL, version)
 
 	rc, err := newOCIRegistryClient()
 	if err != nil {
 		return nil, fmt.Errorf("oci registry client: %w", err)
 	}
 
-	resolvedVersion := version
 	if resolvedVersion == "" {
-		tags, err := rc.Tags(ref)
-		if err != nil {
-			return nil, fmt.Errorf("list oci tags: %w", err)
+		if !strings.Contains(ref, "@") {
+			tags, err := rc.Tags(ref)
+			if err != nil {
+				return nil, fmt.Errorf("list oci tags: %w", err)
+			}
+			if len(tags) == 0 {
+				return nil, fmt.Errorf("no tags found for %s", repoURL)
+			}
+			resolvedVersion = tags[0]
 		}
-		if len(tags) == 0 {
-			return nil, fmt.Errorf("no tags found for %s", repoURL)
-		}
-		resolvedVersion = tags[0]
 	}
 
-	pull, err := rc.Pull(fmt.Sprintf("%s:%s", ref, resolvedVersion), registry.PullOptWithChart(true))
+	pullRef := ref
+	if resolvedVersion != "" {
+		if strings.Contains(ref, "@") {
+			return nil, fmt.Errorf("oci digest reference %s cannot be used with version %q", repoURL, resolvedVersion)
+		}
+		pullRef = fmt.Sprintf("%s:%s", ref, resolvedVersion)
+	}
+
+	pull, err := rc.Pull(pullRef, registry.PullOptWithChart(true))
 	if err != nil {
 		return nil, fmt.Errorf("pull oci chart: %w", err)
 	}
@@ -310,6 +383,13 @@ func loadChart(chartName, repoURL, version string) (*chart.Chart, error) {
 	}
 
 	chartURL := entry.URLs[0]
+	if isOCIRepo(chartURL) {
+		ociVersion := version
+		if ociVersion == "" {
+			ociVersion = entry.Version
+		}
+		return loadOCIChart(chartURL, ociVersion)
+	}
 	if !strings.HasPrefix(chartURL, "http") {
 		chartURL = strings.TrimRight(repoURL, "/") + "/" + strings.TrimLeft(chartURL, "/")
 	}
@@ -339,6 +419,412 @@ func parseValues(valuesYAML string) (map[string]interface{}, error) {
 		return nil, fmt.Errorf("parse values: %w", err)
 	}
 	return vals, nil
+}
+
+func withHelmReleaseDiagnostics(ctx context.Context, cfg *rest.Config, releaseName, namespace string, err error) error {
+	if err == nil {
+		return nil
+	}
+	lines := helmReleaseDiagnostics(ctx, cfg, releaseName, namespace)
+	if len(lines) == 0 {
+		return err
+	}
+	return fmt.Errorf("%w\n%s", err, strings.Join(lines, "\n"))
+}
+
+func helmReleaseDiagnostics(parent context.Context, cfg *rest.Config, releaseName, namespace string) []string {
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, helmDiagnosticsTimeout)
+	defer cancel()
+
+	client, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return []string{fmt.Sprintf("Helm release diagnostics unavailable: %v", err)}
+	}
+	if namespace == "" {
+		namespace = "default"
+	}
+
+	selector := labels.SelectorFromSet(labels.Set{"app.kubernetes.io/instance": releaseName}).String()
+	lines := []string{
+		fmt.Sprintf("Helm release diagnostics for %s/%s:", namespace, releaseName),
+		fmt.Sprintf("  selector: %s", selector),
+	}
+	objectNames := map[string]bool{releaseName: true}
+	addObjectName := func(name string) {
+		if name != "" {
+			objectNames[name] = true
+		}
+	}
+
+	deployments, err := client.AppsV1().Deployments(namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
+	if err != nil {
+		lines = append(lines, fmt.Sprintf("  list deployments failed: %v", err))
+	} else if len(deployments.Items) == 0 {
+		lines = append(lines, "  no deployments found for release")
+	} else {
+		for _, deployment := range deployments.Items {
+			addObjectName(deployment.Name)
+			lines = appendDeploymentDiagnostics(lines, deployment)
+		}
+	}
+
+	replicaSets, err := client.AppsV1().ReplicaSets(namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
+	if err != nil {
+		lines = append(lines, fmt.Sprintf("  list replicasets failed: %v", err))
+	} else if len(replicaSets.Items) == 0 {
+		lines = append(lines, "  no replicasets found for release")
+	} else {
+		for _, replicaSet := range replicaSets.Items {
+			addObjectName(replicaSet.Name)
+			lines = appendReplicaSetDiagnostics(lines, replicaSet)
+		}
+	}
+
+	services, err := client.CoreV1().Services(namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
+	if err != nil {
+		lines = append(lines, fmt.Sprintf("  list services failed: %v", err))
+	} else if len(services.Items) == 0 {
+		lines = append(lines, "  no services found for release")
+	} else {
+		for _, service := range services.Items {
+			addObjectName(service.Name)
+			lines = appendServiceDiagnostics(lines, service)
+		}
+	}
+
+	pods, err := client.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
+	if err != nil {
+		lines = append(lines, fmt.Sprintf("  list pods failed: %v", err))
+	} else if len(pods.Items) == 0 {
+		lines = append(lines, "  no pods found for release")
+	} else {
+		for _, pod := range pods.Items {
+			addObjectName(pod.Name)
+			lines = appendPodDiagnostics(ctx, client, lines, pod)
+		}
+	}
+
+	lines = appendEventDiagnostics(ctx, client, lines, namespace, releaseName, objectNames)
+	return lines
+}
+
+func appendDeploymentDiagnostics(lines []string, deployment appsv1.Deployment) []string {
+	desired := int32(1)
+	if deployment.Spec.Replicas != nil {
+		desired = *deployment.Spec.Replicas
+	}
+	lines = append(lines, fmt.Sprintf(
+		"  Deployment %s: ready=%d/%d available=%d updated=%d observedGeneration=%d generation=%d",
+		deployment.Name,
+		deployment.Status.ReadyReplicas,
+		desired,
+		deployment.Status.AvailableReplicas,
+		deployment.Status.UpdatedReplicas,
+		deployment.Status.ObservedGeneration,
+		deployment.Generation,
+	))
+	for _, condition := range deployment.Status.Conditions {
+		lines = append(lines, fmt.Sprintf(
+			"    condition %s=%s reason=%s message=%s",
+			condition.Type,
+			condition.Status,
+			emptyDash(condition.Reason),
+			oneLineDiagnosticText(condition.Message, helmDiagnosticsMessageLen),
+		))
+	}
+	return lines
+}
+
+func appendReplicaSetDiagnostics(lines []string, replicaSet appsv1.ReplicaSet) []string {
+	desired := int32(1)
+	if replicaSet.Spec.Replicas != nil {
+		desired = *replicaSet.Spec.Replicas
+	}
+	lines = append(lines, fmt.Sprintf(
+		"  ReplicaSet %s: ready=%d/%d available=%d observedGeneration=%d generation=%d",
+		replicaSet.Name,
+		replicaSet.Status.ReadyReplicas,
+		desired,
+		replicaSet.Status.AvailableReplicas,
+		replicaSet.Status.ObservedGeneration,
+		replicaSet.Generation,
+	))
+	for _, condition := range replicaSet.Status.Conditions {
+		lines = append(lines, fmt.Sprintf(
+			"    condition %s=%s reason=%s message=%s",
+			condition.Type,
+			condition.Status,
+			emptyDash(condition.Reason),
+			oneLineDiagnosticText(condition.Message, helmDiagnosticsMessageLen),
+		))
+	}
+	return lines
+}
+
+func appendServiceDiagnostics(lines []string, service corev1.Service) []string {
+	ports := make([]string, 0, len(service.Spec.Ports))
+	for _, port := range service.Spec.Ports {
+		portText := fmt.Sprintf("%s/%d->%s", port.Protocol, port.Port, port.TargetPort.String())
+		if port.NodePort != 0 {
+			portText = fmt.Sprintf("%s nodePort=%d", portText, port.NodePort)
+		}
+		ports = append(ports, portText)
+	}
+	lines = append(lines, fmt.Sprintf(
+		"  Service %s: type=%s clusterIP=%s ports=[%s] selector=%v",
+		service.Name,
+		service.Spec.Type,
+		service.Spec.ClusterIP,
+		strings.Join(ports, ", "),
+		service.Spec.Selector,
+	))
+	return lines
+}
+
+func appendPodDiagnostics(ctx context.Context, client kubernetes.Interface, lines []string, pod corev1.Pod) []string {
+	readyContainers, totalContainers := podReadyContainers(pod)
+	lines = append(lines, fmt.Sprintf(
+		"  Pod %s: phase=%s ready=%d/%d restarts=%d node=%s podIP=%s reason=%s message=%s",
+		pod.Name,
+		pod.Status.Phase,
+		readyContainers,
+		totalContainers,
+		podRestartCount(pod),
+		emptyDash(pod.Spec.NodeName),
+		emptyDash(pod.Status.PodIP),
+		emptyDash(pod.Status.Reason),
+		oneLineDiagnosticText(pod.Status.Message, helmDiagnosticsMessageLen),
+	))
+	for _, condition := range pod.Status.Conditions {
+		lines = append(lines, fmt.Sprintf(
+			"    condition %s=%s reason=%s message=%s",
+			condition.Type,
+			condition.Status,
+			emptyDash(condition.Reason),
+			oneLineDiagnosticText(condition.Message, helmDiagnosticsMessageLen),
+		))
+	}
+
+	restartsByContainer := map[string]int32{}
+	for _, status := range pod.Status.InitContainerStatuses {
+		restartsByContainer[status.Name] = status.RestartCount
+		lines = appendContainerStatusDiagnostics(lines, "init container", status)
+	}
+	for _, status := range pod.Status.ContainerStatuses {
+		restartsByContainer[status.Name] = status.RestartCount
+		lines = appendContainerStatusDiagnostics(lines, "container", status)
+	}
+
+	for _, container := range pod.Spec.InitContainers {
+		lines = appendPodLogDiagnostics(ctx, client, lines, pod.Namespace, pod.Name, container.Name, false)
+		if restartsByContainer[container.Name] > 0 {
+			lines = appendPodLogDiagnostics(ctx, client, lines, pod.Namespace, pod.Name, container.Name, true)
+		}
+	}
+	for _, container := range pod.Spec.Containers {
+		lines = appendPodLogDiagnostics(ctx, client, lines, pod.Namespace, pod.Name, container.Name, false)
+		if restartsByContainer[container.Name] > 0 {
+			lines = appendPodLogDiagnostics(ctx, client, lines, pod.Namespace, pod.Name, container.Name, true)
+		}
+	}
+	return lines
+}
+
+func appendContainerStatusDiagnostics(lines []string, kind string, status corev1.ContainerStatus) []string {
+	lines = append(lines, fmt.Sprintf(
+		"    %s %s: ready=%t restarts=%d state=%s",
+		kind,
+		status.Name,
+		status.Ready,
+		status.RestartCount,
+		containerStateText(status.State),
+	))
+	lastState := containerStateText(status.LastTerminationState)
+	if lastState != "none" {
+		lines = append(lines, fmt.Sprintf("      lastState=%s", lastState))
+	}
+	return lines
+}
+
+func appendPodLogDiagnostics(ctx context.Context, client kubernetes.Interface, lines []string, namespace, podName, containerName string, previous bool) []string {
+	tailLines := helmDiagnosticsTailLines
+	raw, err := client.CoreV1().Pods(namespace).GetLogs(podName, &corev1.PodLogOptions{
+		Container: containerName,
+		Previous:  previous,
+		TailLines: &tailLines,
+	}).Do(ctx).Raw()
+	if err != nil {
+		return append(lines, fmt.Sprintf(
+			"    logs %s/%s container=%s previous=%t unavailable: %v",
+			namespace,
+			podName,
+			containerName,
+			previous,
+			err,
+		))
+	}
+	logText := strings.TrimSpace(string(raw))
+	if logText == "" {
+		return append(lines, fmt.Sprintf(
+			"    logs %s/%s container=%s previous=%t empty",
+			namespace,
+			podName,
+			containerName,
+			previous,
+		))
+	}
+	logText = oneLineDiagnosticText(logText, helmDiagnosticsMaxLogBytes)
+	return append(lines, fmt.Sprintf(
+		"    logs %s/%s container=%s previous=%t tail: %s",
+		namespace,
+		podName,
+		containerName,
+		previous,
+		logText,
+	))
+}
+
+func appendEventDiagnostics(ctx context.Context, client kubernetes.Interface, lines []string, namespace, releaseName string, objectNames map[string]bool) []string {
+	matchedEventsByKey := map[string]corev1.Event{}
+	for objectName := range objectNames {
+		events, err := client.CoreV1().Events(namespace).List(ctx, metav1.ListOptions{
+			FieldSelector: fields.OneTermEqualSelector("involvedObject.name", objectName).String(),
+		})
+		if err != nil {
+			lines = append(lines, fmt.Sprintf("  list events for %s failed: %v", objectName, err))
+			continue
+		}
+		for _, event := range events.Items {
+			matchedEventsByKey[eventKey(event)] = event
+		}
+	}
+
+	matchedEvents := make([]corev1.Event, 0, len(matchedEventsByKey))
+	for _, event := range matchedEventsByKey {
+		if objectNames[event.InvolvedObject.Name] || strings.Contains(event.Message, releaseName) {
+			matchedEvents = append(matchedEvents, event)
+		}
+	}
+	sort.Slice(matchedEvents, func(i, j int) bool {
+		return eventTime(matchedEvents[i]).Before(eventTime(matchedEvents[j]))
+	})
+	if len(matchedEvents) == 0 {
+		return append(lines, "  no related events found")
+	}
+	if len(matchedEvents) > helmDiagnosticsMaxEvents {
+		matchedEvents = matchedEvents[len(matchedEvents)-helmDiagnosticsMaxEvents:]
+	}
+	lines = append(lines, "  recent related events:")
+	for _, event := range matchedEvents {
+		lines = append(lines, fmt.Sprintf(
+			"    %s %s %s %s/%s count=%d message=%s",
+			eventTime(event).Format(time.RFC3339),
+			event.Type,
+			event.Reason,
+			event.InvolvedObject.Kind,
+			event.InvolvedObject.Name,
+			event.Count,
+			oneLineDiagnosticText(event.Message, helmDiagnosticsEventLen),
+		))
+	}
+	return lines
+}
+
+func eventKey(event corev1.Event) string {
+	if event.UID != "" {
+		return string(event.UID)
+	}
+	return fmt.Sprintf(
+		"%s/%s/%s/%s/%s/%s",
+		event.Namespace,
+		event.InvolvedObject.Kind,
+		event.InvolvedObject.Name,
+		event.Type,
+		event.Reason,
+		eventTime(event).Format(time.RFC3339Nano),
+	)
+}
+
+func podReadyContainers(pod corev1.Pod) (int, int) {
+	ready := 0
+	for _, status := range pod.Status.ContainerStatuses {
+		if status.Ready {
+			ready++
+		}
+	}
+	return ready, len(pod.Spec.Containers)
+}
+
+func podRestartCount(pod corev1.Pod) int32 {
+	var restarts int32
+	for _, status := range pod.Status.InitContainerStatuses {
+		restarts += status.RestartCount
+	}
+	for _, status := range pod.Status.ContainerStatuses {
+		restarts += status.RestartCount
+	}
+	return restarts
+}
+
+func containerStateText(state corev1.ContainerState) string {
+	switch {
+	case state.Waiting != nil:
+		return fmt.Sprintf(
+			"waiting reason=%s message=%s",
+			emptyDash(state.Waiting.Reason),
+			oneLineDiagnosticText(state.Waiting.Message, helmDiagnosticsMessageLen),
+		)
+	case state.Running != nil:
+		return fmt.Sprintf("running startedAt=%s", state.Running.StartedAt.Time.Format(time.RFC3339))
+	case state.Terminated != nil:
+		return fmt.Sprintf(
+			"terminated reason=%s exitCode=%d signal=%d finishedAt=%s message=%s",
+			emptyDash(state.Terminated.Reason),
+			state.Terminated.ExitCode,
+			state.Terminated.Signal,
+			state.Terminated.FinishedAt.Time.Format(time.RFC3339),
+			oneLineDiagnosticText(state.Terminated.Message, helmDiagnosticsMessageLen),
+		)
+	default:
+		return "none"
+	}
+}
+
+func eventTime(event corev1.Event) time.Time {
+	if !event.LastTimestamp.IsZero() {
+		return event.LastTimestamp.Time
+	}
+	if !event.EventTime.IsZero() {
+		return event.EventTime.Time
+	}
+	if !event.FirstTimestamp.IsZero() {
+		return event.FirstTimestamp.Time
+	}
+	return event.CreationTimestamp.Time
+}
+
+func emptyDash(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "-"
+	}
+	return value
+}
+
+func oneLineDiagnosticText(text string, maxLen int) string {
+	text = strings.Join(strings.Fields(text), " ")
+	if text == "" {
+		return "-"
+	}
+	if len(text) <= maxLen {
+		return text
+	}
+	if maxLen <= 3 {
+		return text[:maxLen]
+	}
+	return text[:maxLen-3] + "..."
 }
 
 // ---------- Release helpers ----------
@@ -410,14 +896,19 @@ func InstallHelmChart(cfg *rest.Config, releaseName, namespace, chartName, repoU
 	install.Namespace = namespace
 	install.CreateNamespace = true
 	install.Wait = true
-	install.Timeout = 5 * time.Minute
+	install.Timeout = helmInstallTimeout
 
 	_, err = install.Run(ch, vals)
-	return err
+	if err != nil {
+		return withHelmReleaseDiagnostics(context.Background(), cfg, releaseName, namespace, err)
+	}
+	return nil
 }
 
 // InstallHelmChartStream runs helm install asynchronously and pushes log lines to the returned channel.
-// The channel is closed when the operation finishes; a final line of "ERROR: <msg>" or "DONE" signals the outcome.
+// It waits for chart resources to become ready before sending "DONE", so the stream can stay open until
+// helmInstallTimeout or until ctx is canceled.
+// The channel is closed when the operation finishes; a final line of "ERROR: <msg>", "ABORTED", or "DONE" signals the outcome.
 // Cancel ctx to abort a waiting install (e.g. stuck waiting for PVCs).
 func InstallHelmChartStream(ctx context.Context, cfg *rest.Config, releaseName, namespace, chartName, repoURL, version, valuesYAML string) <-chan string {
 	logCh := make(chan string, 64)
@@ -453,11 +944,17 @@ func InstallHelmChartStream(ctx context.Context, cfg *rest.Config, releaseName, 
 		install.ReleaseName = releaseName
 		install.Namespace = namespace
 		install.CreateNamespace = true
-		install.Wait = false
+		install.Wait = true
+		install.Timeout = helmInstallTimeout
 		if _, err = install.RunWithContext(ctx, helmChart, vals); err != nil {
 			if ctx.Err() != nil {
 				send("ABORTED")
 			} else {
+				for _, line := range helmReleaseDiagnostics(ctx, cfg, releaseName, namespace) {
+					if !send(line) {
+						return
+					}
+				}
 				send("ERROR: " + err.Error())
 			}
 			return
@@ -484,7 +981,7 @@ func UpgradeHelmRelease(cfg *rest.Config, releaseName, namespace, chartName, rep
 	upgrade := action.NewUpgrade(actionConfig)
 	upgrade.Namespace = namespace
 	upgrade.Wait = true
-	upgrade.Timeout = 5 * time.Minute
+	upgrade.Timeout = helmOperationTimeout
 
 	_, err = upgrade.Run(releaseName, ch, vals)
 	return err
@@ -498,7 +995,7 @@ func RollbackHelmRelease(cfg *rest.Config, releaseName, namespace string, revisi
 	rollback := action.NewRollback(actionConfig)
 	rollback.Version = revision
 	rollback.Wait = true
-	rollback.Timeout = 5 * time.Minute
+	rollback.Timeout = helmOperationTimeout
 	return rollback.Run(releaseName)
 }
 
@@ -509,7 +1006,7 @@ func UninstallHelmRelease(cfg *rest.Config, releaseName, namespace string) error
 	}
 	uninstall := action.NewUninstall(actionConfig)
 	uninstall.Wait = true
-	uninstall.Timeout = 5 * time.Minute
+	uninstall.Timeout = helmOperationTimeout
 	_, err = uninstall.Run(releaseName)
 	return err
 }

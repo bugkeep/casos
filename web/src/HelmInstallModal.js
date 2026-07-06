@@ -103,20 +103,23 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
           valuesYAML,
         },
         line => {
-          if (line === "ABORTED") {
-            setAborted(true);
-          } else {
+          if (line !== "DONE" && line !== "ABORTED") {
             setLogs(prev => [...prev, line]);
           }
         },
         ctrl.signal
       )
-        .then(() => {
-          setDone(true);
-          onInstalled?.();
+        .then(status => {
+          if (status === "DONE") {
+            setDone(true);
+          } else if (status === "ABORTED") {
+            setAborted(true);
+          }
         })
         .catch(e => {
-          if (e.name !== "AbortError") {
+          if (e.name === "AbortError") {
+            setAborted(true);
+          } else {
             setError(e.message);
           }
         })
