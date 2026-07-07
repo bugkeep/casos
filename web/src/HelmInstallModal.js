@@ -3,6 +3,7 @@ import {Alert, Button, Form, Input, Modal, Select, Spin, Typography} from "antd"
 import {useTranslation} from "react-i18next";
 import * as HelmBackend from "./backend/HelmBackend";
 import * as NamespaceBackend from "./backend/NamespaceBackend";
+import {buildRecommendedValues} from "./helmInstallDefaults";
 
 const {Text} = Typography;
 
@@ -46,7 +47,9 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
       HelmBackend.getHelmChartValues(chart.chartName, chart.repoURL, chart.version ?? "")
         .then(res => {
           if (res.status === "ok") {
-            setValuesYAML(res.data ?? "");
+            const releaseName = form.getFieldValue("releaseName") || chart.chartName;
+            const {yaml} = buildRecommendedValues(res.data ?? "", releaseName);
+            setValuesYAML(yaml);
           } else {
             setError(res.msg);
           }
@@ -79,6 +82,9 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
   };
 
   const handleOk = () => {
+    if (valuesLoading) {
+      return;
+    }
     if (done || aborted) {
       if (done) {onInstalled?.();}
       handleClose();
@@ -103,9 +109,7 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
           valuesYAML,
         },
         line => {
-          if (line === "ABORTED") {
-            setAborted(true);
-          } else {
+          if (line !== "DONE" && line !== "ABORTED") {
             setLogs(prev => [...prev, line]);
           }
         },
@@ -114,6 +118,8 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
         .then(status => {
           if (status === "DONE") {
             setDone(true);
+          } else if (status === "ABORTED") {
+            setAborted(true);
           }
         })
         .catch(e => {
@@ -165,7 +171,7 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
             </Button>
           )}
           {!done && !aborted && (
-            <Button type="primary" loading={installing} onClick={handleOk}>
+            <Button type="primary" loading={installing} disabled={valuesLoading} onClick={handleOk}>
               {t("helm:Install")}
             </Button>
           )}
