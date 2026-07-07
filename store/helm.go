@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -246,7 +247,11 @@ func fetchIndexFile(repoURL string) (*repo.IndexFile, error) {
 	indexURL := strings.TrimRight(repoURL, "/") + "/index.yaml"
 	resp, err := helmGet(indexURL)
 	if err != nil {
-		return nil, fmt.Errorf("fetch index: %w", err)
+		return nil, fmt.Errorf(
+			"fetch index %q: %w",
+			redactURLForError(indexURL),
+			sanitizeErrorMessage(err, indexURL, repoURL),
+		)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
@@ -382,14 +387,18 @@ func pullOCIChart(repoURL, version string) (*registry.PullResult, error) {
 		if !strings.Contains(ref, "@") {
 			tags, err := rc.Tags(ref)
 			if err != nil {
-				return nil, fmt.Errorf("list oci tags: %w", err)
+				return nil, fmt.Errorf(
+					"list oci tags for %q: %w",
+					redactURLForError(repoURL),
+					sanitizeErrorMessage(err, repoURL, ref),
+				)
 			}
 			if len(tags) == 0 {
-				return nil, fmt.Errorf("no tags found for %s", repoURL)
+				return nil, fmt.Errorf("no tags found for %s", redactURLForError(repoURL))
 			}
 			resolvedVersion = latestOCISemverTag(tags)
 			if resolvedVersion == "" {
-				return nil, fmt.Errorf("no semver tags found for %s", repoURL)
+				return nil, fmt.Errorf("no semver tags found for %s", redactURLForError(repoURL))
 			}
 		}
 	}
@@ -397,14 +406,18 @@ func pullOCIChart(repoURL, version string) (*registry.PullResult, error) {
 	pullRef := ref
 	if resolvedVersion != "" {
 		if strings.Contains(ref, "@") {
-			return nil, fmt.Errorf("oci digest reference %s cannot be used with version %q", repoURL, resolvedVersion)
+			return nil, fmt.Errorf("oci digest reference %s cannot be used with version %q", redactURLForError(repoURL), resolvedVersion)
 		}
 		pullRef = fmt.Sprintf("%s:%s", ref, resolvedVersion)
 	}
 
 	pull, err := rc.Pull(pullRef, registry.PullOptWithChart(true))
 	if err != nil {
-		return nil, fmt.Errorf("pull oci chart: %w", err)
+		return nil, fmt.Errorf(
+			"pull oci chart %q: %w",
+			redactURLForError(repoURL),
+			sanitizeErrorMessage(err, repoURL, ref, pullRef),
+		)
 	}
 	return pull, nil
 }
@@ -448,7 +461,7 @@ func fetchOCIChartSummary(repoURL string) ([]HelmChartSummary, error) {
 	}
 	meta := pull.Chart.Meta
 	if meta == nil {
-		return nil, fmt.Errorf("chart metadata not found for %s", repoURL)
+		return nil, fmt.Errorf("chart metadata not found for %s", redactURLForError(repoURL))
 	}
 	return []HelmChartSummary{
 		{
@@ -464,14 +477,150 @@ func fetchOCIChartSummary(repoURL string) ([]HelmChartSummary, error) {
 
 // ---------- Chart loader ----------
 
+func redactURLForError(raw string) string {
+	if raw == "" {
+		return raw
+	}
+	work := raw
+	addedScheme := false
+	if !strings.Contains(raw, "://") {
+		work = "redact://" + raw
+		addedScheme = true
+	}
+	parsed, err := url.Parse(work)
+	if err != nil {
+		return fallbackRedactCredentialSegment(raw)
+	}
+	if parsed.User != nil {
+		parsed.User = url.User("REDACTED")
+	}
+	if parsed.RawQuery != "" {
+		query := parsed.Query()
+		for key := range query {
+			if isCredentialQueryKey(key) {
+				query.Set(key, "REDACTED")
+			}
+		}
+		parsed.RawQuery = query.Encode()
+	}
+	redacted := parsed.String()
+	if addedScheme {
+		return strings.TrimPrefix(redacted, "redact://")
+	}
+	return redacted
+}
+
+func isCredentialQueryKey(key string) bool {
+	switch strings.ToLower(key) {
+	case "access_key", "accesskey", "access_token", "apikey", "api_key", "password", "passwd", "secret", "token":
+		return true
+	default:
+		return false
+	}
+}
+
+func fallbackRedactCredentialSegment(raw string) string {
+	at := strings.Index(raw, "@")
+	if at <= 0 {
+		return raw
+	}
+	start := strings.LastIndex(raw[:at], "://")
+	if start >= 0 {
+		start += 3
+	} else {
+		start = 0
+	}
+	candidate := raw[start:at]
+	if !strings.Contains(candidate, ":") || strings.ContainsAny(candidate, "/?#") {
+		return raw
+	}
+	return raw[:start] + "REDACTED" + raw[at:]
+}
+
+type sanitizedDisplayError struct {
+	message string
+	cause   error
+}
+
+func (e *sanitizedDisplayError) Error() string {
+	return e.message
+}
+
+func (e *sanitizedDisplayError) Unwrap() error {
+	return e.cause
+}
+
+func sanitizeErrorMessage(err error, rawValues ...string) error {
+	if err == nil {
+		return nil
+	}
+	message := err.Error()
+	values := make([]string, 0, len(rawValues)*2)
+	seen := make(map[string]struct{}, len(rawValues)*2)
+	for _, raw := range rawValues {
+		for _, candidate := range redactionCandidates(raw) {
+			if _, ok := seen[candidate]; ok {
+				continue
+			}
+			seen[candidate] = struct{}{}
+			values = append(values, candidate)
+		}
+	}
+	sort.SliceStable(values, func(i, j int) bool {
+		return len(values[i]) > len(values[j])
+	})
+	for _, raw := range values {
+		message = strings.ReplaceAll(message, raw, redactURLForError(raw))
+	}
+	if message == err.Error() {
+		return err
+	}
+	return &sanitizedDisplayError{message: message, cause: err}
+}
+
+func redactionCandidates(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	candidates := []string{raw}
+	work := raw
+	addedScheme := false
+	if !strings.Contains(raw, "://") {
+		work = "redact://" + raw
+		addedScheme = true
+	}
+	parsed, err := url.Parse(work)
+	if err != nil {
+		return candidates
+	}
+	normalized := parsed.String()
+	if addedScheme {
+		normalized = strings.TrimPrefix(normalized, "redact://")
+	}
+	if normalized != raw {
+		candidates = append(candidates, normalized)
+	}
+	return candidates
+}
+
 func loadChart(chartName, repoURL, version string) (*chart.Chart, error) {
 	if isOCIRepo(repoURL) {
-		return loadOCIChart(repoURL, version)
+		ch, err := loadOCIChart(repoURL, version)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"load chart %q from OCI repo %q version %q: %w",
+				chartName,
+				redactURLForError(repoURL),
+				version,
+				err,
+			)
+		}
+		return ch, nil
 	}
 
 	idx, err := fetchIndexFile(repoURL)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("load chart %q from repo %q version %q: fetch index.yaml failed: %w", chartName, redactURLForError(repoURL), version, err)
 	}
 
 	versions, ok := idx.Entries[chartName]
@@ -499,7 +648,18 @@ func loadChart(chartName, repoURL, version string) (*chart.Chart, error) {
 		if ociVersion == "" {
 			ociVersion = entry.Version
 		}
-		return loadOCIChart(chartURL, ociVersion)
+		ch, err := loadOCIChart(chartURL, ociVersion)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"load chart %q from repo %q version %q: index.yaml resolved to OCI chart URL %q: %w",
+				chartName,
+				redactURLForError(repoURL),
+				ociVersion,
+				redactURLForError(chartURL),
+				err,
+			)
+		}
+		return ch, nil
 	}
 	if !strings.HasPrefix(chartURL, "http") {
 		chartURL = strings.TrimRight(repoURL, "/") + "/" + strings.TrimLeft(chartURL, "/")
@@ -507,18 +667,50 @@ func loadChart(chartName, repoURL, version string) (*chart.Chart, error) {
 
 	resp, err := helmGet(chartURL)
 	if err != nil {
-		return nil, fmt.Errorf("download chart: %w", err)
+		return nil, fmt.Errorf(
+			"load chart %q from repo %q version %q: download chart archive %q failed: %w",
+			chartName,
+			redactURLForError(repoURL),
+			entry.Version,
+			redactURLForError(chartURL),
+			sanitizeErrorMessage(err, chartURL, repoURL),
+		)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("download chart: HTTP %d", resp.StatusCode)
+		return nil, fmt.Errorf(
+			"load chart %q from repo %q version %q: chart archive %q returned HTTP %d",
+			chartName,
+			redactURLForError(repoURL),
+			entry.Version,
+			redactURLForError(chartURL),
+			resp.StatusCode,
+		)
 	}
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf(
+			"load chart %q from repo %q version %q: read chart archive %q failed: %w",
+			chartName,
+			redactURLForError(repoURL),
+			entry.Version,
+			redactURLForError(chartURL),
+			err,
+		)
 	}
-	return loader.LoadArchive(bytes.NewReader(data))
+	ch, err := loader.LoadArchive(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf(
+			"load chart %q from repo %q version %q: parse chart archive %q failed: %w",
+			chartName,
+			redactURLForError(repoURL),
+			entry.Version,
+			redactURLForError(chartURL),
+			err,
+		)
+	}
+	return ch, nil
 }
 
 func parseValues(valuesYAML string) (map[string]interface{}, error) {
