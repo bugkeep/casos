@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -16,7 +15,6 @@ import (
 	"helm.sh/helm/v3/pkg/action"
 	"helm.sh/helm/v3/pkg/chart"
 	"helm.sh/helm/v3/pkg/chart/loader"
-	"helm.sh/helm/v3/pkg/chartutil"
 	"helm.sh/helm/v3/pkg/registry"
 	"helm.sh/helm/v3/pkg/release"
 	"helm.sh/helm/v3/pkg/repo"
@@ -27,7 +25,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
-	k8sversion "k8s.io/apimachinery/pkg/util/version"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/discovery/cached/memory"
 	"k8s.io/client-go/kubernetes"
@@ -145,89 +142,7 @@ func newHelmConfigWithLog(cfg *rest.Config, namespace string, logFn func(string,
 	if err := actionConfig.Init(newRESTClientGetter(cfg, namespace), namespace, "secret", logFn); err != nil {
 		return nil, fmt.Errorf("helm config init: %w", err)
 	}
-	capabilities, err := buildHelmCapabilities(cfg, namespace, logFn)
-	if err != nil {
-		logFn("WARNING: failed to build helm capabilities, using defaults: %v", err)
-		capabilities = chartutil.DefaultCapabilities
-	}
-	actionConfig.Capabilities = capabilities
 	return actionConfig, nil
-}
-
-func buildHelmCapabilities(cfg *rest.Config, namespace string, logFn func(string, ...interface{})) (*chartutil.Capabilities, error) {
-	dc, err := newRESTClientGetter(cfg, namespace).ToDiscoveryClient()
-	if err != nil {
-		return nil, fmt.Errorf("helm discovery client: %w", err)
-	}
-	dc.Invalidate()
-
-	kubeVersion, err := dc.ServerVersion()
-	if err != nil {
-		return nil, fmt.Errorf("helm server version: %w", err)
-	}
-
-	apiVersions, err := action.GetVersionSet(dc)
-	if err != nil {
-		if discovery.IsGroupDiscoveryFailedError(err) {
-			logFn("WARNING: The Kubernetes server has an orphaned API service. Server reports: %s", err)
-			logFn("WARNING: To fix this, kubectl delete apiservice <service-name>")
-			if apiVersions == nil {
-				apiVersions = chartutil.VersionSet{}
-			}
-		} else {
-			return nil, fmt.Errorf("helm api versions: %w", err)
-		}
-	}
-
-	normalizedVersion := normalizeHelmKubeVersion(kubeVersion.GitVersion, kubeVersion.Major, kubeVersion.Minor)
-
-	return &chartutil.Capabilities{
-		APIVersions: apiVersions,
-		KubeVersion: normalizedVersion,
-		HelmVersion: chartutil.DefaultCapabilities.HelmVersion,
-	}, nil
-}
-
-func normalizeHelmKubeVersion(gitVersion, major, minor string) chartutil.KubeVersion {
-	normalizedGitVersion := gitVersion
-	if idx := strings.Index(normalizedGitVersion, "+"); idx >= 0 {
-		normalizedGitVersion = normalizedGitVersion[:idx]
-	}
-
-	semanticVersion, err := k8sversion.ParseSemantic(normalizedGitVersion)
-	if err == nil {
-		normalized := chartutil.KubeVersion{
-			Version: "v" + semanticVersion.String(),
-			Major:   strconv.Itoa(int(semanticVersion.Major())),
-			Minor:   strconv.Itoa(int(semanticVersion.Minor())),
-		}
-		if shouldKeepHelmKubePrerelease(semanticVersion.PreRelease()) {
-			return normalized
-		}
-		normalized.Version = fmt.Sprintf("v%d.%d.%d", semanticVersion.Major(), semanticVersion.Minor(), semanticVersion.Patch())
-		return normalized
-	}
-
-	parsedVersion, err := chartutil.ParseKubeVersion(normalizedGitVersion)
-	if err == nil {
-		return *parsedVersion
-	}
-
-	return chartutil.KubeVersion{
-		Version: gitVersion,
-		Major:   major,
-		Minor:   minor,
-	}
-}
-
-func shouldKeepHelmKubePrerelease(preRelease string) bool {
-	// Preserve canonical Kubernetes prereleases, but strip distro/vendor
-	// suffixes such as k3s/eks so Helm's kubeVersion checks see the base
-	// upstream version instead of a distribution tag.
-	return preRelease == "" ||
-		strings.HasPrefix(preRelease, "alpha") ||
-		strings.HasPrefix(preRelease, "beta") ||
-		strings.HasPrefix(preRelease, "rc")
 }
 
 // ---------- HTTP helper ----------
@@ -729,10 +644,11 @@ func withHelmReleaseDiagnostics(ctx context.Context, cfg *rest.Config, releaseNa
 		return nil
 	}
 	lines := helmReleaseDiagnostics(ctx, cfg, releaseName, namespace)
+	displayErr := clarifyHelmWaitError(err)
 	if len(lines) == 0 {
-		return err
+		return displayErr
 	}
-	return fmt.Errorf("%w\n%s", err, strings.Join(lines, "\n"))
+	return fmt.Errorf("%w\n%s", displayErr, strings.Join(lines, "\n"))
 }
 
 func helmReleaseDiagnostics(parent context.Context, cfg *rest.Config, releaseName, namespace string) []string {
@@ -795,6 +711,18 @@ func helmReleaseDiagnostics(parent context.Context, cfg *rest.Config, releaseNam
 		for _, service := range services.Items {
 			addObjectName(service.Name)
 			lines = appendServiceDiagnostics(lines, service)
+		}
+	}
+
+	pvcs, err := client.CoreV1().PersistentVolumeClaims(namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
+	if err != nil {
+		lines = append(lines, fmt.Sprintf("  list pvcs failed: %v", err))
+	} else if len(pvcs.Items) == 0 {
+		lines = append(lines, "  no persistentvolumeclaims found for release")
+	} else {
+		for _, pvc := range pvcs.Items {
+			addObjectName(pvc.Name)
+			lines = appendPVCDiagnostics(lines, pvc)
 		}
 	}
 
@@ -884,6 +812,34 @@ func appendServiceDiagnostics(lines []string, service corev1.Service) []string {
 		strings.Join(ports, ", "),
 		service.Spec.Selector,
 	))
+	return lines
+}
+
+func appendPVCDiagnostics(lines []string, pvc corev1.PersistentVolumeClaim) []string {
+	storage := ""
+	if pvc.Spec.Resources.Requests != nil {
+		storage = pvc.Spec.Resources.Requests.Storage().String()
+	}
+	className := ""
+	if pvc.Spec.StorageClassName != nil {
+		className = *pvc.Spec.StorageClassName
+	}
+	lines = append(lines, fmt.Sprintf(
+		"  PersistentVolumeClaim %s: status=%s volume=%s storageClass=%s requested=%s",
+		pvc.Name,
+		pvc.Status.Phase,
+		emptyDash(pvc.Spec.VolumeName),
+		emptyDash(className),
+		emptyDash(storage),
+	))
+	for _, condition := range pvc.Status.Conditions {
+		lines = append(lines, fmt.Sprintf(
+			"    condition %s=%s message=%s",
+			condition.Type,
+			condition.Status,
+			oneLineDiagnosticText(condition.Message, helmDiagnosticsMessageLen),
+		))
+	}
 	return lines
 }
 
@@ -1164,12 +1120,7 @@ func InstallHelmChartStream(ctx context.Context, cfg *rest.Config, releaseName, 
 	go func() {
 		defer close(logCh)
 		send := func(line string) bool {
-			select {
-			case logCh <- line:
-				return true
-			case <-ctx.Done():
-				return false
-			}
+			return trySendLogLine(ctx, logCh, line)
 		}
 		logFn := func(format string, args ...interface{}) {
 			send(fmt.Sprintf(format, args...))
@@ -1211,6 +1162,20 @@ func InstallHelmChartStream(ctx context.Context, cfg *rest.Config, releaseName, 
 		send("DONE")
 	}()
 	return logCh
+}
+
+func trySendLogLine(ctx context.Context, logCh chan string, line string) (ok bool) {
+	defer func() {
+		if recover() != nil {
+			ok = false
+		}
+	}()
+	select {
+	case logCh <- line:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
 
 func UpgradeHelmRelease(cfg *rest.Config, releaseName, namespace, chartName, repoURL, version, valuesYAML string) error {
@@ -1306,4 +1271,44 @@ func GetHelmChartDefaultValues(chartName, repoURL, version string) (string, erro
 		return "", err
 	}
 	return string(data), nil
+}
+
+func clarifyHelmWaitMessage(message string) string {
+	replacements := []struct {
+		old string
+		new string
+	}{
+		{
+			old: "PersistentVolumeClaim is not bound:",
+			new: "Waiting for PersistentVolumeClaim to bind (this can be normal during install/reinstall):",
+		},
+		{
+			old: "Deployment is not ready:",
+			new: "Waiting for Deployment readiness:",
+		},
+		{
+			old: "StatefulSet is not ready:",
+			new: "Waiting for StatefulSet readiness:",
+		},
+		{
+			old: "DaemonSet is not ready:",
+			new: "Waiting for DaemonSet readiness:",
+		},
+	}
+	clarified := message
+	for _, replacement := range replacements {
+		clarified = strings.ReplaceAll(clarified, replacement.old, replacement.new)
+	}
+	return clarified
+}
+
+func clarifyHelmWaitError(err error) error {
+	if err == nil {
+		return nil
+	}
+	message := clarifyHelmWaitMessage(err.Error())
+	if message == err.Error() {
+		return err
+	}
+	return &sanitizedDisplayError{message: message, cause: err}
 }

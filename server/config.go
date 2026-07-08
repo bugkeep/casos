@@ -11,14 +11,15 @@ import (
 
 // Config holds control-plane settings populated from app.conf.
 type Config struct {
-	DataDir          string
-	ApiserverBind    string // actual bind / SAN IP (may be loopback in dev)
-	AdvertiseAddress string // non-loopback IP registered as kubernetes service endpoint
-	ApiserverPort    int
-	WebhookPort      int    // HTTPS port for the Casbin admission webhook server
-	DSN              string // MySQL DSN forwarded to kine
-	SandboxImage     string // containerd sandbox (pause) image, empty = upstream default
-	Socks5Proxy      string // outbound socks5 proxy, e.g. 127.0.0.1:10808
+	DataDir                   string
+	ApiserverBind             string // actual bind / SAN IP (may be loopback in dev)
+	AdvertiseAddress          string // non-loopback IP registered as kubernetes service endpoint
+	ApiserverPort             int
+	WebhookPort               int    // HTTPS port for the Casbin admission webhook server
+	DSN                       string // MySQL DSN forwarded to kine
+	SandboxImage              string // containerd sandbox (pause) image, empty = upstream default
+	Socks5Proxy               string // outbound socks5 proxy, e.g. 127.0.0.1:10808
+	StorageProvisionerEnabled bool   // install the built-in local-path provisioner for local clusters
 }
 
 // ConfigFromAppConf reads server config from the beego app.conf.
@@ -66,15 +67,21 @@ func ConfigFromAppConf() (Config, error) {
 		}
 	}
 
+	storageProvisionerEnabled := true
+	if conf.GetConfigString("storageProvisionerEnabled") != "" {
+		storageProvisionerEnabled = conf.GetConfigBool("storageProvisionerEnabled")
+	}
+
 	return Config{
-		DataDir:          dataDir,
-		ApiserverBind:    bind,
-		AdvertiseAddress: advertise,
-		ApiserverPort:    port,
-		WebhookPort:      webhookPort,
-		DSN:              dsn,
-		SandboxImage:     sandboxImage,
-		Socks5Proxy:      socks5Proxy,
+		DataDir:                   dataDir,
+		ApiserverBind:             bind,
+		AdvertiseAddress:          advertise,
+		ApiserverPort:             port,
+		WebhookPort:               webhookPort,
+		DSN:                       dsn,
+		SandboxImage:              sandboxImage,
+		Socks5Proxy:               socks5Proxy,
+		StorageProvisionerEnabled: storageProvisionerEnabled,
 	}, nil
 }
 

@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"encoding/json"
+	"strconv"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -19,6 +20,7 @@ type deploymentSummary struct {
 	ReadyReplicas     int32             `json:"readyReplicas"`
 	AvailableReplicas int32             `json:"availableReplicas"`
 	Image             string            `json:"image"`
+	Ports             []portRequest     `json:"ports"`
 	Selector          map[string]string `json:"selector"`
 	EnvVars           []envVarSummary   `json:"envVars"`
 	Volumes           []volumeSummary   `json:"volumes"`
@@ -39,6 +41,20 @@ func toDeploymentSummary(d appsv1.Deployment) deploymentSummary {
 	if d.Spec.Selector != nil {
 		selector = d.Spec.Selector.MatchLabels
 	}
+	ports := []portRequest{}
+	if len(d.Spec.Template.Spec.Containers) > 0 {
+		for _, p := range d.Spec.Template.Spec.Containers[0].Ports {
+			ports = append(ports, portRequest{
+				Name:       p.Name,
+				Protocol:   string(p.Protocol),
+				Port:       p.ContainerPort,
+				TargetPort: p.Name,
+			})
+			if p.Name == "" {
+				ports[len(ports)-1].TargetPort = strconv.FormatInt(int64(p.ContainerPort), 10)
+			}
+		}
+	}
 	return deploymentSummary{
 		Namespace:         d.Namespace,
 		Name:              d.Name,
@@ -46,6 +62,7 @@ func toDeploymentSummary(d appsv1.Deployment) deploymentSummary {
 		ReadyReplicas:     d.Status.ReadyReplicas,
 		AvailableReplicas: d.Status.AvailableReplicas,
 		Image:             image,
+		Ports:             ports,
 		Selector:          selector,
 		EnvVars:           extractEnvVars(d.Spec.Template.Spec.Containers),
 		Volumes:           extractVolumes(d),
