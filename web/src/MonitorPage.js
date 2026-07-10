@@ -1,5 +1,5 @@
 import React, {useEffect, useMemo, useState} from "react";
-import {Alert, Button, Card, Col, Descriptions, Input, Modal, Row, Space, Spin, Statistic, Table, Tag, Tooltip, Typography} from "antd";
+import {Alert, Button, Card, Col, Descriptions, Input, Modal, Row, Space, Spin, Statistic, Table, Tag, Typography} from "antd";
 import {
   AppstoreOutlined,
   BellOutlined,
@@ -17,7 +17,7 @@ import i18next from "i18next";
 import * as MonitorBackend from "./backend/MonitorBackend";
 import * as Setting from "./Setting";
 
-const {Paragraph, Text} = Typography;
+const {Paragraph} = Typography;
 
 const statusMeta = {
   healthy: {color: "green", icon: <CheckCircleOutlined />},
@@ -91,16 +91,6 @@ function renderStatusTag(status, t) {
   );
 }
 
-function compactText(value, maxWidth = 460) {
-  return (
-    <Tooltip title={value}>
-      <div style={{maxWidth, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"}}>
-        {value || "-"}
-      </div>
-    </Tooltip>
-  );
-}
-
 function eventDisplayTime(event) {
   return event.lastTimestamp || event.eventTime || event.firstTimestamp;
 }
@@ -157,19 +147,14 @@ function MonitorPage() {
       title: t("monitor:Check"),
       dataIndex: "name",
       key: "name",
-      width: 260,
-      render: (value, record) => (
-        <Space direction="vertical" size={0}>
-          <Text strong>{value}</Text>
-          <Text type="secondary" style={{fontSize: 12}}>{record.id}</Text>
-        </Space>
-      ),
+      width: 280,
+      ellipsis: true,
     },
     {
       title: t("monitor:Category"),
       dataIndex: "category",
       key: "category",
-      width: 120,
+      width: 130,
       render: value => <Tag>{value}</Tag>,
     },
     {
@@ -183,20 +168,22 @@ function MonitorPage() {
       title: t("trivy:Severity"),
       dataIndex: "severity",
       key: "severity",
-      width: 110,
+      width: 130,
       render: value => <Tag color={severityColor[value] || "default"}>{t(`monitor:severity ${value || "info"}`)}</Tag>,
     },
     {
       title: t("monitor:Message"),
       dataIndex: "message",
       key: "message",
-      render: value => compactText(value),
+      width: 340,
+      ellipsis: true,
     },
     {
       title: t("monitor:Suggestion"),
       dataIndex: "suggestion",
       key: "suggestion",
-      render: value => compactText(value, 360),
+      width: 360,
+      ellipsis: true,
     },
     {
       title: t("monitor:Last Checked"),
@@ -226,14 +213,16 @@ function MonitorPage() {
       title: t("monitor:Object"),
       key: "object",
       width: 260,
-      render: (_, record) => compactText(`${record.involvedObjectKind || "-"} / ${record.involvedObjectName || "-"}`, 240),
+      ellipsis: true,
+      render: (_, record) => `${record.involvedObjectKind || "-"} / ${record.involvedObjectName || "-"}`,
     },
     {title: t("monitor:Reason"), dataIndex: "reason", key: "reason", width: 180},
     {
       title: t("monitor:Message"),
       dataIndex: "message",
       key: "message",
-      render: value => compactText(value, 520),
+      width: 420,
+      ellipsis: true,
     },
     {title: t("monitor:Count"), dataIndex: "count", key: "count", width: 90},
     {
@@ -373,8 +362,9 @@ function MonitorPage() {
           columns={checkColumns}
           dataSource={checks}
           loading={loading}
+          size="middle"
           pagination={false}
-          scroll={{x: 1180}}
+          scroll={{x: 1560}}
         />
       </Card>
 
@@ -412,8 +402,9 @@ function MonitorPage() {
           columns={eventColumns}
           dataSource={events}
           loading={eventsLoading}
-          pagination={{pageSize: 20, showSizeChanger: true}}
-          scroll={{x: 1280}}
+          size="middle"
+          pagination={{pageSize: 20}}
+          scroll={{x: 1510}}
           onRow={(record) => ({
             onDoubleClick: () => setSelectedEvent(record),
           })}
