@@ -5,6 +5,16 @@ import (
 	"fmt"
 )
 
+func nodeKernelNetworkingSetupCommand() string {
+	return `modprobe br_netfilter
+cat >/etc/modules-load.d/casos-kubernetes.conf <<'EOF'
+br_netfilter
+EOF
+sysctl -w net.bridge.bridge-nf-call-iptables=1
+sysctl -w net.bridge.bridge-nf-call-ip6tables=1
+sysctl -w net.ipv4.ip_forward=1`
+}
+
 func (d *NodeDeployer) installNodeBinaries(ctx context.Context, runner *NodeDeploySSHRunner, arch, k8sVersion string) error {
 	version := k8sVersion
 	cniVersion := defaultNodeDeployCNIVersion
@@ -32,6 +42,7 @@ func (d *NodeDeployer) installNodeBinaries(ctx context.Context, runner *NodeDepl
 
 	d.logStep(nodeDeployPhaseInstalling, "Ensuring upstream kubelet, kube-proxy, and CNI plugins")
 	installCmd := fmt.Sprintf(`set -e
+%s
 download() {
   url="$3"
   curl -fsSL --connect-timeout 20 --max-time 600 --retry 2 --retry-delay 5 --retry-connrefused "$@" || { echo "download failed: $url" >&2; exit 22; }
@@ -57,7 +68,7 @@ rm -f /etc/cni/net.d/10-casos-bridge.conflist
 if [ ! -x /opt/cni/bin/bridge ] || [ ! -x /opt/cni/bin/loopback ] || [ ! -x /opt/cni/bin/portmap ]; then
   download -o /tmp/cni-plugins.tgz https://github.com/containernetworking/plugins/releases/download/%s/cni-plugins-linux-%s-%s.tgz
   tar -xzf /tmp/cni-plugins.tgz -C /opt/cni/bin
-fi`, version, version, arch, version, arch, cniVersion, arch, cniVersion)
+fi`, nodeKernelNetworkingSetupCommand(), version, version, arch, version, arch, cniVersion, arch, cniVersion)
 	if _, err := runner.RunRootContext(ctx, installCmd); err != nil {
 		return fmt.Errorf("install node binaries: %w", err)
 	}
