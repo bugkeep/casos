@@ -10,6 +10,11 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+const (
+	defaultFlannelImage          = "ghcr.io/flannel-io/flannel:v0.27.4"
+	defaultFlannelCNIPluginImage = "ghcr.io/flannel-io/flannel-cni-plugin:v1.8.0-flannel1"
+)
+
 // Config holds control-plane settings populated from app.conf.
 type Config struct {
 	DataDir                   string
@@ -80,8 +85,8 @@ func ConfigFromAppConf() (Config, error) {
 	coreDNSImage := configStringDefault("coreDNSImage", "docker.1ms.run/coredns/coredns:1.12.4")
 	localPathProvisionerImage := configStringDefault("localPathProvisionerImage", "docker.1ms.run/rancher/local-path-provisioner:v0.0.32")
 	localPathHelperImage := configStringDefault("localPathHelperImage", "docker.1ms.run/library/busybox:1.37.0")
-	flannelImage := configStringDefault("flannelImage", "docker.1ms.run/flannelcni/flannel:v0.27.4")
-	flannelCNIPluginImage := configStringDefault("flannelCNIPluginImage", "docker.1ms.run/flannelcni/flannel-cni-plugin:v1.7.1-flannel1")
+	flannelImage := configStringDefault("flannelImage", defaultFlannelImage)
+	flannelCNIPluginImage := configStringDefault("flannelCNIPluginImage", defaultFlannelCNIPluginImage)
 	flannelInitImage := configStringDefault("flannelInitImage", "docker.1ms.run/library/busybox:1.37.0")
 	storageProbeImage := configStringDefault("storageProbeImage", "docker.1ms.run/library/busybox:1.37.0")
 	ingressControllerImage := configStringDefault("ingressControllerImage", "docker.1ms.run/traefik:v3.3.4")

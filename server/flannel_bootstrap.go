@@ -102,11 +102,11 @@ func ensureFlannelDaemonSet(ctx context.Context, client kubernetes.Interface, cf
 func buildFlannelDaemonSet(cfg Config) *appsv1.DaemonSet {
 	flannelDaemonImage := cfg.FlannelImage
 	if flannelDaemonImage == "" {
-		flannelDaemonImage = "docker.1ms.run/flannelcni/flannel:v0.27.4"
+		flannelDaemonImage = defaultFlannelImage
 	}
 	flannelPluginImage := cfg.FlannelCNIPluginImage
 	if flannelPluginImage == "" {
-		flannelPluginImage = "docker.1ms.run/flannelcni/flannel-cni-plugin:v1.7.1-flannel1"
+		flannelPluginImage = defaultFlannelCNIPluginImage
 	}
 	labels := flannelLabels()
 	selector := map[string]string{"app": "flannel", "k8s-app": "flannel"}
