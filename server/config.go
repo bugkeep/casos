@@ -88,7 +88,7 @@ func ConfigFromAppConf() (Config, error) {
 	flannelImage := configStringDefault("flannelImage", defaultFlannelImage)
 	flannelCNIPluginImage := configStringDefault("flannelCNIPluginImage", defaultFlannelCNIPluginImage)
 	flannelInitImage := configStringDefault("flannelInitImage", "docker.1ms.run/library/busybox:1.37.0")
-	storageProbeImage := configStringDefault("storageProbeImage", "docker.1ms.run/library/busybox:1.37.0")
+	storageProbeImage := configStringDefault("storageProbeImage", "registry.k8s.io/e2e-test-images/agnhost:2.39")
 	ingressControllerImage := configStringDefault("ingressControllerImage", "docker.1ms.run/traefik:v3.3.4")
 
 	return Config{

@@ -559,7 +559,7 @@ func dnsProbeName(nodeName string) string {
 
 func workerProbeImage(image string) string {
 	if image == "" {
-		return "docker.1ms.run/library/busybox:1.37.0"
+		return "registry.k8s.io/e2e-test-images/agnhost:2.39"
 	}
 	return image
 }
