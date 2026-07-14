@@ -12,6 +12,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
@@ -314,6 +315,9 @@ func workerOperationalState(ctx context.Context, client kubernetes.Interface, no
 	if err := waitForSchedulerProbe(ctx, client, nodeName, hostname, storageProbeImage); err != nil {
 		return err.Error(), false, nil
 	}
+	if err := waitForServiceProbe(ctx, client, nodeName, storageProbeImage); err != nil {
+		return err.Error(), false, nil
+	}
 	return "", true, nil
 }
 
@@ -337,6 +341,11 @@ func storageProbeName(nodeName string) string {
 func schedulerProbeName(nodeName string) string {
 	digest := sha256.Sum256([]byte(nodeName))
 	return "casos-scheduler-" + hex.EncodeToString(digest[:])[:16]
+}
+
+func serviceProbeName(nodeName string) string {
+	digest := sha256.Sum256([]byte(nodeName))
+	return "casos-service-" + hex.EncodeToString(digest[:])[:16]
 }
 
 func workerProbeImage(image string) string {
@@ -467,6 +476,199 @@ func waitForSchedulerProbe(ctx context.Context, client kubernetes.Interface, nod
 			case corev1.PodFailed:
 				return fmt.Errorf("scheduler probe Pod failed")
 			}
+		}
+	}
+}
+
+func waitForServiceProbe(ctx context.Context, client kubernetes.Interface, nodeName, image string) error {
+	const namespace = "kube-system"
+	name := serviceProbeName(nodeName)
+	clientName := name + "-client"
+	cleanupCtx, cancelCleanup := context.WithTimeout(ctx, 15*time.Second)
+	defer cancelCleanup()
+	if err := deleteServiceProbeResources(cleanupCtx, client, namespace, name, clientName); err != nil {
+		return err
+	}
+	if err := waitForServiceProbeResourcesDeleted(cleanupCtx, client, namespace, name, clientName); err != nil {
+		return err
+	}
+
+	labels := map[string]string{
+		"casos.io/probe":      "service-routing",
+		"casos.io/probe-name": name,
+	}
+	service := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: labels},
+		Spec: corev1.ServiceSpec{
+			Selector: labels,
+			Ports:    []corev1.ServicePort{{Name: "http", Port: 80, TargetPort: intstr.FromInt(8080)}},
+		},
+	}
+	createdService, err := client.CoreV1().Services(namespace).Create(ctx, service, metav1.CreateOptions{})
+	if err != nil {
+		return fmt.Errorf("create service probe Service: %w", err)
+	}
+	defer func() {
+		_ = deleteServiceProbeResources(context.Background(), client, namespace, name, clientName)
+	}()
+
+	serverPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: labels},
+		Spec: corev1.PodSpec{
+			NodeName:      nodeName,
+			RestartPolicy: corev1.RestartPolicyAlways,
+			Containers: []corev1.Container{{
+				Name: "service-server", Image: workerProbeImage(image), ImagePullPolicy: corev1.PullIfNotPresent,
+				Command: []string{"sh", "-c", "mkdir -p /tmp/www && echo casos-service > /tmp/www/index.html && httpd -f -p 8080 -h /tmp/www"},
+				ReadinessProbe: &corev1.Probe{ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{
+					Path: "/", Port: intstr.FromInt(8080), Scheme: corev1.URISchemeHTTP,
+				}}, InitialDelaySeconds: 1, PeriodSeconds: 2, TimeoutSeconds: 2, FailureThreshold: 5},
+			}},
+		},
+	}
+	if _, err := client.CoreV1().Pods(namespace).Create(ctx, serverPod, metav1.CreateOptions{}); err != nil {
+		return fmt.Errorf("create service probe server Pod: %w", err)
+	}
+
+	clusterIP, err := waitForServiceProbeClusterIP(ctx, client, namespace, createdService.Name)
+	if err != nil {
+		return err
+	}
+	if err := waitForServiceProbePodReady(ctx, client, namespace, name); err != nil {
+		return err
+	}
+
+	clientPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: clientName, Namespace: namespace, Labels: map[string]string{"casos.io/probe": "service-routing-client"}},
+		Spec: corev1.PodSpec{
+			NodeName:      nodeName,
+			RestartPolicy: corev1.RestartPolicyNever,
+			Containers: []corev1.Container{{
+				Name: "service-client", Image: workerProbeImage(image), ImagePullPolicy: corev1.PullIfNotPresent,
+				Command: []string{"sh", "-c", fmt.Sprintf("i=0; while [ $i -lt 30 ]; do wget -qO- http://%s:80/ | grep -q casos-service && exit 0; i=$((i+1)); sleep 1; done; exit 1", clusterIP)},
+			}},
+		},
+	}
+	if _, err := client.CoreV1().Pods(namespace).Create(ctx, clientPod, metav1.CreateOptions{}); err != nil {
+		return fmt.Errorf("create service probe client Pod: %w", err)
+	}
+	return waitForServiceProbePodSucceeded(ctx, client, namespace, clientName)
+}
+
+func waitForServiceProbeClusterIP(ctx context.Context, client kubernetes.Interface, namespace, name string) (string, error) {
+	deadlineTimer, deadline := deploymentWaitDeadline(ctx)
+	ticker := time.NewTicker(2 * time.Second)
+	defer deadlineTimer.Stop()
+	defer ticker.Stop()
+	for {
+		current, err := client.CoreV1().Services(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil && !apierrors.IsNotFound(err) {
+			return "", fmt.Errorf("get service probe Service: %w", err)
+		}
+		if err == nil && current.Spec.ClusterIP != "" && current.Spec.ClusterIP != corev1.ClusterIPNone {
+			return current.Spec.ClusterIP, nil
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-deadline:
+			return "", fmt.Errorf("timed out waiting for service probe ClusterIP")
+		case <-ticker.C:
+		}
+	}
+}
+
+func waitForServiceProbePodReady(ctx context.Context, client kubernetes.Interface, namespace, name string) error {
+	deadlineTimer, deadline := deploymentWaitDeadline(ctx)
+	ticker := time.NewTicker(2 * time.Second)
+	defer deadlineTimer.Stop()
+	defer ticker.Stop()
+	for {
+		pod, err := client.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			// The kubelet may not have created the Pod status yet.
+		} else if err != nil {
+			return fmt.Errorf("get service probe server Pod: %w", err)
+		} else if pod.Status.Phase == corev1.PodFailed {
+			return fmt.Errorf("service probe server Pod failed")
+		} else if isPodReady(*pod) {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline:
+			return fmt.Errorf("timed out waiting for service probe server Pod")
+		case <-ticker.C:
+		}
+	}
+}
+
+func waitForServiceProbePodSucceeded(ctx context.Context, client kubernetes.Interface, namespace, name string) error {
+	deadlineTimer, deadline := deploymentWaitDeadline(ctx)
+	ticker := time.NewTicker(2 * time.Second)
+	defer deadlineTimer.Stop()
+	defer ticker.Stop()
+	for {
+		pod, err := client.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			// The kubelet may not have created the Pod status yet.
+		} else if err != nil {
+			return fmt.Errorf("get service probe client Pod: %w", err)
+		} else {
+			switch pod.Status.Phase {
+			case corev1.PodSucceeded:
+				return nil
+			case corev1.PodFailed:
+				return fmt.Errorf("service probe client Pod failed")
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline:
+			return fmt.Errorf("timed out waiting for service probe client Pod")
+		case <-ticker.C:
+		}
+	}
+}
+
+func deleteServiceProbeResources(ctx context.Context, client kubernetes.Interface, namespace, serviceName, clientName string) error {
+	if err := client.CoreV1().Pods(namespace).Delete(ctx, clientName, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("delete service probe client Pod: %w", err)
+	}
+	if err := client.CoreV1().Pods(namespace).Delete(ctx, serviceName, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("delete service probe server Pod: %w", err)
+	}
+	if err := client.CoreV1().Services(namespace).Delete(ctx, serviceName, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("delete service probe Service: %w", err)
+	}
+	return nil
+}
+
+func waitForServiceProbeResourcesDeleted(ctx context.Context, client kubernetes.Interface, namespace, serviceName, clientName string) error {
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		_, serverErr := client.CoreV1().Pods(namespace).Get(ctx, serviceName, metav1.GetOptions{})
+		_, clientErr := client.CoreV1().Pods(namespace).Get(ctx, clientName, metav1.GetOptions{})
+		_, serviceErr := client.CoreV1().Services(namespace).Get(ctx, serviceName, metav1.GetOptions{})
+		if serverErr != nil && !apierrors.IsNotFound(serverErr) {
+			return fmt.Errorf("check service probe server deletion: %w", serverErr)
+		}
+		if clientErr != nil && !apierrors.IsNotFound(clientErr) {
+			return fmt.Errorf("check service probe client deletion: %w", clientErr)
+		}
+		if serviceErr != nil && !apierrors.IsNotFound(serviceErr) {
+			return fmt.Errorf("check service probe Service deletion: %w", serviceErr)
+		}
+		if apierrors.IsNotFound(serverErr) && apierrors.IsNotFound(clientErr) && apierrors.IsNotFound(serviceErr) {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timed out waiting for previous service probe resources to be deleted")
+		case <-ticker.C:
 		}
 	}
 }
