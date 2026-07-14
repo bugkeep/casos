@@ -261,6 +261,98 @@ func (d *NodeDeployer) waitForNodeReady(ctx context.Context, nodeName string) er
 	}
 }
 
+// WaitForOperational verifies the platform prerequisites that make a worker
+// safe for application scheduling. Node Ready alone does not prove that CNI,
+// DNS, or the default storage path is usable.
+func (d *NodeDeployer) WaitForOperational(ctx context.Context, nodeName string) error {
+	if d.restConfig == nil {
+		return fmt.Errorf("apiserver rest config is required")
+	}
+	client, err := kubernetes.NewForConfig(d.restConfig)
+	if err != nil {
+		return err
+	}
+	deadlineTimer, deadline := deploymentWaitDeadline(ctx)
+	ticker := time.NewTicker(3 * time.Second)
+	defer deadlineTimer.Stop()
+	defer ticker.Stop()
+	var lastReason string
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline:
+			if lastReason == "" {
+				lastReason = "platform prerequisites are not ready"
+			}
+			return fmt.Errorf("timed out waiting for worker operational readiness: %s", lastReason)
+		case <-ticker.C:
+			reason, ready, err := workerOperationalState(ctx, client, nodeName)
+			if err != nil {
+				return err
+			}
+			if ready {
+				return nil
+			}
+			lastReason = reason
+		}
+	}
+}
+
+func workerOperationalState(ctx context.Context, client kubernetes.Interface, nodeName string) (string, bool, error) {
+	node, err := client.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return "node is not registered", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	if !isNodeReady(node) {
+		return "node is not Ready", false, nil
+	}
+	if node.Spec.PodCIDR == "" {
+		return "node has no PodCIDR", false, nil
+	}
+
+	flannelPods, err := client.CoreV1().Pods("kube-flannel").List(ctx, metav1.ListOptions{
+		LabelSelector: "k8s-app=flannel",
+		FieldSelector: "spec.nodeName=" + nodeName,
+	})
+	if err != nil {
+		return "", false, err
+	}
+	if len(flannelPods.Items) == 0 || !isPodReady(flannelPods.Items[0]) {
+		return "Flannel is not Ready on the worker", false, nil
+	}
+
+	dns, err := client.AppsV1().Deployments("kube-system").Get(ctx, "coredns", metav1.GetOptions{})
+	if apierrors.IsNotFound(err) || (err == nil && dns.Status.AvailableReplicas < 1) {
+		return "CoreDNS is not Available", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+
+	if _, err := client.StorageV1().StorageClasses().Get(ctx, "local-path", metav1.GetOptions{}); apierrors.IsNotFound(err) {
+		return "default local-path StorageClass is missing", false, nil
+	} else if err != nil {
+		return "", false, err
+	}
+	return "", true, nil
+}
+
+func isPodReady(pod corev1.Pod) bool {
+	if pod.Status.Phase != corev1.PodRunning {
+		return false
+	}
+	for _, condition := range pod.Status.Conditions {
+		if condition.Type == corev1.PodReady {
+			return condition.Status == corev1.ConditionTrue
+		}
+	}
+	return false
+}
+
 func isNodeReady(node *corev1.Node) bool {
 	if node == nil {
 		return false
