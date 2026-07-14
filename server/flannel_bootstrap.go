@@ -96,6 +96,10 @@ func flannelCNIConfigData() string {
 }
 
 func ensureFlannelDaemonSet(ctx context.Context, client kubernetes.Interface, cfg Config) error {
+	return createOrUpdateDaemonSet(ctx, client, buildFlannelDaemonSet(cfg))
+}
+
+func buildFlannelDaemonSet(cfg Config) *appsv1.DaemonSet {
 	flannelDaemonImage := cfg.FlannelImage
 	if flannelDaemonImage == "" {
 		flannelDaemonImage = "docker.1ms.run/flannelcni/flannel:v0.27.4"
@@ -135,7 +139,7 @@ func ensureFlannelDaemonSet(ctx context.Context, client kubernetes.Interface, cf
 			{Name: "POD_NAME", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.name"}}},
 			{Name: "POD_NAMESPACE", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.namespace"}}},
 		},
-		SecurityContext: &corev1.SecurityContext{Privileged: ptr(false), Capabilities: &corev1.Capabilities{Add: []corev1.Capability{"NET_ADMIN", "NET_RAW"}}},
+		SecurityContext: &corev1.SecurityContext{Privileged: ptr(true)},
 		Ports:           []corev1.ContainerPort{{Name: "vxlan", ContainerPort: 8472, Protocol: corev1.ProtocolUDP}},
 		VolumeMounts:    []corev1.VolumeMount{{Name: "run", MountPath: "/run/flannel"}, {Name: "flannel-cfg", MountPath: "/etc/kube-flannel", ReadOnly: true}, {Name: "xtables-lock", MountPath: "/run/xtables.lock"}},
 	}
@@ -158,7 +162,7 @@ func ensureFlannelDaemonSet(ctx context.Context, client kubernetes.Interface, cf
 			}},
 		},
 	}
-	return createOrUpdateDaemonSet(ctx, client, daemonSet)
+	return daemonSet
 }
 
 func createOrUpdateDaemonSet(ctx context.Context, client kubernetes.Interface, desired *appsv1.DaemonSet) error {
