@@ -198,6 +198,10 @@ func ensureIngressControllerService(ctx context.Context, client kubernetes.Inter
 
 func ensureIngressControllerDeployment(ctx context.Context, client kubernetes.Interface, cfg Config) error {
 	replicas := int32(1)
+	image := cfg.IngressControllerImage
+	if image == "" {
+		image = "docker.1ms.run/traefik:v3.3.4"
+	}
 	labels := ingressControllerLabels()
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
@@ -224,7 +228,7 @@ func ensureIngressControllerDeployment(ctx context.Context, client kubernetes.In
 					},
 					Containers: []corev1.Container{{
 						Name:            ingressControllerName,
-						Image:           cfg.IngressControllerImage,
+						Image:           image,
 						ImagePullPolicy: corev1.PullIfNotPresent,
 						Args: []string{
 							"--providers.kubernetesingress=true",
