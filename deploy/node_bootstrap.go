@@ -333,11 +333,14 @@ func waitForStorageProbe(ctx context.Context, client kubernetes.Interface, nodeN
 	}
 	const namespace = "kube-system"
 	name := storageProbeName(nodeName)
-	cleanup := func() {
-		_ = client.CoreV1().Pods(namespace).Delete(context.Background(), name, metav1.DeleteOptions{})
-		_ = client.CoreV1().PersistentVolumeClaims(namespace).Delete(context.Background(), name, metav1.DeleteOptions{})
+	cleanupCtx, cancelCleanup := context.WithTimeout(ctx, 15*time.Second)
+	defer cancelCleanup()
+	if err := deleteStorageProbeResources(cleanupCtx, client, namespace, name); err != nil {
+		return err
 	}
-	cleanup()
+	if err := waitForStorageProbeResourcesDeleted(cleanupCtx, client, namespace, name); err != nil {
+		return err
+	}
 	pvc := &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: map[string]string{"casos.io/probe": "worker-storage"}},
 		Spec: corev1.PersistentVolumeClaimSpec{
@@ -365,10 +368,12 @@ func waitForStorageProbe(ctx context.Context, client kubernetes.Interface, nodeN
 		},
 	}
 	if _, err := client.CoreV1().Pods(namespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
-		cleanup()
+		_ = deleteStorageProbeResources(context.Background(), client, namespace, name)
 		return fmt.Errorf("create storage probe Pod: %w", err)
 	}
-	defer cleanup()
+	defer func() {
+		_ = deleteStorageProbeResources(context.Background(), client, namespace, name)
+	}()
 	deadlineTimer, deadline := deploymentWaitDeadline(ctx)
 	ticker := time.NewTicker(2 * time.Second)
 	defer deadlineTimer.Stop()
@@ -393,6 +398,39 @@ func waitForStorageProbe(ctx context.Context, client kubernetes.Interface, nodeN
 			case corev1.PodFailed:
 				return fmt.Errorf("storage probe Pod failed")
 			}
+		}
+	}
+}
+
+func deleteStorageProbeResources(ctx context.Context, client kubernetes.Interface, namespace, name string) error {
+	if err := client.CoreV1().Pods(namespace).Delete(ctx, name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("delete storage probe Pod: %w", err)
+	}
+	if err := client.CoreV1().PersistentVolumeClaims(namespace).Delete(ctx, name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("delete storage probe PVC: %w", err)
+	}
+	return nil
+}
+
+func waitForStorageProbeResourcesDeleted(ctx context.Context, client kubernetes.Interface, namespace, name string) error {
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		_, podErr := client.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
+		_, pvcErr := client.CoreV1().PersistentVolumeClaims(namespace).Get(ctx, name, metav1.GetOptions{})
+		if podErr != nil && !apierrors.IsNotFound(podErr) {
+			return fmt.Errorf("check storage probe Pod deletion: %w", podErr)
+		}
+		if pvcErr != nil && !apierrors.IsNotFound(pvcErr) {
+			return fmt.Errorf("check storage probe PVC deletion: %w", pvcErr)
+		}
+		if apierrors.IsNotFound(podErr) && apierrors.IsNotFound(pvcErr) {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timed out waiting for previous storage probe resources to be deleted")
+		case <-ticker.C:
 		}
 	}
 }
