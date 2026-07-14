@@ -33,6 +33,9 @@ func Bootstrap(ctx context.Context, cfg *rest.Config, srvCfg Config) error {
 			return err
 		}
 	}
+	if err := ensureIngressController(ctx, client, srvCfg); err != nil {
+		return err
+	}
 	return ensureCasbinWebhook(ctx, client, srvCfg)
 }
 

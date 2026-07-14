@@ -23,6 +23,7 @@ type Config struct {
 	CoreDNSImage              string // CoreDNS image used by the built-in DNS bootstrap
 	LocalPathProvisionerImage string // local-path-provisioner controller image
 	LocalPathHelperImage      string // helper pod image used by local-path-provisioner
+	IngressControllerImage    string // Traefik image used by the built-in Ingress controller
 	StorageProvisionerEnabled bool   // install the built-in local-path provisioner for local clusters
 }
 
@@ -75,6 +76,7 @@ func ConfigFromAppConf() (Config, error) {
 	coreDNSImage := configStringDefault("coreDNSImage", "docker.1ms.run/coredns/coredns:1.12.4")
 	localPathProvisionerImage := configStringDefault("localPathProvisionerImage", "docker.1ms.run/rancher/local-path-provisioner:v0.0.32")
 	localPathHelperImage := configStringDefault("localPathHelperImage", "docker.1ms.run/library/busybox:1.37.0")
+	ingressControllerImage := configStringDefault("ingressControllerImage", "docker.1ms.run/traefik:v3.3.4")
 
 	return Config{
 		DataDir:                   dataDir,
@@ -88,6 +90,7 @@ func ConfigFromAppConf() (Config, error) {
 		CoreDNSImage:              coreDNSImage,
 		LocalPathProvisionerImage: localPathProvisionerImage,
 		LocalPathHelperImage:      localPathHelperImage,
+		IngressControllerImage:    ingressControllerImage,
 		StorageProvisionerEnabled: storageProvisionerEnabled,
 	}, nil
 }
