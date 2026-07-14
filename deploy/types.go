@@ -118,6 +118,7 @@ type Config struct {
 	ApiserverPort             int
 	SandboxImage              string
 	Socks5Proxy               string
+	StorageProbeImage         string
 	StorageProvisionerEnabled bool
 	GenerateKubeconfig        KubeconfigGenerator
 }
@@ -129,6 +130,7 @@ func ConfigFromServerConfig(cfg server.Config) Config {
 		ApiserverPort:             cfg.ApiserverPort,
 		SandboxImage:              cfg.SandboxImage,
 		Socks5Proxy:               cfg.Socks5Proxy,
+		StorageProbeImage:         cfg.StorageProbeImage,
 		StorageProvisionerEnabled: cfg.StorageProvisionerEnabled,
 		GenerateKubeconfig: func(nodeName, apiserverURL string) (*NodeKubeconfig, error) {
 			wk, err := server.GenerateWorkerKubeconfigForServer(cfg, nodeName, apiserverURL)
