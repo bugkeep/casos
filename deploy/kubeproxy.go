@@ -15,7 +15,7 @@ func (d *NodeDeployer) startKubeProxy(ctx context.Context, runner *NodeDeploySSH
 
 func kubeProxyStartCommand() string {
 	return `systemctl daemon-reload && systemctl enable kube-proxy && systemctl restart kube-proxy
-for i in $(seq 1 30); do
+for i in $(seq 1 120); do
   iptables-save 2>/dev/null | grep -q '10.43.0.1' && exit 0
   sleep 1
 done
