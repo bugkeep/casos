@@ -7,10 +7,20 @@ import (
 
 func (d *NodeDeployer) startKubeProxy(ctx context.Context, runner *NodeDeploySSHRunner) error {
 	d.logStep(nodeDeployPhaseStarting, "Starting kube-proxy")
-	if _, err := runner.RunRootContext(ctx, "systemctl daemon-reload && systemctl enable kube-proxy && systemctl restart kube-proxy"); err != nil {
+	if _, err := runner.RunRootContext(ctx, kubeProxyStartCommand()); err != nil {
 		return fmt.Errorf("start kube-proxy: %w", err)
 	}
 	return nil
+}
+
+func kubeProxyStartCommand() string {
+	return `systemctl daemon-reload && systemctl enable kube-proxy && systemctl restart kube-proxy
+for i in $(seq 1 30); do
+  iptables-save 2>/dev/null | grep -q '10.43.0.1' && exit 0
+  sleep 1
+done
+echo "kube-proxy did not program the Kubernetes Service IP" >&2
+exit 1`
 }
 
 func kubeProxyConfig() string {
