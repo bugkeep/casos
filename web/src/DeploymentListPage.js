@@ -153,13 +153,18 @@ class DeploymentListPage extends React.Component {
     const {services, ingresses, nodeIP} = this.state;
     const urls = [];
 
-    if (nodeIP) {
-      const svc = services.find(s => s.name === deploy.name && s.namespace === deploy.namespace && s.type === "NodePort");
-      if (svc) {
-        (svc.ports ?? []).filter(p => p.nodePort).forEach(p => {
-          urls.push({url: `http://${nodeIP}:${p.nodePort}`, type: "nodeport"});
-        });
-      }
+    const svc = services.find(s => s.name === deploy.name && s.namespace === deploy.namespace && (s.type === "NodePort" || s.type === "LoadBalancer"));
+    if (svc) {
+      const addresses = svc.type === "LoadBalancer"
+        ? (svc.loadBalancerIPs?.length > 0 ? svc.loadBalancerIPs : (nodeIP ? [nodeIP] : []))
+        : (nodeIP ? [nodeIP] : []);
+      const ports = svc.type === "LoadBalancer"
+        ? (svc.ports ?? []).filter(p => p.port)
+        : (svc.ports ?? []).filter(p => p.nodePort);
+      addresses.forEach(address => ports.forEach(p => {
+        const port = svc.type === "LoadBalancer" ? p.port : p.nodePort;
+        urls.push({url: `http://${address}:${port}`, type: svc.type === "LoadBalancer" ? "loadbalancer" : "nodeport"});
+      }));
     }
 
     const deployServiceNames = new Set(
