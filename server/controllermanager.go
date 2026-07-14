@@ -28,18 +28,7 @@ func StartControllerManager(ctx context.Context, cfg Config) error {
 
 	go func() {
 		cmd := cmapp.NewControllerManagerCommand()
-		cmd.SetArgs([]string{
-			"--kubeconfig=" + kubeconfigPath,
-			"--leader-elect=false",
-			"--bind-address=127.0.0.1",
-			"--secure-port=10257",
-			"--cluster-signing-cert-file=" + caCrt,
-			"--cluster-signing-key-file=" + caKey,
-			"--root-ca-file=" + caCrt,
-			"--service-account-private-key-file=" + saKey,
-			"--allocate-node-cidrs=true",
-			"--cluster-cidr=10.244.0.0/16",
-		})
+		cmd.SetArgs(controllerManagerArgs(kubeconfigPath, caCrt, caKey, saKey))
 		if err := cmd.ExecuteContext(ctx); err != nil && ctx.Err() == nil {
 			logrus.Errorf("controller-manager exited: %v", err)
 		}
@@ -47,4 +36,21 @@ func StartControllerManager(ctx context.Context, cfg Config) error {
 
 	logrus.Info("controller-manager started in-process")
 	return nil
+}
+
+func controllerManagerArgs(kubeconfigPath, caCrt, caKey, saKey string) []string {
+	return []string{
+		"--kubeconfig=" + kubeconfigPath,
+		"--leader-elect=true",
+		"--leader-elect-resource-namespace=kube-system",
+		"--leader-elect-resource-name=casos-controller-manager",
+		"--bind-address=127.0.0.1",
+		"--secure-port=10257",
+		"--cluster-signing-cert-file=" + caCrt,
+		"--cluster-signing-key-file=" + caKey,
+		"--root-ca-file=" + caCrt,
+		"--service-account-private-key-file=" + saKey,
+		"--allocate-node-cidrs=true",
+		"--cluster-cidr=10.244.0.0/16",
+	}
 }
