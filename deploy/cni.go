@@ -46,7 +46,7 @@ func flannelCNIConfig() string {
     {
       "type": "portmap",
       "capabilities": {"portMappings": true}
-    },
+    }
   ]
 }
 `
