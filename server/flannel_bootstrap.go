@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -10,6 +11,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	appsinternal "k8s.io/kubernetes/pkg/apis/apps/v1"
 )
 
 const (
@@ -160,6 +162,7 @@ func ensureFlannelDaemonSet(ctx context.Context, client kubernetes.Interface, cf
 }
 
 func createOrUpdateDaemonSet(ctx context.Context, client kubernetes.Interface, desired *appsv1.DaemonSet) error {
+	appsinternal.SetObjectDefaults_DaemonSet(desired)
 	current, err := client.AppsV1().DaemonSets(desired.Namespace).Get(ctx, desired.Name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		if _, err := client.AppsV1().DaemonSets(desired.Namespace).Create(ctx, desired, metav1.CreateOptions{}); err != nil {
@@ -169,6 +172,11 @@ func createOrUpdateDaemonSet(ctx context.Context, client kubernetes.Interface, d
 	}
 	if err != nil {
 		return fmt.Errorf("get daemonset %s/%s: %w", desired.Namespace, desired.Name, err)
+	}
+	if reflect.DeepEqual(current.Labels, desired.Labels) &&
+		reflect.DeepEqual(current.Annotations, desired.Annotations) &&
+		reflect.DeepEqual(current.Spec, desired.Spec) {
+		return nil
 	}
 	desired.ResourceVersion = current.ResourceVersion
 	if _, err := client.AppsV1().DaemonSets(desired.Namespace).Update(ctx, desired, metav1.UpdateOptions{}); err != nil {
