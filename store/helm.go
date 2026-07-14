@@ -1231,11 +1231,16 @@ func InstallHelmChartStream(ctx context.Context, cfg *rest.Config, releaseName, 
 	logCh := make(chan string, 64)
 	go func() {
 		defer close(logCh)
+		streamCtx := ctx
+		if streamCtx == nil {
+			streamCtx = context.Background()
+		}
+		installCtx := helmInstallContext(streamCtx)
 		send := func(line string) bool {
 			select {
 			case logCh <- line:
 				return true
-			case <-ctx.Done():
+			case <-streamCtx.Done():
 				return false
 			}
 		}
@@ -1264,22 +1269,28 @@ func InstallHelmChartStream(ctx context.Context, cfg *rest.Config, releaseName, 
 		install.CreateNamespace = true
 		install.Wait = true
 		install.Timeout = helmInstallTimeout
-		if _, err = install.RunWithContext(ctx, helmChart, vals); err != nil {
-			if ctx.Err() != nil {
-				send("ABORTED")
-			} else {
-				for _, line := range helmReleaseDiagnostics(ctx, cfg, releaseName, namespace) {
-					if !send(line) {
-						return
-					}
+		if _, err = install.RunWithContext(installCtx, helmChart, vals); err != nil {
+			for _, line := range helmReleaseDiagnostics(installCtx, cfg, releaseName, namespace) {
+				if !send(line) {
+					return
 				}
-				send("ERROR: " + err.Error())
 			}
+			send("ERROR: " + err.Error())
 			return
 		}
 		send("DONE")
 	}()
 	return logCh
+}
+
+// helmInstallContext deliberately detaches the Helm operation from the
+// browser/SSE request. The stream is only a progress channel; closing it must
+// not cancel an installation that has already been submitted.
+func helmInstallContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
+	}
+	return context.WithoutCancel(ctx)
 }
 
 func UpgradeHelmRelease(cfg *rest.Config, releaseName, namespace, chartName, repoURL, version, valuesYAML string) error {
