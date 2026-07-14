@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -17,6 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	appsinternal "k8s.io/kubernetes/pkg/apis/apps/v1"
 )
 
 const (
@@ -479,6 +481,7 @@ func createOrUpdateConfigMap(ctx context.Context, client kubernetes.Interface, c
 }
 
 func createOrUpdateDeployment(ctx context.Context, client kubernetes.Interface, deployment *appsv1.Deployment) error {
+	appsinternal.SetObjectDefaults_Deployment(deployment)
 	current, err := client.AppsV1().Deployments(deployment.Namespace).Get(ctx, deployment.Name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		_, err = client.AppsV1().Deployments(deployment.Namespace).Create(ctx, deployment, metav1.CreateOptions{})
@@ -492,6 +495,12 @@ func createOrUpdateDeployment(ctx context.Context, client kubernetes.Interface, 
 	}
 	deployment.Labels = mergeStringMap(current.Labels, deployment.Labels)
 	deployment.Annotations = mergeStringMap(current.Annotations, deployment.Annotations)
+	currentSpec := defaultedDeploymentSpec(current.Spec)
+	if reflect.DeepEqual(current.Labels, deployment.Labels) &&
+		reflect.DeepEqual(current.Annotations, deployment.Annotations) &&
+		reflect.DeepEqual(currentSpec, deployment.Spec) {
+		return nil
+	}
 	deployment.ResourceVersion = current.ResourceVersion
 	if _, err := client.AppsV1().Deployments(deployment.Namespace).Update(ctx, deployment, metav1.UpdateOptions{}); err != nil {
 		return fmt.Errorf("update deployment %s/%s: %w", deployment.Namespace, deployment.Name, err)
@@ -550,6 +559,7 @@ func reconcileLocalPathDeployment(ctx context.Context, client kubernetes.Interfa
 }
 
 func hashLocalPathDeploymentSpec(spec appsv1.DeploymentSpec) (string, error) {
+	spec = defaultedDeploymentSpec(spec)
 	managed := struct {
 		Replicas *int32
 		Selector *metav1.LabelSelector
@@ -574,6 +584,12 @@ func hashLocalPathDeploymentSpec(spec appsv1.DeploymentSpec) (string, error) {
 	managed.Template.Spec.Containers = spec.Template.Spec.Containers
 	managed.Template.Spec.Volumes = spec.Template.Spec.Volumes
 	return hashJSON(managed)
+}
+
+func defaultedDeploymentSpec(spec appsv1.DeploymentSpec) appsv1.DeploymentSpec {
+	defaulted := &appsv1.Deployment{Spec: *spec.DeepCopy()}
+	appsinternal.SetObjectDefaults_Deployment(defaulted)
+	return defaulted.Spec
 }
 
 func createOrPatchStorageClassDefaultAnnotations(ctx context.Context, client kubernetes.Interface, class *storagev1.StorageClass) error {
