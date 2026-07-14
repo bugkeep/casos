@@ -56,7 +56,7 @@ func admissionValidateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Image vulnerability check: only for Pod-creating operations.
-	if req.Resource.Resource == "pods" && (req.Operation == admissionv1.Create || req.Operation == admissionv1.Update) {
+	if req.Resource.Resource == "pods" && !isPlatformNamespace(req.Namespace) && (req.Operation == admissionv1.Create || req.Operation == admissionv1.Update) {
 		if denyMsg := checkPodImages(req.Object.Raw); denyMsg != "" {
 			resp.Response.Allowed = false
 			resp.Response.Result = &metav1.Status{Message: denyMsg}
@@ -66,6 +66,18 @@ func admissionValidateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeAdmissionResponse(w, resp)
+}
+
+// Platform components must be able to restart and scale even when an image's
+// cached Trivy result is stale or critical. Application namespaces remain
+// subject to the normal image admission policy.
+func isPlatformNamespace(namespace string) bool {
+	switch namespace {
+	case "kube-system", "kube-flannel", "local-path-storage":
+		return true
+	default:
+		return false
+	}
 }
 
 // checkPodImages extracts images from the Pod spec, checks Trivy cache, and
