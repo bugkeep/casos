@@ -2,12 +2,15 @@ package deploy
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -287,7 +290,7 @@ func (d *NodeDeployer) WaitForOperational(ctx context.Context, nodeName string) 
 			}
 			return fmt.Errorf("timed out waiting for worker operational readiness: %s", lastReason)
 		case <-ticker.C:
-			reason, ready, err := workerOperationalState(ctx, client, nodeName)
+			reason, ready, err := workerOperationalState(ctx, client, nodeName, d.config.StorageProbeImage)
 			if err != nil {
 				return err
 			}
@@ -299,7 +302,7 @@ func (d *NodeDeployer) WaitForOperational(ctx context.Context, nodeName string) 
 	}
 }
 
-func workerOperationalState(ctx context.Context, client kubernetes.Interface, nodeName string) (string, bool, error) {
+func workerOperationalState(ctx context.Context, client kubernetes.Interface, nodeName, storageProbeImage string) (string, bool, error) {
 	node, err := client.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		return "node is not registered", false, nil
@@ -338,6 +341,9 @@ func workerOperationalState(ctx context.Context, client kubernetes.Interface, no
 	} else if err != nil {
 		return "", false, err
 	}
+	if err := waitForStorageProbe(ctx, client, nodeName, storageProbeImage); err != nil {
+		return err.Error(), false, nil
+	}
 	return "", true, nil
 }
 
@@ -352,6 +358,83 @@ func isPodReady(pod corev1.Pod) bool {
 	}
 	return false
 }
+
+func storageProbeName(nodeName string) string {
+	digest := sha256.Sum256([]byte(nodeName))
+	return "casos-storage-" + hex.EncodeToString(digest[:])[:16]
+}
+
+func waitForStorageProbe(ctx context.Context, client kubernetes.Interface, nodeName, image string) error {
+	if image == "" {
+		image = "docker.1ms.run/library/busybox:1.37.0"
+	}
+	const namespace = "kube-system"
+	name := storageProbeName(nodeName)
+	cleanup := func() {
+		_ = client.CoreV1().Pods(namespace).Delete(context.Background(), name, metav1.DeleteOptions{})
+		_ = client.CoreV1().PersistentVolumeClaims(namespace).Delete(context.Background(), name, metav1.DeleteOptions{})
+	}
+	cleanup()
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: map[string]string{"casos.io/probe": "worker-storage"}},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+			StorageClassName: stringPtr("local-path"),
+			Resources: corev1.VolumeResourceRequirements{Requests: corev1.ResourceList{
+				corev1.ResourceStorage: resource.MustParse("1Mi"),
+			}},
+		},
+	}
+	if _, err := client.CoreV1().PersistentVolumeClaims(namespace).Create(ctx, pvc, metav1.CreateOptions{}); err != nil {
+		return fmt.Errorf("create storage probe PVC: %w", err)
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: map[string]string{"casos.io/probe": "worker-storage"}},
+		Spec: corev1.PodSpec{
+			NodeName:      nodeName,
+			RestartPolicy: corev1.RestartPolicyNever,
+			Containers: []corev1.Container{{
+				Name: "storage-probe", Image: image, ImagePullPolicy: corev1.PullIfNotPresent,
+				Command:      []string{"sh", "-c", "echo casos > /data/probe && test \"$(cat /data/probe)\" = casos"},
+				VolumeMounts: []corev1.VolumeMount{{Name: "data", MountPath: "/data"}},
+			}},
+			Volumes: []corev1.Volume{{Name: "data", VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: name}}}},
+		},
+	}
+	if _, err := client.CoreV1().Pods(namespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
+		cleanup()
+		return fmt.Errorf("create storage probe Pod: %w", err)
+	}
+	defer cleanup()
+	deadlineTimer, deadline := deploymentWaitDeadline(ctx)
+	ticker := time.NewTicker(2 * time.Second)
+	defer deadlineTimer.Stop()
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline:
+			return fmt.Errorf("timed out waiting for storage probe")
+		case <-ticker.C:
+			current, err := client.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			if err != nil {
+				return fmt.Errorf("get storage probe Pod: %w", err)
+			}
+			switch current.Status.Phase {
+			case corev1.PodSucceeded:
+				return nil
+			case corev1.PodFailed:
+				return fmt.Errorf("storage probe Pod failed")
+			}
+		}
+	}
+}
+
+func stringPtr(value string) *string { return &value }
 
 func isNodeReady(node *corev1.Node) bool {
 	if node == nil {
