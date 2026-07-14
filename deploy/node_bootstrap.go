@@ -111,9 +111,6 @@ func (d *NodeDeployer) Deploy(ctx context.Context, opts NodeDeployOptions) (*Nod
 	if err = d.ensureNodeBootstrapTaint(ctx, opts.NodeName); err != nil {
 		return nil, fmt.Errorf("protect worker during bootstrap: %w", err)
 	}
-	if err = d.startKubeProxy(ctx, runner); err != nil {
-		return nil, err
-	}
 	if err = d.startKubelet(ctx, runner); err != nil {
 		return nil, err
 	}
@@ -121,6 +118,10 @@ func (d *NodeDeployer) Deploy(ctx context.Context, opts NodeDeployOptions) (*Nod
 	d.logStep(nodeDeployPhaseWaiting, "Waiting for node registration")
 	bootstrapState, err := d.waitForNodeBootstrapState(ctx, opts.NodeName)
 	if err != nil {
+		return nil, err
+	}
+
+	if err = d.startKubeProxy(ctx, runner); err != nil {
 		return nil, err
 	}
 

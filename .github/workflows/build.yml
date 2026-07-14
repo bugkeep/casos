@@ -329,9 +329,11 @@ jobs:
               root@"$E2E_WORKER_VM_IP" '
                 set +e
                 echo "-- systemctl status --"
-                systemctl --no-pager --full status kubelet containerd
+                systemctl --no-pager --full status kubelet kube-proxy containerd
                 echo "-- kubelet journal --"
                 journalctl -u kubelet --no-pager -n 200
+                echo "-- kube-proxy journal --"
+                journalctl -u kube-proxy --no-pager -n 200
                 echo "-- containerd journal --"
                 journalctl -u containerd --no-pager -n 100
                 echo "-- cni config --"
