@@ -60,7 +60,6 @@ func reconcileServiceLB(ctx context.Context, client kubernetes.Interface) error 
 	if err != nil {
 		return fmt.Errorf("list nodes: %w", err)
 	}
-	nodeIPs := readyWorkerIPs(nodes.Items)
 	services, err := client.CoreV1().Services(metav1.NamespaceAll).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return fmt.Errorf("list LoadBalancer services: %w", err)
@@ -68,6 +67,11 @@ func reconcileServiceLB(ctx context.Context, client kubernetes.Interface) error 
 	for i := range services.Items {
 		service := &services.Items[i]
 		if service.Spec.Type != corev1.ServiceTypeLoadBalancer || service.Annotations[serviceLBDisabledAnnotation] == "true" {
+			continue
+		}
+		nodeIPs, err := serviceLBNodeIPs(ctx, client, service, nodes.Items)
+		if err != nil {
+			logrus.Warnf("select LoadBalancer nodes for %s/%s failed: %v", service.Namespace, service.Name, err)
 			continue
 		}
 		if err := reconcileLoadBalancerService(ctx, client, service, nodeIPs); err != nil {
@@ -78,20 +82,34 @@ func reconcileServiceLB(ctx context.Context, client kubernetes.Interface) error 
 }
 
 func readyWorkerIPs(nodes []corev1.Node) []string {
-	workerIPs := readyNodeIPs(nodes, false)
-	if len(workerIPs) > 0 {
-		return workerIPs
+	result := make([]string, 0)
+	for _, node := range readyServiceLBNodes(nodes) {
+		result = append(result, node.ips...)
 	}
-	return readyNodeIPs(nodes, true)
+	return uniqueStrings(result)
 }
 
-func readyNodeIPs(nodes []corev1.Node, controlPlaneOnly bool) []string {
+type serviceLBNode struct {
+	name string
+	ips  []string
+}
+
+func readyServiceLBNodes(nodes []corev1.Node) []serviceLBNode {
+	workerNodes := readyNodeAddresses(nodes, false)
+	if len(workerNodes) > 0 {
+		return workerNodes
+	}
+	return readyNodeAddresses(nodes, true)
+}
+
+func readyNodeAddresses(nodes []corev1.Node, controlPlaneOnly bool) []serviceLBNode {
 	seen := map[string]struct{}{}
-	result := make([]string, 0)
+	result := make([]serviceLBNode, 0)
 	for _, node := range nodes {
 		if !isReadyWorkerNode(node) || (controlPlaneOnly != isControlPlaneNode(node)) {
 			continue
 		}
+		addresses := make([]string, 0)
 		for _, address := range node.Status.Addresses {
 			if address.Type != corev1.NodeExternalIP && address.Type != corev1.NodeInternalIP {
 				continue
@@ -105,10 +123,50 @@ func readyNodeIPs(nodes []corev1.Node, controlPlaneOnly bool) []string {
 				continue
 			}
 			seen[value] = struct{}{}
-			result = append(result, value)
+			addresses = append(addresses, value)
+		}
+		if len(addresses) > 0 {
+			result = append(result, serviceLBNode{name: node.Name, ips: addresses})
 		}
 	}
 	return result
+}
+
+func serviceLBNodeIPs(ctx context.Context, client kubernetes.Interface, service *corev1.Service, nodes []corev1.Node) ([]string, error) {
+	candidates := readyServiceLBNodes(nodes)
+	if service.Spec.ExternalTrafficPolicy != corev1.ServiceExternalTrafficPolicyTypeLocal {
+		ips := make([]string, 0)
+		for _, node := range candidates {
+			ips = append(ips, node.ips...)
+		}
+		return uniqueStrings(ips), nil
+	}
+	candidates = readyNodeAddresses(nodes, false)
+	candidates = append(candidates, readyNodeAddresses(nodes, true)...)
+
+	endpointSlices, err := client.DiscoveryV1().EndpointSlices(service.Namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: "kubernetes.io/service-name=" + service.Name,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list EndpointSlices: %w", err)
+	}
+	localNodes := map[string]struct{}{}
+	for _, endpointSlice := range endpointSlices.Items {
+		for _, endpoint := range endpointSlice.Endpoints {
+			if endpoint.NodeName == nil || (endpoint.Conditions.Ready != nil && !*endpoint.Conditions.Ready) {
+				continue
+			}
+			localNodes[*endpoint.NodeName] = struct{}{}
+		}
+	}
+	ips := make([]string, 0)
+	for _, node := range candidates {
+		if _, ok := localNodes[node.name]; !ok {
+			continue
+		}
+		ips = append(ips, node.ips...)
+	}
+	return uniqueStrings(ips), nil
 }
 
 func isReadyWorkerNode(node corev1.Node) bool {
