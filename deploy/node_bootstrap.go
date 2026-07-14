@@ -121,13 +121,6 @@ func (d *NodeDeployer) Deploy(ctx context.Context, opts NodeDeployOptions) (*Nod
 		return nil, err
 	}
 
-	if bootstrapState.podCIDR != "" {
-		d.logStep(nodeDeployPhaseConfiguring, "Removing legacy bridge-only CNI config")
-		if _, err = runner.RunRootContext(ctx, removeLegacyBridgeCNICommand()); err != nil {
-			return nil, fmt.Errorf("remove legacy bridge-only CNI config: %w", err)
-		}
-	}
-
 	if err = d.startKubeProxy(ctx, runner); err != nil {
 		return nil, err
 	}
@@ -141,6 +134,15 @@ func (d *NodeDeployer) Deploy(ctx context.Context, opts NodeDeployOptions) (*Nod
 		d.logStep(nodeDeployPhaseWaiting, "Node is already Ready")
 	}
 
+	d.logStep(nodeDeployPhaseWaiting, "Waiting for Flannel to become Ready on the worker")
+	if err = d.waitForFlannelReady(ctx, opts.NodeName); err != nil {
+		return nil, err
+	}
+	d.logStep(nodeDeployPhaseConfiguring, "Removing legacy bridge-only CNI config")
+	if _, err = runner.RunRootContext(ctx, removeLegacyBridgeCNICommand()); err != nil {
+		return nil, fmt.Errorf("remove legacy bridge-only CNI config: %w", err)
+	}
+
 	d.logStep(nodeDeployPhaseConfiguring, "Writing CasOS managed SSH key")
 	keyPair, err := GenerateNodeDeployKeyPair()
 	if err != nil {
@@ -152,6 +154,41 @@ func (d *NodeDeployer) Deploy(ctx context.Context, opts NodeDeployOptions) (*Nod
 
 	d.logStep(nodeDeployPhaseReady, "Node registered and Ready")
 	return &NodeDeployResult{ManagedPrivateKey: keyPair.PrivateKey}, nil
+}
+
+func (d *NodeDeployer) waitForFlannelReady(ctx context.Context, nodeName string) error {
+	if d.restConfig == nil {
+		return fmt.Errorf("apiserver rest config is required")
+	}
+	client, err := kubernetes.NewForConfig(d.restConfig)
+	if err != nil {
+		return err
+	}
+	deadlineTimer, deadline := deploymentWaitDeadline(ctx)
+	ticker := time.NewTicker(2 * time.Second)
+	defer deadlineTimer.Stop()
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline:
+			return fmt.Errorf("timed out waiting for Flannel to become Ready on worker %s", nodeName)
+		case <-ticker.C:
+			pods, err := client.CoreV1().Pods("kube-flannel").List(ctx, metav1.ListOptions{
+				LabelSelector: "k8s-app=flannel",
+				FieldSelector: "spec.nodeName=" + nodeName,
+			})
+			if err != nil {
+				return err
+			}
+			for i := range pods.Items {
+				if flannelPodReady(&pods.Items[i]) {
+					return nil
+				}
+			}
+		}
+	}
 }
 
 func (d *NodeDeployer) clusterDNSServiceIP(ctx context.Context) (string, error) {
@@ -499,6 +536,10 @@ func isPodReady(pod corev1.Pod) bool {
 		}
 	}
 	return false
+}
+
+func flannelPodReady(pod *corev1.Pod) bool {
+	return pod != nil && isPodReady(*pod)
 }
 
 func storageProbeName(nodeName string) string {
