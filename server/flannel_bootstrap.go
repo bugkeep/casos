@@ -21,7 +21,7 @@ const (
 )
 
 func ensureFlannel(ctx context.Context, client kubernetes.Interface, cfg Config) error {
-	if err := ensureNamespace(ctx, client, flannelNamespace); err != nil {
+	if err := ensureFlannelNamespace(ctx, client); err != nil {
 		return err
 	}
 	if err := ensureFlannelServiceAccount(ctx, client); err != nil {
@@ -37,6 +37,36 @@ func ensureFlannel(ctx context.Context, client kubernetes.Interface, cfg Config)
 		return err
 	}
 	return ensureFlannelDaemonSet(ctx, client, cfg)
+}
+
+func ensureFlannelNamespace(ctx context.Context, client kubernetes.Interface) error {
+	namespaces := client.CoreV1().Namespaces()
+	current, err := namespaces.Get(ctx, flannelNamespace, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		_, err = namespaces.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+			Name: flannelNamespace,
+			Labels: map[string]string{
+				"k8s-app":                            "flannel",
+				"pod-security.kubernetes.io/enforce": "privileged",
+			},
+		}}, metav1.CreateOptions{})
+		if err != nil {
+			return fmt.Errorf("create namespace %s: %w", flannelNamespace, err)
+		}
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("get namespace %s: %w", flannelNamespace, err)
+	}
+	updated := current.DeepCopy()
+	updated.Labels = mergeStringMap(updated.Labels, map[string]string{
+		"k8s-app":                            "flannel",
+		"pod-security.kubernetes.io/enforce": "privileged",
+	})
+	if _, err := namespaces.Update(ctx, updated, metav1.UpdateOptions{}); err != nil {
+		return fmt.Errorf("update namespace %s: %w", flannelNamespace, err)
+	}
+	return nil
 }
 
 func flannelLabels() map[string]string {
