@@ -157,7 +157,7 @@ func ensureIngressControllerService(ctx context.Context, client kubernetes.Inter
 			Labels:    ingressControllerLabels(),
 		},
 		Spec: corev1.ServiceSpec{
-			Type:                  corev1.ServiceTypeNodePort,
+			Type:                  corev1.ServiceTypeLoadBalancer,
 			Selector:              ingressControllerLabels(),
 			ExternalTrafficPolicy: corev1.ServiceExternalTrafficPolicyTypeCluster,
 			Ports: []corev1.ServicePort{
@@ -182,6 +182,7 @@ func ensureIngressControllerService(ctx context.Context, client kubernetes.Inter
 	desired.Spec.ClusterIPs = current.Spec.ClusterIPs
 	desired.Spec.IPFamilies = current.Spec.IPFamilies
 	desired.Spec.IPFamilyPolicy = current.Spec.IPFamilyPolicy
+	desired.Spec.ExternalIPs = current.Spec.ExternalIPs
 	for i := range desired.Spec.Ports {
 		for _, currentPort := range current.Spec.Ports {
 			if desired.Spec.Ports[i].Name == currentPort.Name {
