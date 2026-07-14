@@ -165,7 +165,8 @@ jobs:
             iproute2 \
             iptables \
             qemu-system-x86 \
-            qemu-utils
+            qemu-utils \
+            sshpass
 
           sudo modprobe kvm || true
           if [[ ! -e /dev/kvm ]]; then
@@ -314,6 +315,35 @@ jobs:
           set -o pipefail
           mapfile -t ui_test_files < ui-standard-regression-tests.txt
           yarn run ui:test:regression -- "${ui_test_files[@]}" 2>&1 | tee ui-test.log
+      - name: Collect worker node diagnostics
+        if: always() && steps.prepare-worker-vm.outcome == 'success'
+        shell: bash
+        env:
+          SSHPASS: ${{ env.E2E_SSH_PASSWORD }}
+        run: |
+          set +e
+          diagnostics_file="$RUNNER_TEMP/worker-node-diagnostics.log"
+          {
+            echo "== worker node diagnostics =="
+            sshpass -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+              root@"$E2E_WORKER_VM_IP" '
+                set +e
+                echo "-- systemctl status --"
+                systemctl --no-pager --full status kubelet containerd
+                echo "-- kubelet journal --"
+                journalctl -u kubelet --no-pager -n 200
+                echo "-- containerd journal --"
+                journalctl -u containerd --no-pager -n 100
+                echo "-- cni config --"
+                ls -la /etc/cni/net.d /opt/cni/bin
+                for file in /etc/cni/net.d/*; do [ -f "$file" ] && { echo "### $file"; cat "$file"; }; done
+                echo "-- network state --"
+                ip -br addr
+                ip route
+                ip -d link show
+              '
+          } > "$diagnostics_file" 2>&1
+          echo "Worker diagnostics written to $diagnostics_file"
       - name: Skip UI regression tests
         if: steps.ui-regression-tests.outputs.has_standard_tests != 'true'
         working-directory: ./web
@@ -358,6 +388,7 @@ jobs:
             ./web/ui-test.log
             ./web/ui-worker-node-ready-test.log
             ./web/ui-app-store-test.log
+            ${{ runner.temp }}/worker-node-diagnostics.log
             ${{ runner.temp }}/casos-worker-vm/serial.log
           if-no-files-found: ignore
 
