@@ -344,7 +344,11 @@ func workerOperationalState(ctx context.Context, client kubernetes.Interface, no
 	if err := waitForStorageProbe(ctx, client, nodeName, storageProbeImage); err != nil {
 		return err.Error(), false, nil
 	}
-	if err := waitForSchedulerProbe(ctx, client, nodeName, storageProbeImage); err != nil {
+	hostname := nodeName
+	if node.Labels["kubernetes.io/hostname"] != "" {
+		hostname = node.Labels["kubernetes.io/hostname"]
+	}
+	if err := waitForSchedulerProbe(ctx, client, nodeName, hostname, storageProbeImage); err != nil {
 		return err.Error(), false, nil
 	}
 	return "", true, nil
@@ -447,7 +451,7 @@ func waitForStorageProbe(ctx context.Context, client kubernetes.Interface, nodeN
 	}
 }
 
-func waitForSchedulerProbe(ctx context.Context, client kubernetes.Interface, nodeName, image string) error {
+func waitForSchedulerProbe(ctx context.Context, client kubernetes.Interface, nodeName, hostname, image string) error {
 	const namespace = "kube-system"
 	name := schedulerProbeName(nodeName)
 	cleanup := func() {
@@ -458,7 +462,7 @@ func waitForSchedulerProbe(ctx context.Context, client kubernetes.Interface, nod
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: map[string]string{"casos.io/probe": "scheduler-placement"}},
 		Spec: corev1.PodSpec{
 			RestartPolicy: corev1.RestartPolicyNever,
-			NodeSelector:  map[string]string{"kubernetes.io/hostname": nodeName},
+			NodeSelector:  map[string]string{"kubernetes.io/hostname": hostname},
 			Containers: []corev1.Container{{
 				Name: "scheduler-probe", Image: workerProbeImage(image), ImagePullPolicy: corev1.PullIfNotPresent,
 				Command: []string{"sh", "-c", "echo casos-scheduler"},
