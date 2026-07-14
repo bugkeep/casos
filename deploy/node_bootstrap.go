@@ -104,12 +104,9 @@ func (d *NodeDeployer) Deploy(ctx context.Context, opts NodeDeployOptions) (*Nod
 	}
 
 	if bootstrapState.podCIDR != "" {
-		d.logStep(nodeDeployPhaseConfiguring, "Writing node CNI config")
-		if err = runner.WriteFileContext(ctx, "/etc/cni/net.d/10-casos-bridge.conflist", bridgeCNIConfig(bootstrapState.podCIDR), "0644"); err != nil {
-			return nil, fmt.Errorf("write /etc/cni/net.d/10-casos-bridge.conflist: %w", err)
-		}
-		if _, err = runner.RunRootContext(ctx, "systemctl restart kubelet"); err != nil {
-			return nil, fmt.Errorf("restart kubelet: %w", err)
+		d.logStep(nodeDeployPhaseConfiguring, "Removing legacy bridge-only CNI config")
+		if _, err = runner.RunRootContext(ctx, removeLegacyBridgeCNICommand()); err != nil {
+			return nil, fmt.Errorf("remove legacy bridge-only CNI config: %w", err)
 		}
 	}
 
