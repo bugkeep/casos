@@ -53,6 +53,7 @@ if needs_kube_binary /usr/local/bin/kube-proxy; then
   install -o root -g root -m 0755 /tmp/kube-proxy /usr/local/bin/kube-proxy
 fi
 mkdir -p /opt/cni/bin /etc/cni/net.d
+rm -f /etc/cni/net.d/10-casos-bridge.conflist
 if [ ! -x /opt/cni/bin/bridge ] || [ ! -x /opt/cni/bin/loopback ] || [ ! -x /opt/cni/bin/portmap ]; then
   download -o /tmp/cni-plugins.tgz https://github.com/containernetworking/plugins/releases/download/%s/cni-plugins-linux-%s-%s.tgz
   tar -xzf /tmp/cni-plugins.tgz -C /opt/cni/bin
