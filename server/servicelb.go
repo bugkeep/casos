@@ -78,10 +78,18 @@ func reconcileServiceLB(ctx context.Context, client kubernetes.Interface) error 
 }
 
 func readyWorkerIPs(nodes []corev1.Node) []string {
+	workerIPs := readyNodeIPs(nodes, false)
+	if len(workerIPs) > 0 {
+		return workerIPs
+	}
+	return readyNodeIPs(nodes, true)
+}
+
+func readyNodeIPs(nodes []corev1.Node, controlPlaneOnly bool) []string {
 	seen := map[string]struct{}{}
 	result := make([]string, 0)
 	for _, node := range nodes {
-		if isControlPlaneNode(node) || !isReadyWorkerNode(node) {
+		if !isReadyWorkerNode(node) || (controlPlaneOnly != isControlPlaneNode(node)) {
 			continue
 		}
 		for _, address := range node.Status.Addresses {
