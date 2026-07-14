@@ -12,7 +12,6 @@ import (
 const (
 	defaultNodeDeployCNIVersion = "v1.5.1"
 	nodeDeployClusterCIDR       = "10.244.0.0/16"
-	nodeDeployClusterDNS        = "10.43.0.10"
 	nodeDeployPhasePreflight    = "preflight"
 	nodeDeployPhaseInstalling   = "installing"
 	nodeDeployPhaseConfiguring  = "configuring"

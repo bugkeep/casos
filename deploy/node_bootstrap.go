@@ -93,7 +93,12 @@ func (d *NodeDeployer) Deploy(ctx context.Context, opts NodeDeployOptions) (*Nod
 	if err = d.installNodeBinaries(ctx, runner, preflightResult.Arch, k8sVersion); err != nil {
 		return nil, err
 	}
-	if err = d.writeNodeFiles(ctx, runner, opts.NodeName, wk.Kubeconfig); err != nil {
+	d.logStep(nodeDeployPhaseConfiguring, "Resolving cluster DNS Service")
+	clusterDNS, err := d.clusterDNSServiceIP(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err = d.writeNodeFiles(ctx, runner, opts.NodeName, wk.Kubeconfig, clusterDNS); err != nil {
 		return nil, err
 	}
 	if err = d.startKubelet(ctx, runner); err != nil {
@@ -137,6 +142,48 @@ func (d *NodeDeployer) Deploy(ctx context.Context, opts NodeDeployOptions) (*Nod
 
 	d.logStep(nodeDeployPhaseReady, "Node registered and Ready")
 	return &NodeDeployResult{ManagedPrivateKey: keyPair.PrivateKey}, nil
+}
+
+func (d *NodeDeployer) clusterDNSServiceIP(ctx context.Context) (string, error) {
+	if d.restConfig == nil {
+		return "", fmt.Errorf("apiserver rest config is required")
+	}
+	client, err := kubernetes.NewForConfig(d.restConfig)
+	if err != nil {
+		return "", err
+	}
+	deadlineTimer, deadline := deploymentWaitDeadline(ctx)
+	ticker := time.NewTicker(2 * time.Second)
+	defer deadlineTimer.Stop()
+	defer ticker.Stop()
+	var lastReason string
+	for {
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-deadline:
+			if lastReason == "" {
+				lastReason = "kube-system/kube-dns has no ClusterIP"
+			}
+			return "", fmt.Errorf("timed out waiting for cluster DNS Service: %s", lastReason)
+		case <-ticker.C:
+			requestCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			service, err := client.CoreV1().Services("kube-system").Get(requestCtx, "kube-dns", metav1.GetOptions{})
+			cancel()
+			if apierrors.IsNotFound(err) {
+				lastReason = "kube-system/kube-dns is not created"
+				continue
+			}
+			if err != nil {
+				return "", fmt.Errorf("get kube-system/kube-dns Service: %w", err)
+			}
+			if service.Spec.ClusterIP == "" || service.Spec.ClusterIP == corev1.ClusterIPNone {
+				lastReason = "kube-system/kube-dns has no routable ClusterIP"
+				continue
+			}
+			return service.Spec.ClusterIP, nil
+		}
+	}
 }
 
 func newRunnerForMachine(machine NodeDeployMachine) (*NodeDeploySSHRunner, error) {

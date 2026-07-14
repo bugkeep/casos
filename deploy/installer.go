@@ -63,7 +63,7 @@ fi`, version, version, arch, version, arch, cniVersion, arch, cniVersion)
 	return nil
 }
 
-func (d *NodeDeployer) writeNodeFiles(ctx context.Context, runner *NodeDeploySSHRunner, nodeName, kubeconfig string) error {
+func (d *NodeDeployer) writeNodeFiles(ctx context.Context, runner *NodeDeploySSHRunner, nodeName, kubeconfig, clusterDNS string) error {
 	ca, err := extractCertificateAuthority(kubeconfig)
 	if err != nil {
 		return err
@@ -74,7 +74,7 @@ func (d *NodeDeployer) writeNodeFiles(ctx context.Context, runner *NodeDeploySSH
 	if err = runner.WriteFileContext(ctx, "/etc/kubernetes/ca.crt", ca, "0644"); err != nil {
 		return fmt.Errorf("write /etc/kubernetes/ca.crt: %w", err)
 	}
-	if err = runner.WriteFileContext(ctx, "/var/lib/kubelet/config.yaml", kubeletConfig(), "0644"); err != nil {
+	if err = runner.WriteFileContext(ctx, "/var/lib/kubelet/config.yaml", kubeletConfig(clusterDNS), "0644"); err != nil {
 		return fmt.Errorf("write /var/lib/kubelet/config.yaml: %w", err)
 	}
 	if err = runner.WriteFileContext(ctx, "/etc/systemd/system/kubelet.service", kubeletService(nodeName), "0644"); err != nil {
