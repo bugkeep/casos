@@ -270,6 +270,11 @@ func workerOperationalState(ctx context.Context, client kubernetes.Interface, no
 	if err != nil {
 		return "", false, err
 	}
+	for _, condition := range node.Status.Conditions {
+		if condition.Type == corev1.NodeNetworkUnavailable && condition.Status == corev1.ConditionTrue {
+			return "node network is unavailable", false, nil
+		}
+	}
 	if !isNodeReady(node) {
 		return "node is not Ready", false, nil
 	}
