@@ -5,9 +5,10 @@ import (
 )
 
 const (
-	MachineStatusDeploying = "Deploying"
-	MachineStatusDeployed  = "Deployed"
-	MachineStatusFailed    = "Failed"
+	MachineStatusDeploying   = "Deploying"
+	MachineStatusDeployed    = "Deployed"
+	MachineStatusOperational = "Operational"
+	MachineStatusFailed      = "Failed"
 )
 
 type Machine struct {

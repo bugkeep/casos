@@ -308,8 +308,18 @@ func (s *Service) runMachineNodeDeployTask(parentCtx context.Context, taskId int
 		logTask(object.MachineNodeDeployLogLevelInfo, "CasOS managed SSH key installed")
 	}
 
-	logTask(object.MachineNodeDeployLogLevelInfo, "Node deployment completed")
-	if err = object.UpdateMachineNodeDeployStatus(machine.Owner, machine.Name, object.MachineStatusDeployed); err != nil {
+	logTask(object.MachineNodeDeployLogLevelInfo, "Worker installed; validating network, DNS, and storage readiness")
+	if err = deployer.WaitForOperational(ctx, task.NodeName); err != nil {
+		logTask(object.MachineNodeDeployLogLevelError, "Worker operational validation failed: "+err.Error())
+		_ = object.UpdateMachineNodeDeployStatus(machine.Owner, machine.Name, object.MachineStatusFailed)
+		if finishErr := object.FinishMachineNodeDeployTask(taskId, false, object.MachineNodeDeployPhaseFailed, err.Error()); finishErr != nil {
+			logTask(object.MachineNodeDeployLogLevelError, "Failed to finish node deployment task: "+finishErr.Error())
+		}
+		return
+	}
+
+	logTask(object.MachineNodeDeployLogLevelInfo, "Worker is operational")
+	if err = object.UpdateMachineNodeDeployStatus(machine.Owner, machine.Name, object.MachineStatusOperational); err != nil {
 		logTask(object.MachineNodeDeployLogLevelError, "Failed to update machine status after completed node deployment: "+err.Error())
 		_ = object.FinishMachineNodeDeployTask(taskId, true, object.MachineNodeDeployPhaseReady, "machine status update failed: "+err.Error())
 		return
