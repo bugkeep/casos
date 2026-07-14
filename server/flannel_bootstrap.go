@@ -9,9 +9,11 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	appsinternal "k8s.io/kubernetes/pkg/apis/apps/v1"
 )
 
 const (
@@ -237,6 +239,15 @@ func createOrUpdateDaemonSet(ctx context.Context, client kubernetes.Interface, d
 	}
 	if err != nil {
 		return fmt.Errorf("get daemonset %s/%s: %w", desired.Namespace, desired.Name, err)
+	}
+	desired.Labels = mergeStringMap(current.Labels, desired.Labels)
+	desired.Annotations = mergeStringMap(current.Annotations, desired.Annotations)
+	currentDefaulted := current.DeepCopy()
+	appsinternal.SetObjectDefaults_DaemonSet(currentDefaulted)
+	if apiequality.Semantic.DeepEqual(currentDefaulted.Labels, desired.Labels) &&
+		apiequality.Semantic.DeepEqual(currentDefaulted.Annotations, desired.Annotations) &&
+		apiequality.Semantic.DeepEqual(currentDefaulted.Spec, desired.Spec) {
+		return nil
 	}
 	desired.ResourceVersion = current.ResourceVersion
 	if _, err := client.AppsV1().DaemonSets(desired.Namespace).Update(ctx, desired, metav1.UpdateOptions{}); err != nil {

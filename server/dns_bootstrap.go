@@ -9,6 +9,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -370,6 +371,11 @@ func createOrUpdateService(ctx context.Context, client kubernetes.Interface, svc
 	svc.Spec.LoadBalancerClass = current.Spec.LoadBalancerClass
 	svc.Spec.LoadBalancerSourceRanges = current.Spec.LoadBalancerSourceRanges
 	svc.Spec.AllocateLoadBalancerNodePorts = current.Spec.AllocateLoadBalancerNodePorts
+	if apiequality.Semantic.DeepEqual(current.Labels, svc.Labels) &&
+		apiequality.Semantic.DeepEqual(current.Annotations, svc.Annotations) &&
+		apiequality.Semantic.DeepEqual(current.Spec, svc.Spec) {
+		return nil
+	}
 	if _, err := client.CoreV1().Services(svc.Namespace).Update(ctx, svc, metav1.UpdateOptions{}); err != nil {
 		return fmt.Errorf("update service %s/%s: %w", svc.Namespace, svc.Name, err)
 	}

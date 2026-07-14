@@ -12,6 +12,7 @@ import (
 	admissionregv1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -275,8 +276,16 @@ func ensureCasbinWebhook(ctx context.Context, client kubernetes.Interface, cfg C
 	if err != nil {
 		return fmt.Errorf("get casbin-admission webhook: %w", err)
 	}
-	whConfig.ResourceVersion = existing.ResourceVersion
-	if _, err := ar.Update(ctx, whConfig, metav1.UpdateOptions{}); err != nil {
+	updated := existing.DeepCopy()
+	updated.Labels = mergeStringMap(existing.Labels, whConfig.Labels)
+	updated.Annotations = mergeStringMap(existing.Annotations, whConfig.Annotations)
+	updated.Webhooks = whConfig.Webhooks
+	if apiequality.Semantic.DeepEqual(existing.Labels, updated.Labels) &&
+		apiequality.Semantic.DeepEqual(existing.Annotations, updated.Annotations) &&
+		apiequality.Semantic.DeepEqual(existing.Webhooks, updated.Webhooks) {
+		return nil
+	}
+	if _, err := ar.Update(ctx, updated, metav1.UpdateOptions{}); err != nil {
 		return fmt.Errorf("update casbin-admission webhook: %w", err)
 	}
 	logrus.Info("updated ValidatingWebhookConfiguration casbin-admission")
