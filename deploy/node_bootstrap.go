@@ -345,6 +345,9 @@ func workerOperationalState(ctx context.Context, client kubernetes.Interface, no
 	if err != nil {
 		return "", false, err
 	}
+	if err := waitForDNSProbe(ctx, client, nodeName, storageProbeImage); err != nil {
+		return err.Error(), false, nil
+	}
 
 	if _, err := client.StorageV1().StorageClasses().Get(ctx, "local-path", metav1.GetOptions{}); apierrors.IsNotFound(err) {
 		return "default local-path StorageClass is missing", false, nil
@@ -382,11 +385,102 @@ func schedulerProbeName(nodeName string) string {
 	return "casos-scheduler-" + hex.EncodeToString(digest[:])[:16]
 }
 
+func dnsProbeName(nodeName string) string {
+	digest := sha256.Sum256([]byte(nodeName))
+	return "casos-dns-" + hex.EncodeToString(digest[:])[:16]
+}
+
 func workerProbeImage(image string) string {
 	if image == "" {
 		return "docker.1ms.run/library/busybox:1.37.0"
 	}
 	return image
+}
+
+func dnsProbePod(name, nodeName, image string) *corev1.Pod {
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "kube-system", Labels: map[string]string{"casos.io/probe": "dns"}},
+		Spec: corev1.PodSpec{
+			NodeName:      nodeName,
+			RestartPolicy: corev1.RestartPolicyNever,
+			DNSPolicy:     corev1.DNSClusterFirst,
+			Containers: []corev1.Container{{
+				Name: "dns-probe", Image: workerProbeImage(image), ImagePullPolicy: corev1.PullIfNotPresent,
+				Command: []string{"sh", "-c", "nslookup kubernetes.default.svc.cluster.local >/dev/null"},
+			}},
+		},
+	}
+}
+
+func waitForDNSProbe(ctx context.Context, client kubernetes.Interface, nodeName, image string) error {
+	const namespace = "kube-system"
+	name := dnsProbeName(nodeName)
+	cleanupCtx, cancelCleanup := context.WithTimeout(ctx, 15*time.Second)
+	defer cancelCleanup()
+	if err := deleteDNSProbe(cleanupCtx, client, namespace, name); err != nil {
+		return err
+	}
+	if err := waitForDNSProbeDeleted(cleanupCtx, client, namespace, name); err != nil {
+		return err
+	}
+	if _, err := client.CoreV1().Pods(namespace).Create(ctx, dnsProbePod(name, nodeName, image), metav1.CreateOptions{}); err != nil {
+		return fmt.Errorf("create DNS probe Pod: %w", err)
+	}
+	defer func() {
+		_ = deleteDNSProbe(context.Background(), client, namespace, name)
+	}()
+	deadlineTimer, deadline := deploymentWaitDeadline(ctx)
+	ticker := time.NewTicker(2 * time.Second)
+	defer deadlineTimer.Stop()
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline:
+			return fmt.Errorf("timed out waiting for DNS probe")
+		case <-ticker.C:
+			current, err := client.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			if err != nil {
+				return fmt.Errorf("get DNS probe Pod: %w", err)
+			}
+			switch current.Status.Phase {
+			case corev1.PodSucceeded:
+				return nil
+			case corev1.PodFailed:
+				return fmt.Errorf("DNS probe Pod failed")
+			}
+		}
+	}
+}
+
+func deleteDNSProbe(ctx context.Context, client kubernetes.Interface, namespace, name string) error {
+	if err := client.CoreV1().Pods(namespace).Delete(ctx, name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("delete DNS probe Pod: %w", err)
+	}
+	return nil
+}
+
+func waitForDNSProbeDeleted(ctx context.Context, client kubernetes.Interface, namespace, name string) error {
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		_, err := client.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("check DNS probe Pod deletion: %w", err)
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timed out waiting for DNS probe Pod deletion")
+		case <-ticker.C:
+		}
+	}
 }
 
 func waitForStorageProbe(ctx context.Context, client kubernetes.Interface, nodeName, image string) error {
