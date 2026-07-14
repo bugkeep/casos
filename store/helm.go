@@ -1225,9 +1225,9 @@ func InstallHelmChart(cfg *rest.Config, releaseName, namespace, chartName, repoU
 
 // InstallHelmChartStream runs helm install asynchronously and pushes log lines to the returned channel.
 // It waits for chart resources to become ready before sending "DONE", so the stream can stay open until
-// helmInstallTimeout or until ctx is canceled.
-// The channel is closed when the operation finishes; a final line of "ERROR: <msg>", "ABORTED", or "DONE" signals the outcome.
-// Cancel ctx to abort a waiting install (e.g. stuck waiting for PVCs).
+// helmInstallTimeout. The channel is closed when the operation finishes; a final line of
+// "ERROR: <msg>" or "DONE" signals the outcome. Closing the browser stream stops progress delivery,
+// but does not cancel the submitted Helm operation.
 func InstallHelmChartStream(ctx context.Context, cfg *rest.Config, releaseName, namespace, chartName, repoURL, version, valuesYAML string) <-chan string {
 	logCh := make(chan string, 64)
 	go func() {
