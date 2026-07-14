@@ -337,6 +337,8 @@ jobs:
                 echo "-- cni config --"
                 ls -la /etc/cni/net.d /opt/cni/bin
                 for file in /etc/cni/net.d/*; do [ -f "$file" ] && { echo "### $file"; cat "$file"; }; done
+                echo "-- pod container logs --"
+                find /var/log/pods -path '*kube-flannel*' -type f -name '*.log' -print -exec tail -n 200 {} \;
                 echo "-- network state --"
                 ip -br addr
                 ip route
