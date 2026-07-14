@@ -140,7 +140,7 @@ func buildApiserverArgs(cfg Config, certDir, etcdEndpoint, authzKubeconfig strin
 		"--service-cluster-ip-range=10.43.0.0/16",
 		"--allow-privileged=true",
 		"--authorization-mode=" + authzMode(authzKubeconfig),
-		"--enable-admission-plugins=NodeRestriction,ValidatingAdmissionWebhook",
+		"--enable-admission-plugins=NodeRestriction,DefaultIngressClass,ValidatingAdmissionWebhook",
 		"--tls-cert-file=" + filepath.Join(certDir, "apiserver.crt"),
 		"--tls-private-key-file=" + filepath.Join(certDir, "apiserver.key"),
 		"--client-ca-file=" + filepath.Join(certDir, "ca.crt"),
