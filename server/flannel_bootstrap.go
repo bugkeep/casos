@@ -15,13 +15,12 @@ import (
 )
 
 const (
-	defaultFlannelImage          = "docker.1ms.run/flannelcni/flannel:v0.27.4"
-	defaultFlannelCNIPluginImage = "docker.1ms.run/flannel/flannel-cni-plugin:v1.7.1-flannel1"
-	flannelNamespace             = "kube-flannel"
-	flannelServiceAccount        = "flannel"
-	flannelConfigMap             = "kube-flannel-cfg"
-	flannelDaemonSet             = "kube-flannel-ds"
-	flannelNetwork               = "10.244.0.0/16"
+	defaultFlannelImage   = "docker.1ms.run/flannelcni/flannel:v0.27.4"
+	flannelNamespace      = "kube-flannel"
+	flannelServiceAccount = "flannel"
+	flannelConfigMap      = "kube-flannel-cfg"
+	flannelDaemonSet      = "kube-flannel-ds"
+	flannelNetwork        = "10.244.0.0/16"
 )
 
 func ensureFlannel(ctx context.Context, client kubernetes.Interface, cfg Config) error {
@@ -159,17 +158,8 @@ func buildFlannelDaemonSet(cfg Config) *appsv1.DaemonSet {
 	if flannelDaemonImage == "" {
 		flannelDaemonImage = defaultFlannelImage
 	}
-	flannelPluginImage := cfg.FlannelCNIPluginImage
-	if flannelPluginImage == "" {
-		flannelPluginImage = defaultFlannelCNIPluginImage
-	}
 	labels := flannelLabels()
 	selector := map[string]string{"app": "flannel", "k8s-app": "flannel"}
-	initCNI := corev1.Container{
-		Name: "install-cni-plugin", Image: flannelPluginImage, ImagePullPolicy: corev1.PullIfNotPresent,
-		Command:      []string{"cp", "/flannel", "/opt/cni/bin/flannel"},
-		VolumeMounts: []corev1.VolumeMount{{Name: "cni-bin", MountPath: "/opt/cni/bin"}},
-	}
 	initConfig := corev1.Container{
 		Name: "install-cni", Image: flannelDaemonImage, ImagePullPolicy: corev1.PullIfNotPresent,
 		Command: []string{"/opt/bin/install-conf"}, Args: []string{"/etc/kube-flannel/cni-conf.json", "/etc/cni/net.d/10-flannel.conflist"},
@@ -198,10 +188,9 @@ func buildFlannelDaemonSet(cfg Config) *appsv1.DaemonSet {
 				ServiceAccountName: flannelServiceAccount, AutomountServiceAccountToken: ptr(true), HostNetwork: true,
 				NodeSelector:   map[string]string{"kubernetes.io/os": "linux"},
 				Tolerations:    []corev1.Toleration{{Operator: corev1.TolerationOpExists}},
-				InitContainers: []corev1.Container{initCNI, initConfig}, Containers: []corev1.Container{flannel},
+				InitContainers: []corev1.Container{initConfig}, Containers: []corev1.Container{flannel},
 				Volumes: []corev1.Volume{
 					{Name: "run", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/run/flannel"}}},
-					{Name: "cni-bin", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/opt/cni/bin"}}},
 					{Name: "cni-conf", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/etc/cni/net.d"}}},
 					{Name: "flannel-cfg", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: flannelConfigMap}}}},
 					{Name: "xtables-lock", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/run/xtables.lock", Type: ptr(corev1.HostPathFileOrCreate)}}},

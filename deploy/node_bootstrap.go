@@ -297,7 +297,6 @@ func (d *NodeDeployer) waitForFlannelReady(ctx context.Context, nodeName string)
 	}
 }
 
-<<<<<<< HEAD
 func flannelPodFailureReason(reason string, client kubernetes.Interface, pod *corev1.Pod) string {
 	if !strings.Contains(reason, "CrashLoopBackOff") && !strings.Contains(reason, "terminated") {
 		return reason
@@ -330,8 +329,6 @@ func flannelPodFailureReason(reason string, client kubernetes.Interface, pod *co
 	return fmt.Sprintf("%s: logs: %s", reason, logs)
 }
 
-=======
->>>>>>> b609dc0a (fix: expose flannel readiness failure reason)
 func flannelDaemonSetReadinessReason(ctx context.Context, client kubernetes.Interface, nodeName string) string {
 	daemonSet, err := client.AppsV1().DaemonSets("kube-flannel").Get(ctx, flannelDaemonSetName, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
