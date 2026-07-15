@@ -9,11 +9,13 @@ import (
 	"sync"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/util/retry"
 )
 
 type nodeBootstrapState struct {
@@ -30,6 +32,7 @@ type NodeDeployer struct {
 const (
 	workerProbeAttemptTimeout = 2 * time.Minute
 	flannelDaemonSetName      = "kube-flannel-ds"
+	workerBootstrapTaintKey   = "casos.io/bootstrap"
 )
 
 var nodeCIDRReservationMu sync.Mutex
@@ -126,6 +129,9 @@ func (d *NodeDeployer) Deploy(ctx context.Context, opts NodeDeployOptions) (*Nod
 	if err != nil {
 		return nil, fmt.Errorf("waiting for node registration: %w", err)
 	}
+	if err = d.ensureWorkerBootstrapTaint(ctx, opts.NodeName); err != nil {
+		return nil, fmt.Errorf("protect worker during bootstrap: %w", err)
+	}
 
 	if err = d.startKubeProxy(ctx, runner); err != nil {
 		return nil, err
@@ -183,6 +189,7 @@ func (d *NodeDeployer) ensureNodeCIDR(ctx context.Context, nodeName string) (str
 			continue
 		}
 		cidr := nodeCIDRFromSpec(&nodes.Items[i])
+		changed := ensureWorkerBootstrapTaint(&nodes.Items[i])
 		if cidr == "" {
 			cidr, err = allocateNodeCIDR(nodes.Items)
 			if err != nil {
@@ -190,8 +197,11 @@ func (d *NodeDeployer) ensureNodeCIDR(ctx context.Context, nodeName string) (str
 			}
 			nodes.Items[i].Spec.PodCIDR = cidr
 			nodes.Items[i].Spec.PodCIDRs = []string{cidr}
+			changed = true
+		}
+		if changed {
 			if _, err = client.CoreV1().Nodes().Update(ctx, &nodes.Items[i], metav1.UpdateOptions{}); err != nil {
-				return "", fmt.Errorf("reserve PodCIDR for node %s: %w", nodeName, err)
+				return "", fmt.Errorf("reserve PodCIDR and bootstrap taint for node %s: %w", nodeName, err)
 			}
 		}
 		return cidr, nil
@@ -206,12 +216,97 @@ func (d *NodeDeployer) ensureNodeCIDR(ctx context.Context, nodeName string) (str
 			Name:   nodeName,
 			Labels: map[string]string{corev1.LabelOSStable: "linux"},
 		},
-		Spec: corev1.NodeSpec{PodCIDR: cidr, PodCIDRs: []string{cidr}},
+		Spec: corev1.NodeSpec{
+			PodCIDR:  cidr,
+			PodCIDRs: []string{cidr},
+			Taints:   []corev1.Taint{{Key: workerBootstrapTaintKey, Value: "true", Effect: corev1.TaintEffectNoSchedule}},
+		},
 	}
 	if _, err = client.CoreV1().Nodes().Create(ctx, node, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
 		return "", fmt.Errorf("create worker node with PodCIDR: %w", err)
 	}
 	return cidr, nil
+}
+
+func ensureWorkerBootstrapTaint(node *corev1.Node) bool {
+	if node == nil {
+		return false
+	}
+	desired := corev1.Taint{Key: workerBootstrapTaintKey, Value: "true", Effect: corev1.TaintEffectNoSchedule}
+	changed := false
+	found := false
+	taints := make([]corev1.Taint, 0, len(node.Spec.Taints)+1)
+	for _, taint := range node.Spec.Taints {
+		if taint.Key != workerBootstrapTaintKey {
+			taints = append(taints, taint)
+			continue
+		}
+		if !found {
+			found = true
+			taints = append(taints, desired)
+			if taint != desired {
+				changed = true
+			}
+		} else {
+			changed = true
+		}
+	}
+	if !found {
+		taints = append(taints, desired)
+		changed = true
+	}
+	if changed {
+		node.Spec.Taints = taints
+	}
+	return changed
+}
+
+func removeWorkerBootstrapTaint(node *corev1.Node) bool {
+	if node == nil {
+		return false
+	}
+	taints := make([]corev1.Taint, 0, len(node.Spec.Taints))
+	changed := false
+	for _, taint := range node.Spec.Taints {
+		if taint.Key == workerBootstrapTaintKey {
+			changed = true
+			continue
+		}
+		taints = append(taints, taint)
+	}
+	if changed {
+		node.Spec.Taints = taints
+	}
+	return changed
+}
+
+func (d *NodeDeployer) ensureWorkerBootstrapTaint(ctx context.Context, nodeName string) error {
+	return d.updateWorkerBootstrapTaint(ctx, nodeName, ensureWorkerBootstrapTaint)
+}
+
+func (d *NodeDeployer) removeWorkerBootstrapTaint(ctx context.Context, nodeName string) error {
+	return d.updateWorkerBootstrapTaint(ctx, nodeName, removeWorkerBootstrapTaint)
+}
+
+func (d *NodeDeployer) updateWorkerBootstrapTaint(ctx context.Context, nodeName string, mutate func(*corev1.Node) bool) error {
+	if d.restConfig == nil {
+		return fmt.Errorf("apiserver rest config is required")
+	}
+	client, err := kubernetes.NewForConfig(d.restConfig)
+	if err != nil {
+		return err
+	}
+	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		node, err := client.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		if !mutate(node) {
+			return nil
+		}
+		_, err = client.CoreV1().Nodes().Update(ctx, node, metav1.UpdateOptions{})
+		return err
+	})
 }
 
 func nodeCIDRFromSpec(node *corev1.Node) string {
@@ -472,6 +567,173 @@ func (d *NodeDeployer) waitForNodeReady(ctx context.Context, nodeName string) er
 			}
 		}
 	}
+}
+
+// WaitForOperational verifies the platform prerequisites that make a worker
+// safe for application scheduling. Node Ready alone does not prove that CNI,
+// DNS, or the default storage path is usable.
+func (d *NodeDeployer) WaitForOperational(ctx context.Context, nodeName string) error {
+	if d.restConfig == nil {
+		return fmt.Errorf("apiserver rest config is required")
+	}
+	client, err := kubernetes.NewForConfig(d.restConfig)
+	if err != nil {
+		return err
+	}
+	deadlineTimer, deadline := deploymentWaitDeadline(ctx)
+	ticker := time.NewTicker(3 * time.Second)
+	defer deadlineTimer.Stop()
+	defer ticker.Stop()
+	var lastReason string
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline:
+			if lastReason == "" {
+				lastReason = "platform prerequisites are not ready"
+			}
+			return fmt.Errorf("timed out waiting for worker operational readiness: %s", lastReason)
+		case <-ticker.C:
+			reason, ready, err := workerOperationalState(ctx, client, nodeName)
+			if err != nil {
+				return err
+			}
+			if ready {
+				if err := d.removeWorkerBootstrapTaint(ctx, nodeName); err != nil {
+					return fmt.Errorf("remove worker bootstrap taint: %w", err)
+				}
+				return nil
+			}
+			lastReason = reason
+		}
+	}
+}
+
+func workerOperationalState(ctx context.Context, client kubernetes.Interface, nodeName string) (string, bool, error) {
+	node, err := client.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return "node is not registered", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	if !isNodeReady(node) {
+		return "node is not Ready", false, nil
+	}
+	if node.Spec.PodCIDR == "" {
+		return "node has no PodCIDR", false, nil
+	}
+
+	flannelPods, err := client.CoreV1().Pods("kube-flannel").List(ctx, metav1.ListOptions{
+		LabelSelector: "k8s-app=flannel",
+		FieldSelector: "spec.nodeName=" + nodeName,
+	})
+	if err != nil {
+		return "", false, err
+	}
+	if len(flannelPods.Items) == 0 || !isPodReady(flannelPods.Items[0]) {
+		return "Flannel is not Ready on the worker", false, nil
+	}
+
+	dns, err := client.AppsV1().Deployments("kube-system").Get(ctx, "coredns", metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return "CoreDNS Deployment is missing", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	if dns.Status.AvailableReplicas < 1 {
+		return coreDNSReadinessReason(ctx, client, dns), false, nil
+	}
+
+	if _, err := client.StorageV1().StorageClasses().Get(ctx, "local-path", metav1.GetOptions{}); apierrors.IsNotFound(err) {
+		return "default local-path StorageClass is missing", false, nil
+	} else if err != nil {
+		return "", false, err
+	}
+	return "", true, nil
+}
+
+func coreDNSReadinessReason(ctx context.Context, client kubernetes.Interface, deployment *appsv1.Deployment) string {
+	pods, err := client.CoreV1().Pods("kube-system").List(ctx, metav1.ListOptions{
+		LabelSelector: "app.kubernetes.io/name=coredns,app.kubernetes.io/managed-by=casos",
+	})
+	if err != nil {
+		return "CoreDNS is not Available (unable to inspect Pods: " + err.Error() + ")"
+	}
+	for _, pod := range pods.Items {
+		for _, status := range append(pod.Status.InitContainerStatuses, pod.Status.ContainerStatuses...) {
+			if status.State.Waiting != nil {
+				reason := status.State.Waiting.Reason
+				if reason == "" {
+					reason = "waiting"
+				}
+				if status.State.Waiting.Message != "" {
+					return coreDNSPodFailureReason(fmt.Sprintf("CoreDNS Pod %s container %s is %s: %s", pod.Name, status.Name, reason, status.State.Waiting.Message), client, pod)
+				}
+				return coreDNSPodFailureReason(fmt.Sprintf("CoreDNS Pod %s container %s is %s", pod.Name, status.Name, reason), client, pod)
+			}
+			if status.State.Terminated != nil && status.State.Terminated.ExitCode != 0 {
+				terminated := status.State.Terminated
+				return coreDNSPodFailureReason(fmt.Sprintf("CoreDNS Pod %s container %s terminated with %s (exit code %d): %s", pod.Name, status.Name, terminated.Reason, terminated.ExitCode, terminated.Message), client, pod)
+			}
+		}
+		if pod.Status.Phase != corev1.PodRunning {
+			return fmt.Sprintf("CoreDNS Pod %s is %s: %s", pod.Name, pod.Status.Phase, pod.Status.Message)
+		}
+	}
+	return fmt.Sprintf(
+		"CoreDNS is not Available (desired=%d ready=%d available=%d updated=%d)",
+		deployment.Status.Replicas,
+		deployment.Status.ReadyReplicas,
+		deployment.Status.AvailableReplicas,
+		deployment.Status.UpdatedReplicas,
+	)
+}
+
+func coreDNSPodFailureReason(reason string, client kubernetes.Interface, pod corev1.Pod) string {
+	if !strings.Contains(reason, "CrashLoopBackOff") && !strings.Contains(reason, "terminated") {
+		return reason
+	}
+	tailLines := int64(40)
+	logCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	stream, err := client.CoreV1().Pods("kube-system").GetLogs(pod.Name, &corev1.PodLogOptions{
+		Container: "coredns",
+		Previous:  true,
+		TailLines: &tailLines,
+	}).Stream(logCtx)
+	if err != nil {
+		return fmt.Sprintf("%s (unable to read CoreDNS logs: %v)", reason, err)
+	}
+	defer stream.Close()
+	data, err := io.ReadAll(stream)
+	if err != nil {
+		return fmt.Sprintf("%s (unable to read CoreDNS logs: %v)", reason, err)
+	}
+	logs := strings.TrimSpace(string(data))
+	if logs == "" {
+		return reason
+	}
+	logs = strings.ReplaceAll(logs, "\r\n", " | ")
+	logs = strings.ReplaceAll(logs, "\n", " | ")
+	if len(logs) > 2000 {
+		logs = logs[len(logs)-2000:]
+	}
+	return fmt.Sprintf("%s: logs: %s", reason, logs)
+}
+
+func isPodReady(pod corev1.Pod) bool {
+	if pod.Status.Phase != corev1.PodRunning {
+		return false
+	}
+	for _, condition := range pod.Status.Conditions {
+		if condition.Type == corev1.PodReady {
+			return condition.Status == corev1.ConditionTrue
+		}
+	}
+	return false
 }
 
 func isNodeReady(node *corev1.Node) bool {

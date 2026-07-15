@@ -543,7 +543,7 @@ func UpdateMachineNodeDeployStatus(owner, name, status string) error {
 
 func isValidMachineStatus(status string) bool {
 	switch status {
-	case MachineStatusDeploying, MachineStatusDeployed, MachineStatusFailed:
+	case MachineStatusDeploying, MachineStatusDeployed, MachineStatusOperational, MachineStatusFailed:
 		return true
 	default:
 		return false
