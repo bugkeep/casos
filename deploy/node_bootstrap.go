@@ -859,6 +859,67 @@ func workerProbeImage(image string) string {
 	return image
 }
 
+type serviceProbePlacement struct {
+	serverNodeName string
+	serverHostname string
+	clientHostname string
+}
+
+func selectServiceProbePlacement(nodes []corev1.Node, targetNodeName string) (serviceProbePlacement, error) {
+	var target *corev1.Node
+	for i := range nodes {
+		if nodes[i].Name == targetNodeName {
+			target = &nodes[i]
+			break
+		}
+	}
+	if target == nil {
+		return serviceProbePlacement{}, fmt.Errorf("target worker %s is not registered", targetNodeName)
+	}
+	placement := serviceProbePlacement{
+		serverNodeName: target.Name,
+		serverHostname: nodeHostname(target),
+		clientHostname: nodeHostname(target),
+	}
+	for i := range nodes {
+		node := &nodes[i]
+		if node.Name == targetNodeName || isControlPlaneNode(node) || !isNodeReady(node) || nodeCIDRFromSpec(node) == "" {
+			continue
+		}
+		placement.serverNodeName = node.Name
+		placement.serverHostname = nodeHostname(node)
+		break
+	}
+	return placement, nil
+}
+
+func nodeHostname(node *corev1.Node) string {
+	if node == nil {
+		return ""
+	}
+	if hostname := node.Labels[corev1.LabelHostname]; hostname != "" {
+		return hostname
+	}
+	return node.Name
+}
+
+func isControlPlaneNode(node *corev1.Node) bool {
+	if node == nil {
+		return false
+	}
+	_, controlPlane := node.Labels["node-role.kubernetes.io/control-plane"]
+	_, master := node.Labels["node-role.kubernetes.io/master"]
+	return controlPlane || master
+}
+
+func workerBootstrapProbeTolerations() []corev1.Toleration {
+	return []corev1.Toleration{{
+		Key:      "casos.io/bootstrap",
+		Operator: corev1.TolerationOpExists,
+		Effect:   corev1.TaintEffectNoSchedule,
+	}}
+}
+
 func waitForSchedulerProbe(ctx context.Context, client kubernetes.Interface, nodeName, hostname, image string) error {
 	const namespace = "kube-system"
 	name := schedulerProbeName(nodeName)
@@ -928,10 +989,18 @@ func waitForServiceProbe(ctx context.Context, client kubernetes.Interface, nodeN
 	if err := waitForServiceProbeResourcesDeleted(cleanupCtx, client, namespace, name, clientName); err != nil {
 		return err
 	}
+	nodes, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("list nodes for service probe: %w", err)
+	}
+	placement, err := selectServiceProbePlacement(nodes.Items, nodeName)
+	if err != nil {
+		return err
+	}
 	labels := map[string]string{"casos.io/probe": "service-routing", "casos.io/probe-name": name}
 	service := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: labels},
-		Spec: corev1.ServiceSpec{Selector: labels, Ports: []corev1.ServicePort{{Name: "http", Port: 80, TargetPort: intstr.FromInt(8080)}}},
+		Spec:       corev1.ServiceSpec{Selector: labels, Ports: []corev1.ServicePort{{Name: "http", Port: 80, TargetPort: intstr.FromInt(8080)}}},
 	}
 	createdService, err := client.CoreV1().Services(namespace).Create(ctx, service, metav1.CreateOptions{})
 	if err != nil {
@@ -941,10 +1010,12 @@ func waitForServiceProbe(ctx context.Context, client kubernetes.Interface, nodeN
 	serverPod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: labels},
 		Spec: corev1.PodSpec{
-			NodeName: nodeName, RestartPolicy: corev1.RestartPolicyAlways,
+			NodeSelector:  map[string]string{corev1.LabelHostname: placement.serverHostname},
+			Tolerations:   workerBootstrapProbeTolerations(),
+			RestartPolicy: corev1.RestartPolicyAlways,
 			Containers: []corev1.Container{{
 				Name: "service-server", Image: workerProbeImage(image), ImagePullPolicy: corev1.PullIfNotPresent,
-				Command: []string{"sh", "-c", "mkdir -p /tmp/www && echo casos-service > /tmp/www/index.html && httpd -f -p 8080 -h /tmp/www"},
+				Command:        []string{"sh", "-c", "mkdir -p /tmp/www && echo casos-service > /tmp/www/index.html && httpd -f -p 8080 -h /tmp/www"},
 				ReadinessProbe: &corev1.Probe{ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: "/", Port: intstr.FromInt(8080), Scheme: corev1.URISchemeHTTP}}, InitialDelaySeconds: 1, PeriodSeconds: 2, TimeoutSeconds: 2, FailureThreshold: 5},
 			}},
 		},
@@ -952,27 +1023,43 @@ func waitForServiceProbe(ctx context.Context, client kubernetes.Interface, nodeN
 	if _, err := client.CoreV1().Pods(namespace).Create(ctx, serverPod, metav1.CreateOptions{}); err != nil {
 		return fmt.Errorf("create service probe server Pod: %w", err)
 	}
-	clusterIP, err := waitForServiceProbeClusterIP(ctx, client, namespace, createdService.Name)
+	serverPod, err = waitForServiceProbePodReady(ctx, client, namespace, name)
 	if err != nil {
 		return err
 	}
-	if err := waitForServiceProbePodReady(ctx, client, namespace, name); err != nil {
+	if serverPod.Spec.NodeName != placement.serverNodeName {
+		return fmt.Errorf("service probe server scheduled on %s instead of %s", serverPod.Spec.NodeName, placement.serverNodeName)
+	}
+	if serverPod.Status.PodIP == "" {
+		return fmt.Errorf("service probe server has no PodIP")
+	}
+	clusterIP, err := waitForServiceProbeClusterIP(ctx, client, namespace, createdService.Name)
+	if err != nil {
 		return err
 	}
 	clientPod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: clientName, Namespace: namespace, Labels: map[string]string{"casos.io/probe": "service-routing-client"}},
 		Spec: corev1.PodSpec{
-			NodeName: nodeName, RestartPolicy: corev1.RestartPolicyNever,
+			NodeSelector:  map[string]string{corev1.LabelHostname: placement.clientHostname},
+			Tolerations:   workerBootstrapProbeTolerations(),
+			RestartPolicy: corev1.RestartPolicyNever,
 			Containers: []corev1.Container{{
 				Name: "service-client", Image: workerProbeImage(image), ImagePullPolicy: corev1.PullIfNotPresent,
-				Command: []string{"sh", "-c", fmt.Sprintf("i=0; while [ $i -lt 30 ]; do wget -qO- http://%s:80/ | grep -q casos-service && exit 0; i=$((i+1)); sleep 1; done; exit 1", clusterIP)},
+				Command: []string{"sh", "-c", fmt.Sprintf("i=0; while [ $i -lt 30 ]; do wget -qO- http://%s:8080/ | grep -q casos-service && wget -qO- http://%s:80/ | grep -q casos-service && exit 0; i=$((i+1)); sleep 1; done; exit 1", serverPod.Status.PodIP, clusterIP)},
 			}},
 		},
 	}
 	if _, err := client.CoreV1().Pods(namespace).Create(ctx, clientPod, metav1.CreateOptions{}); err != nil {
 		return fmt.Errorf("create service probe client Pod: %w", err)
 	}
-	return waitForServiceProbePodSucceeded(ctx, client, namespace, clientName)
+	clientPod, err = waitForServiceProbePodSucceeded(ctx, client, namespace, clientName)
+	if err != nil {
+		return err
+	}
+	if clientPod.Spec.NodeName != nodeName {
+		return fmt.Errorf("service probe client scheduled on %s instead of %s", clientPod.Spec.NodeName, nodeName)
+	}
+	return nil
 }
 
 func waitForServiceProbeClusterIP(ctx context.Context, client kubernetes.Interface, namespace, name string) (string, error) {
@@ -998,7 +1085,7 @@ func waitForServiceProbeClusterIP(ctx context.Context, client kubernetes.Interfa
 	}
 }
 
-func waitForServiceProbePodReady(ctx context.Context, client kubernetes.Interface, namespace, name string) error {
+func waitForServiceProbePodReady(ctx context.Context, client kubernetes.Interface, namespace, name string) (*corev1.Pod, error) {
 	deadlineTimer, deadline := deploymentWaitDeadline(ctx)
 	ticker := time.NewTicker(2 * time.Second)
 	defer deadlineTimer.Stop()
@@ -1008,23 +1095,23 @@ func waitForServiceProbePodReady(ctx context.Context, client kubernetes.Interfac
 		if apierrors.IsNotFound(err) {
 			// The kubelet may not have created the Pod status yet.
 		} else if err != nil {
-			return fmt.Errorf("get service probe server Pod: %w", err)
+			return nil, fmt.Errorf("get service probe server Pod: %w", err)
 		} else if pod.Status.Phase == corev1.PodFailed {
-			return fmt.Errorf("service probe server Pod failed")
+			return nil, fmt.Errorf("service probe server Pod failed")
 		} else if isPodReady(*pod) {
-			return nil
+			return pod, nil
 		}
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return nil, ctx.Err()
 		case <-deadline:
-			return fmt.Errorf("timed out waiting for service probe server Pod")
+			return nil, fmt.Errorf("timed out waiting for service probe server Pod")
 		case <-ticker.C:
 		}
 	}
 }
 
-func waitForServiceProbePodSucceeded(ctx context.Context, client kubernetes.Interface, namespace, name string) error {
+func waitForServiceProbePodSucceeded(ctx context.Context, client kubernetes.Interface, namespace, name string) (*corev1.Pod, error) {
 	deadlineTimer, deadline := deploymentWaitDeadline(ctx)
 	ticker := time.NewTicker(2 * time.Second)
 	defer deadlineTimer.Stop()
@@ -1034,20 +1121,20 @@ func waitForServiceProbePodSucceeded(ctx context.Context, client kubernetes.Inte
 		if apierrors.IsNotFound(err) {
 			// The kubelet may not have created the Pod status yet.
 		} else if err != nil {
-			return fmt.Errorf("get service probe client Pod: %w", err)
+			return nil, fmt.Errorf("get service probe client Pod: %w", err)
 		} else {
 			switch pod.Status.Phase {
 			case corev1.PodSucceeded:
-				return nil
+				return pod, nil
 			case corev1.PodFailed:
-				return fmt.Errorf("service probe client Pod failed")
+				return nil, fmt.Errorf("service probe client Pod failed")
 			}
 		}
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return nil, ctx.Err()
 		case <-deadline:
-			return fmt.Errorf("timed out waiting for service probe client Pod")
+			return nil, fmt.Errorf("timed out waiting for service probe client Pod")
 		case <-ticker.C:
 		}
 	}
