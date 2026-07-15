@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"net"
 	"strconv"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -36,7 +37,7 @@ func ensureFlannel(ctx context.Context, client kubernetes.Interface, cfg Config)
 	if err := ensureFlannelClusterRoleBinding(ctx, client); err != nil {
 		return err
 	}
-	if err := ensureFlannelConfigMap(ctx, client); err != nil {
+	if err := ensureFlannelConfigMap(ctx, client, cfg); err != nil {
 		return err
 	}
 	return ensureFlannelDaemonSet(ctx, client, cfg)
@@ -105,14 +106,37 @@ func ensureFlannelClusterRoleBinding(ctx context.Context, client kubernetes.Inte
 	})
 }
 
-func ensureFlannelConfigMap(ctx context.Context, client kubernetes.Interface) error {
+func ensureFlannelConfigMap(ctx context.Context, client kubernetes.Interface, cfg Config) error {
 	return createOrUpdateConfigMap(ctx, client, &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{Name: flannelConfigMap, Namespace: flannelNamespace, Labels: flannelLabels()},
 		Data: map[string]string{
 			"net-conf.json": fmt.Sprintf(`{"Network":%q,"Backend":{"Type":"vxlan"}}`, flannelNetwork),
 			"cni-conf.json": flannelCNIConfigData(),
+			"kubeconfig":    flannelKubeconfigData(cfg),
 		},
 	})
+}
+
+func flannelKubeconfigData(cfg Config) string {
+	server := fmt.Sprintf("https://%s", net.JoinHostPort(cfg.AdvertiseAddress, strconv.Itoa(cfg.ApiserverPort)))
+	return fmt.Sprintf(`apiVersion: v1
+kind: Config
+clusters:
+- name: casos
+  cluster:
+    server: %s
+    certificate-authority: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+contexts:
+- name: flannel@casos
+  context:
+    cluster: casos
+    user: flannel
+current-context: flannel@casos
+users:
+- name: flannel
+  user:
+    tokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+`, server)
 }
 
 func flannelCNIConfigData() string {
@@ -165,7 +189,7 @@ func buildFlannelDaemonSet(cfg Config) *appsv1.DaemonSet {
 	}
 	flannel := corev1.Container{
 		Name: "kube-flannel", Image: flannelDaemonImage, ImagePullPolicy: corev1.PullIfNotPresent,
-		Command: []string{"/opt/bin/flanneld"}, Args: []string{"--ip-masq", "--kube-subnet-mgr"},
+		Command: []string{"/opt/bin/flanneld"}, Args: []string{"--ip-masq", "--kube-subnet-mgr", "--kubeconfig-file=/etc/kube-flannel/kubeconfig"},
 		Env:             flannelEnv(cfg),
 		SecurityContext: &corev1.SecurityContext{Privileged: ptr(true)},
 		Ports:           []corev1.ContainerPort{{Name: "vxlan", ContainerPort: 8472, Protocol: corev1.ProtocolUDP}},
@@ -180,7 +204,7 @@ func buildFlannelDaemonSet(cfg Config) *appsv1.DaemonSet {
 		Spec: appsv1.DaemonSetSpec{
 			Selector: &metav1.LabelSelector{MatchLabels: selector},
 			Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: labels}, Spec: corev1.PodSpec{
-				ServiceAccountName: flannelServiceAccount, HostNetwork: true,
+				ServiceAccountName: flannelServiceAccount, AutomountServiceAccountToken: ptr(true), HostNetwork: true,
 				NodeSelector:   map[string]string{"kubernetes.io/os": "linux"},
 				Tolerations:    []corev1.Toleration{{Operator: corev1.TolerationOpExists}},
 				InitContainers: []corev1.Container{cleanupLegacyCNI, initCNI, initConfig}, Containers: []corev1.Container{flannel},
