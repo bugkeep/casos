@@ -156,7 +156,10 @@ func (d *NodeDeployer) waitForFlannelReady(ctx context.Context, nodeName string)
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			if lastPod != nil {
+				lastReason = flannelPodFailureReason(lastReason, client, lastPod)
+			}
+			return fmt.Errorf("%s: %w", lastReason, ctx.Err())
 		case <-deadline:
 			if lastPod != nil {
 				lastReason = flannelPodFailureReason(lastReason, client, lastPod)
