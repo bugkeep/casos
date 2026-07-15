@@ -24,6 +24,7 @@ type Config struct {
 	LocalPathProvisionerImage string // local-path-provisioner controller image
 	LocalPathHelperImage      string // helper pod image used by local-path-provisioner
 	FlannelImage              string // Flannel daemon image used by the built-in network bootstrap
+	StorageProbeImage         string // Image used by worker storage readiness probes
 	StorageProvisionerEnabled bool   // install the built-in local-path provisioner for local clusters
 }
 
@@ -74,9 +75,10 @@ func ConfigFromAppConf() (Config, error) {
 
 	storageProvisionerEnabled := configBool("storageProvisionerEnabled", true)
 	coreDNSImage := configStringDefault("coreDNSImage", "registry.k8s.io/coredns/coredns:v1.12.4")
-	localPathProvisionerImage := configStringDefault("localPathProvisionerImage", "docker.1ms.run/rancher/local-path-provisioner:v0.0.32")
-	localPathHelperImage := configStringDefault("localPathHelperImage", "docker.1ms.run/library/busybox:1.37.0")
+	localPathProvisionerImage := configStringDefault("localPathProvisionerImage", "docker.io/rancher/local-path-provisioner:v0.0.32")
+	localPathHelperImage := configStringDefault("localPathHelperImage", "docker.io/library/busybox:1.37.0")
 	flannelImage := configStringDefault("flannelImage", "ghcr.io/flannel-io/flannel:v0.27.4")
+	storageProbeImage := configStringDefault("storageProbeImage", "docker.io/library/busybox:1.37.0")
 
 	return Config{
 		DataDir:                   dataDir,
@@ -91,6 +93,7 @@ func ConfigFromAppConf() (Config, error) {
 		LocalPathProvisionerImage: localPathProvisionerImage,
 		LocalPathHelperImage:      localPathHelperImage,
 		FlannelImage:              flannelImage,
+		StorageProbeImage:         storageProbeImage,
 		StorageProvisionerEnabled: storageProvisionerEnabled,
 	}, nil
 }
