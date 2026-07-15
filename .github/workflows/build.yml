@@ -291,6 +291,7 @@ jobs:
         env:
           E2E_DATA_DIR: ${{ runner.temp }}/casos-e2e-${{ github.run_id }}-${{ github.run_attempt }}-worker
           dbName: casos_worker
+          E2E_WORKER_DEPLOY_TIMEOUT_MS: 900000
         run: |
           set -o pipefail
           yarn playwright test --workers=1 tests/ui/worker-node-ready.spec.js 2>&1 | tee ui-worker-node-ready-test.log
