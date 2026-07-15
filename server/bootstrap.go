@@ -5,14 +5,17 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/sirupsen/logrus"
 	admissionregv1 "k8s.io/api/admissionregistration/v1"
+	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/util/retry"
 )
 
 // Bootstrap creates cluster-wide resources required for worker-node components
@@ -21,6 +24,9 @@ func Bootstrap(ctx context.Context, cfg *rest.Config, srvCfg Config) error {
 	client, err := kubernetes.NewForConfig(cfg)
 	if err != nil {
 		return fmt.Errorf("bootstrap client: %w", err)
+	}
+	if err := ensureNodeCIDRConsistency(ctx, client); err != nil {
+		return err
 	}
 	if err := ensureNodeProxierBinding(ctx, client); err != nil {
 		return err
@@ -34,6 +40,63 @@ func Bootstrap(ctx context.Context, cfg *rest.Config, srvCfg Config) error {
 		}
 	}
 	return ensureCasbinWebhook(ctx, client, srvCfg)
+}
+
+// normalizeNodeCIDRs keeps the legacy PodCIDR field and the NodeIPAM source
+// of truth (PodCIDRs) in sync. NodeIPAM restores allocations from PodCIDRs on
+// controller-manager restart; leaving only PodCIDR populated makes it assign
+// a second range to an existing node.
+func normalizeNodeCIDRs(node *corev1.Node) (bool, error) {
+	if node == nil {
+		return false, nil
+	}
+	legacy := strings.TrimSpace(node.Spec.PodCIDR)
+	if len(node.Spec.PodCIDRs) == 0 {
+		if legacy == "" {
+			return false, nil
+		}
+		node.Spec.PodCIDRs = []string{legacy}
+		return true, nil
+	}
+	if legacy != "" && legacy != node.Spec.PodCIDRs[0] {
+		return false, fmt.Errorf("node %s has conflicting PodCIDR fields %q and %q", node.Name, legacy, node.Spec.PodCIDRs[0])
+	}
+	if legacy == "" {
+		node.Spec.PodCIDR = node.Spec.PodCIDRs[0]
+		return true, nil
+	}
+	return false, nil
+}
+
+func ensureNodeCIDRConsistency(ctx context.Context, client kubernetes.Interface) error {
+	nodes, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("list nodes for PodCIDR consistency: %w", err)
+	}
+	for _, existing := range nodes.Items {
+		nodeName := existing.Name
+		if err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+			node, err := client.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+			if apierrors.IsNotFound(err) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			changed, err := normalizeNodeCIDRs(node)
+			if err != nil {
+				return err
+			}
+			if !changed {
+				return nil
+			}
+			_, err = client.CoreV1().Nodes().Update(ctx, node, metav1.UpdateOptions{})
+			return err
+		}); err != nil {
+			return fmt.Errorf("normalize PodCIDR fields for node %s: %w", nodeName, err)
+		}
+	}
+	return nil
 }
 
 // ensureCasbinWebhook registers the ValidatingWebhookConfiguration that routes
