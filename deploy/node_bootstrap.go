@@ -672,6 +672,12 @@ func workerOperationalState(ctx context.Context, client kubernetes.Interface, no
 	if err != nil {
 		return "scheduler probe: " + err.Error(), false, nil
 	}
+	probeCtx, cancel = context.WithTimeout(ctx, workerProbeAttemptTimeout)
+	err = waitForServiceProbe(probeCtx, client, nodeName, storageProbeImage)
+	cancel()
+	if err != nil {
+		return "service probe: " + err.Error(), false, nil
+	}
 	return "", true, nil
 }
 
