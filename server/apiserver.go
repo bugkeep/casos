@@ -43,7 +43,10 @@ func Start(ctx context.Context, cfg Config) (<-chan struct{}, error) {
 		Endpoint:         "mysql://" + cfg.DSN,
 		Listener:         "tcp://127.0.0.1:2379",
 		CompactBatchSize: 100,
-		NotifyInterval:   time.Second,
+		CompactTimeout:   5 * time.Second,
+		CompactMinRetain: 1000,
+		PollBatchSize:    500,
+		NotifyInterval:   5 * time.Second,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("kine listen: %w", err)
