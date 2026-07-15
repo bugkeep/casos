@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"net"
 	"strings"
 	"sync"
@@ -261,11 +262,15 @@ func (d *NodeDeployer) waitForFlannelReady(ctx context.Context, nodeName string)
 	defer deadlineTimer.Stop()
 	defer ticker.Stop()
 	lastReason := "Flannel Pod has not been created"
+	var lastPod *corev1.Pod
 	for {
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("%s: %w", lastReason, ctx.Err())
 		case <-deadline:
+			if lastPod != nil {
+				lastReason = flannelPodFailureReason(lastReason, client, lastPod)
+			}
 			return fmt.Errorf("timed out waiting for Flannel to become Ready on worker %s: %s", nodeName, lastReason)
 		case <-ticker.C:
 			pods, err := client.CoreV1().Pods("kube-flannel").List(ctx, metav1.ListOptions{
@@ -284,6 +289,7 @@ func (d *NodeDeployer) waitForFlannelReady(ctx context.Context, nodeName string)
 				if flannelPodReady(pod) {
 					return nil
 				}
+				lastPod = pod.DeepCopy()
 				lastReason = flannelPodReadinessReason(pod)
 			}
 			if !matched {
@@ -291,6 +297,38 @@ func (d *NodeDeployer) waitForFlannelReady(ctx context.Context, nodeName string)
 			}
 		}
 	}
+}
+
+func flannelPodFailureReason(reason string, client kubernetes.Interface, pod *corev1.Pod) string {
+	if !strings.Contains(reason, "CrashLoopBackOff") && !strings.Contains(reason, "terminated") {
+		return reason
+	}
+	tailLines := int64(40)
+	logCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	stream, err := client.CoreV1().Pods("kube-flannel").GetLogs(pod.Name, &corev1.PodLogOptions{
+		Container: "kube-flannel",
+		Previous:  true,
+		TailLines: &tailLines,
+	}).Stream(logCtx)
+	if err != nil {
+		return fmt.Sprintf("%s (unable to read Flannel logs: %v)", reason, err)
+	}
+	defer stream.Close()
+	data, err := io.ReadAll(stream)
+	if err != nil {
+		return fmt.Sprintf("%s (unable to read Flannel logs: %v)", reason, err)
+	}
+	logs := strings.TrimSpace(string(data))
+	if logs == "" {
+		return reason
+	}
+	logs = strings.ReplaceAll(logs, "\r\n", " | ")
+	logs = strings.ReplaceAll(logs, "\n", " | ")
+	if len(logs) > 2000 {
+		logs = logs[len(logs)-2000:]
+	}
+	return fmt.Sprintf("%s: logs: %s", reason, logs)
 }
 
 func flannelDaemonSetReadinessReason(ctx context.Context, client kubernetes.Interface, nodeName string) string {
