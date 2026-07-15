@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -165,10 +166,7 @@ func buildFlannelDaemonSet(cfg Config) *appsv1.DaemonSet {
 	flannel := corev1.Container{
 		Name: "kube-flannel", Image: flannelDaemonImage, ImagePullPolicy: corev1.PullIfNotPresent,
 		Command: []string{"/opt/bin/flanneld"}, Args: []string{"--ip-masq", "--kube-subnet-mgr"},
-		Env: []corev1.EnvVar{
-			{Name: "POD_NAME", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.name"}}},
-			{Name: "POD_NAMESPACE", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.namespace"}}},
-		},
+		Env:             flannelEnv(cfg),
 		SecurityContext: &corev1.SecurityContext{Privileged: ptr(true)},
 		Ports:           []corev1.ContainerPort{{Name: "vxlan", ContainerPort: 8472, Protocol: corev1.ProtocolUDP}},
 		ReadinessProbe: &corev1.Probe{
@@ -197,6 +195,21 @@ func buildFlannelDaemonSet(cfg Config) *appsv1.DaemonSet {
 		},
 	}
 	return daemonSet
+}
+
+func flannelEnv(cfg Config) []corev1.EnvVar {
+	env := []corev1.EnvVar{
+		{Name: "POD_NAME", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.name"}}},
+		{Name: "POD_NAMESPACE", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.namespace"}}},
+	}
+	if cfg.AdvertiseAddress != "" && cfg.ApiserverPort > 0 {
+		env = append([]corev1.EnvVar{
+			{Name: "KUBERNETES_SERVICE_HOST", Value: cfg.AdvertiseAddress},
+			{Name: "KUBERNETES_SERVICE_PORT", Value: strconv.Itoa(cfg.ApiserverPort)},
+			{Name: "KUBERNETES_SERVICE_PORT_HTTPS", Value: strconv.Itoa(cfg.ApiserverPort)},
+		}, env...)
+	}
+	return env
 }
 
 func createOrUpdateDaemonSet(ctx context.Context, client kubernetes.Interface, desired *appsv1.DaemonSet) error {
