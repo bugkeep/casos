@@ -723,6 +723,11 @@ func waitForSchedulerProbe(ctx context.Context, client kubernetes.Interface, nod
 		Spec: corev1.PodSpec{
 			RestartPolicy: corev1.RestartPolicyNever,
 			NodeSelector:  map[string]string{"kubernetes.io/hostname": nodeName},
+			Tolerations: []corev1.Toleration{{
+				Key:      workerBootstrapTaintKey,
+				Operator: corev1.TolerationOpExists,
+				Effect:   corev1.TaintEffectNoSchedule,
+			}},
 			Containers: []corev1.Container{{
 				Name: "scheduler-probe", Image: workerProbeImage(image), ImagePullPolicy: corev1.PullIfNotPresent,
 				Command: []string{"sh", "-c", "echo casos-scheduler"},
