@@ -3,7 +3,9 @@ package deploy
 import (
 	"context"
 	"fmt"
+	"net"
 	"strings"
+	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -23,6 +25,8 @@ type NodeDeployer struct {
 	restConfig *rest.Config
 	log        NodeDeployLogger
 }
+
+var nodeCIDRReservationMu sync.Mutex
 
 func NewNodeDeployer(config Config, restConfig *rest.Config, log NodeDeployLogger) *NodeDeployer {
 	if log == nil {
@@ -93,6 +97,11 @@ func (d *NodeDeployer) Deploy(ctx context.Context, opts NodeDeployOptions) (*Nod
 	if err = d.writeNodeFiles(ctx, runner, opts.NodeName, wk.Kubeconfig); err != nil {
 		return nil, err
 	}
+
+	d.logStep(nodeDeployPhaseConfiguring, "Reserving a unique PodCIDR for the worker")
+	if err = d.ensureNodeCIDR(ctx, opts.NodeName); err != nil {
+		return nil, err
+	}
 	if err = d.startKubelet(ctx, runner); err != nil {
 		return nil, err
 	}
@@ -136,6 +145,89 @@ func (d *NodeDeployer) Deploy(ctx context.Context, opts NodeDeployOptions) (*Nod
 
 	d.logStep(nodeDeployPhaseReady, "Node registered and Ready")
 	return &NodeDeployResult{ManagedPrivateKey: keyPair.PrivateKey}, nil
+}
+
+func (d *NodeDeployer) ensureNodeCIDR(ctx context.Context, nodeName string) error {
+	if d.restConfig == nil {
+		return fmt.Errorf("apiserver rest config is required")
+	}
+	client, err := kubernetes.NewForConfig(d.restConfig)
+	if err != nil {
+		return err
+	}
+
+	nodeCIDRReservationMu.Lock()
+	defer nodeCIDRReservationMu.Unlock()
+
+	nodes, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("list nodes for PodCIDR reservation: %w", err)
+	}
+	for i := range nodes.Items {
+		if nodes.Items[i].Name != nodeName {
+			continue
+		}
+		cidr := nodeCIDRFromSpec(&nodes.Items[i])
+		if cidr == "" {
+			cidr, err = allocateNodeCIDR(nodes.Items)
+			if err != nil {
+				return err
+			}
+			nodes.Items[i].Spec.PodCIDR = cidr
+			nodes.Items[i].Spec.PodCIDRs = []string{cidr}
+			if _, err = client.CoreV1().Nodes().Update(ctx, &nodes.Items[i], metav1.UpdateOptions{}); err != nil {
+				return fmt.Errorf("reserve PodCIDR for node %s: %w", nodeName, err)
+			}
+		}
+		return nil
+	}
+
+	cidr, err := allocateNodeCIDR(nodes.Items)
+	if err != nil {
+		return err
+	}
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   nodeName,
+			Labels: map[string]string{corev1.LabelOSStable: "linux"},
+		},
+		Spec: corev1.NodeSpec{PodCIDR: cidr, PodCIDRs: []string{cidr}},
+	}
+	if _, err = client.CoreV1().Nodes().Create(ctx, node, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
+		return fmt.Errorf("create worker node with PodCIDR: %w", err)
+	}
+	return nil
+}
+
+func nodeCIDRFromSpec(node *corev1.Node) string {
+	if node == nil {
+		return ""
+	}
+	if len(node.Spec.PodCIDRs) > 0 {
+		return node.Spec.PodCIDRs[0]
+	}
+	return node.Spec.PodCIDR
+}
+
+func allocateNodeCIDR(nodes []corev1.Node) (string, error) {
+	used := make(map[string]struct{}, len(nodes))
+	for i := range nodes {
+		if cidr := nodeCIDRFromSpec(&nodes[i]); cidr != "" {
+			_, network, err := net.ParseCIDR(cidr)
+			if err != nil {
+				return "", fmt.Errorf("parse PodCIDR %q for node %s: %w", cidr, nodes[i].Name, err)
+			}
+			used[network.String()] = struct{}{}
+		}
+	}
+
+	for subnet := 0; subnet < 256; subnet++ {
+		candidate := fmt.Sprintf("10.244.%d.0/24", subnet)
+		if _, exists := used[candidate]; !exists {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("no available PodCIDR remains in 10.244.0.0/16")
 }
 
 func (d *NodeDeployer) waitForFlannelReady(ctx context.Context, nodeName string) error {
