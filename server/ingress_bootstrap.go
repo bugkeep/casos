@@ -12,8 +12,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes"
-
-	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -150,22 +148,7 @@ func ensureIngressClass(ctx context.Context, client kubernetes.Interface) error 
 }
 
 func ensureIngressControllerService(ctx context.Context, client kubernetes.Interface) error {
-	desired := &corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      ingressControllerName,
-			Namespace: ingressControllerNamespace,
-			Labels:    ingressControllerLabels(),
-		},
-		Spec: corev1.ServiceSpec{
-			Type:                  corev1.ServiceTypeLoadBalancer,
-			Selector:              ingressControllerLabels(),
-			ExternalTrafficPolicy: corev1.ServiceExternalTrafficPolicyTypeCluster,
-			Ports: []corev1.ServicePort{
-				{Name: "web", Port: 80, TargetPort: intstr.FromInt(8000), Protocol: corev1.ProtocolTCP},
-				{Name: "websecure", Port: 443, TargetPort: intstr.FromInt(8443), Protocol: corev1.ProtocolTCP},
-			},
-		},
-	}
+	desired := buildIngressControllerService()
 	services := client.CoreV1().Services(ingressControllerNamespace)
 	current, err := services.Get(ctx, desired.Name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
@@ -197,7 +180,30 @@ func ensureIngressControllerService(ctx context.Context, client kubernetes.Inter
 	return nil
 }
 
+func buildIngressControllerService() *corev1.Service {
+	return &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      ingressControllerName,
+			Namespace: ingressControllerNamespace,
+			Labels:    ingressControllerLabels(),
+		},
+		Spec: corev1.ServiceSpec{
+			Type:                  corev1.ServiceTypeLoadBalancer,
+			Selector:              ingressControllerLabels(),
+			ExternalTrafficPolicy: corev1.ServiceExternalTrafficPolicyTypeCluster,
+			Ports: []corev1.ServicePort{
+				{Name: "web", Port: 80, TargetPort: intstr.FromInt(8000), Protocol: corev1.ProtocolTCP},
+				{Name: "websecure", Port: 443, TargetPort: intstr.FromInt(8443), Protocol: corev1.ProtocolTCP},
+			},
+		},
+	}
+}
+
 func ensureIngressControllerDeployment(ctx context.Context, client kubernetes.Interface, cfg Config) error {
+	return createOrUpdateDeployment(ctx, client, buildIngressControllerDeployment(cfg))
+}
+
+func buildIngressControllerDeployment(cfg Config) *appsv1.Deployment {
 	replicas := int32(1)
 	image := cfg.IngressControllerImage
 	if image == "" {
@@ -226,6 +232,7 @@ func ensureIngressControllerDeployment(ctx context.Context, client kubernetes.In
 						{Key: "CriticalAddonsOnly", Operator: corev1.TolerationOpExists},
 						{Key: "node-role.kubernetes.io/control-plane", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule},
 						{Key: "node-role.kubernetes.io/master", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule},
+						{Key: "casos.io/bootstrap", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule},
 					},
 					Containers: []corev1.Container{{
 						Name:            ingressControllerName,
@@ -255,9 +262,5 @@ func ensureIngressControllerDeployment(ctx context.Context, client kubernetes.In
 			},
 		},
 	}
-	if err := createOrUpdateDeployment(ctx, client, deployment); err != nil {
-		return err
-	}
-	logrus.Infof("ensured default Ingress controller %s/%s", ingressControllerNamespace, ingressControllerName)
-	return nil
+	return deployment
 }
