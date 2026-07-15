@@ -608,13 +608,13 @@ func coreDNSReadinessReason(ctx context.Context, client kubernetes.Interface, de
 					reason = "waiting"
 				}
 				if status.State.Waiting.Message != "" {
-					return fmt.Sprintf("CoreDNS Pod %s container %s is %s: %s", pod.Name, status.Name, reason, status.State.Waiting.Message)
+					return coreDNSPodFailureReason(fmt.Sprintf("CoreDNS Pod %s container %s is %s: %s", pod.Name, status.Name, reason, status.State.Waiting.Message), client, pod)
 				}
-				return fmt.Sprintf("CoreDNS Pod %s container %s is %s", pod.Name, status.Name, reason)
+				return coreDNSPodFailureReason(fmt.Sprintf("CoreDNS Pod %s container %s is %s", pod.Name, status.Name, reason), client, pod)
 			}
 			if status.State.Terminated != nil && status.State.Terminated.ExitCode != 0 {
 				terminated := status.State.Terminated
-				return fmt.Sprintf("CoreDNS Pod %s container %s terminated with %s (exit code %d): %s", pod.Name, status.Name, terminated.Reason, terminated.ExitCode, terminated.Message)
+				return coreDNSPodFailureReason(fmt.Sprintf("CoreDNS Pod %s container %s terminated with %s (exit code %d): %s", pod.Name, status.Name, terminated.Reason, terminated.ExitCode, terminated.Message), client, pod)
 			}
 		}
 		if pod.Status.Phase != corev1.PodRunning {
@@ -627,6 +627,38 @@ func coreDNSReadinessReason(ctx context.Context, client kubernetes.Interface, de
 		deployment.Status.AvailableReplicas,
 		deployment.Status.UpdatedReplicas,
 	)
+}
+
+func coreDNSPodFailureReason(reason string, client kubernetes.Interface, pod corev1.Pod) string {
+	if !strings.Contains(reason, "CrashLoopBackOff") && !strings.Contains(reason, "terminated") {
+		return reason
+	}
+	tailLines := int64(40)
+	logCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	stream, err := client.CoreV1().Pods("kube-system").GetLogs(pod.Name, &corev1.PodLogOptions{
+		Container: "coredns",
+		Previous:  true,
+		TailLines: &tailLines,
+	}).Stream(logCtx)
+	if err != nil {
+		return fmt.Sprintf("%s (unable to read CoreDNS logs: %v)", reason, err)
+	}
+	defer stream.Close()
+	data, err := io.ReadAll(stream)
+	if err != nil {
+		return fmt.Sprintf("%s (unable to read CoreDNS logs: %v)", reason, err)
+	}
+	logs := strings.TrimSpace(string(data))
+	if logs == "" {
+		return reason
+	}
+	logs = strings.ReplaceAll(logs, "\r\n", " | ")
+	logs = strings.ReplaceAll(logs, "\n", " | ")
+	if len(logs) > 2000 {
+		logs = logs[len(logs)-2000:]
+	}
+	return fmt.Sprintf("%s: logs: %s", reason, logs)
 }
 
 func isPodReady(pod corev1.Pod) bool {
