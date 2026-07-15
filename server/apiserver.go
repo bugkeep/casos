@@ -12,6 +12,7 @@ import (
 
 	"github.com/casosorg/casos/util"
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/k3s-io/kine/pkg/drivers/generic"
 	"github.com/k3s-io/kine/pkg/endpoint"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
@@ -40,10 +41,14 @@ func Start(ctx context.Context, cfg Config) (<-chan struct{}, error) {
 		logrus.Warnf("failed to stop old instance on port 2379: %v", err)
 	}
 	etcdCfg, err := endpoint.Listen(ctx, endpoint.Config{
-		Endpoint:         "mysql://" + cfg.DSN,
-		Listener:         "tcp://127.0.0.1:2379",
-		CompactBatchSize: 100,
-		NotifyInterval:   time.Second,
+		Endpoint: "mysql://" + cfg.DSN,
+		Listener: "tcp://127.0.0.1:2379",
+		// Kine resource versions are backed by MySQL auto-increment rows. A
+		// single connection keeps concurrent controller writes committed in
+		// the same order in which Kine assigns revisions.
+		ConnectionPoolConfig: generic.ConnectionPoolConfig{MaxIdle: 1, MaxOpen: 1},
+		CompactBatchSize:     100,
+		NotifyInterval:       time.Second,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("kine listen: %w", err)
