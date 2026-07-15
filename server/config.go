@@ -76,7 +76,7 @@ func ConfigFromAppConf() (Config, error) {
 	coreDNSImage := configStringDefault("coreDNSImage", "docker.1ms.run/coredns/coredns:1.12.4")
 	localPathProvisionerImage := configStringDefault("localPathProvisionerImage", "docker.1ms.run/rancher/local-path-provisioner:v0.0.32")
 	localPathHelperImage := configStringDefault("localPathHelperImage", "docker.1ms.run/library/busybox:1.37.0")
-	ingressControllerImage := configStringDefault("ingressControllerImage", "docker.1ms.run/traefik:v3.3.4")
+	ingressControllerImage := configStringDefault("ingressControllerImage", "docker.io/traefik:v3.3.4")
 
 	return Config{
 		DataDir:                   dataDir,
