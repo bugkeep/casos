@@ -25,6 +25,8 @@ type NodeDeployer struct {
 	log        NodeDeployLogger
 }
 
+const flannelDaemonSetName = "kube-flannel-ds"
+
 func NewNodeDeployer(config Config, restConfig *rest.Config, log NodeDeployLogger) *NodeDeployer {
 	if log == nil {
 		log = func(string, string, string) {}
