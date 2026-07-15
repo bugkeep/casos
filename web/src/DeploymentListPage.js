@@ -156,7 +156,7 @@ class DeploymentListPage extends React.Component {
     const svc = services.find(s => s.name === deploy.name && s.namespace === deploy.namespace && (s.type === "NodePort" || s.type === "LoadBalancer"));
     if (svc) {
       const addresses = svc.type === "LoadBalancer"
-        ? (svc.loadBalancerIPs?.length > 0 ? svc.loadBalancerIPs : (nodeIP ? [nodeIP] : []))
+        ? (svc.loadBalancerIPs ?? [])
         : (nodeIP ? [nodeIP] : []);
       const ports = svc.type === "LoadBalancer"
         ? (svc.ports ?? []).filter(p => p.port)

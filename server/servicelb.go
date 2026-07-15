@@ -20,6 +20,7 @@ import (
 const (
 	serviceLBManagedIPsAnnotation = "casos.io/service-lb-managed-ips"
 	serviceLBDisabledAnnotation   = "casos.io/service-lb-disabled"
+	workerBootstrapTaintKey       = "casos.io/bootstrap"
 )
 
 // StartServiceLB starts the built-in bare-metal LoadBalancer reconciler. It
@@ -109,6 +110,9 @@ func readyNodeAddresses(nodes []corev1.Node, controlPlaneOnly bool) []serviceLBN
 		if !isReadyWorkerNode(node) || (controlPlaneOnly != isControlPlaneNode(node)) {
 			continue
 		}
+		if !controlPlaneOnly && hasNodeTaint(node, workerBootstrapTaintKey, corev1.TaintEffectNoSchedule) {
+			continue
+		}
 		addresses := make([]string, 0)
 		for _, address := range node.Status.Addresses {
 			if address.Type != corev1.NodeExternalIP && address.Type != corev1.NodeInternalIP {
@@ -130,6 +134,15 @@ func readyNodeAddresses(nodes []corev1.Node, controlPlaneOnly bool) []serviceLBN
 		}
 	}
 	return result
+}
+
+func hasNodeTaint(node corev1.Node, key string, effect corev1.TaintEffect) bool {
+	for _, taint := range node.Spec.Taints {
+		if taint.Key == key && (effect == "" || taint.Effect == effect) {
+			return true
+		}
+	}
+	return false
 }
 
 func serviceLBNodeIPs(ctx context.Context, client kubernetes.Interface, service *corev1.Service, nodes []corev1.Node) ([]string, error) {
