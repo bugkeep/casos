@@ -31,7 +31,7 @@ func admissionValidateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	req := review.Request
-	platformRequest := isPlatformNamespace(req.Namespace)
+	platformRequest := isPlatformPodRequest(req)
 	controllerPodRequest := isWorkloadControllerPodRequest(req)
 	allowed, err := true, error(nil)
 	if !platformRequest && !controllerPodRequest {
@@ -84,6 +84,16 @@ func isPlatformNamespace(namespace string) bool {
 	default:
 		return false
 	}
+}
+
+func isPlatformPodRequest(req *admissionv1.AdmissionRequest) bool {
+	if req == nil || req.Resource.Resource != "pods" {
+		return false
+	}
+	if req.Operation != admissionv1.Create && req.Operation != admissionv1.Update {
+		return false
+	}
+	return isPlatformNamespace(req.Namespace)
 }
 
 func isWorkloadControllerPodRequest(req *admissionv1.AdmissionRequest) bool {
