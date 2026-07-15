@@ -15,6 +15,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/util/retry"
 )
 
 type nodeBootstrapState struct {
@@ -31,6 +32,7 @@ type NodeDeployer struct {
 const (
 	workerProbeAttemptTimeout = 2 * time.Minute
 	flannelDaemonSetName      = "kube-flannel-ds"
+	workerBootstrapTaintKey   = "casos.io/bootstrap"
 )
 
 var nodeCIDRReservationMu sync.Mutex
@@ -127,6 +129,9 @@ func (d *NodeDeployer) Deploy(ctx context.Context, opts NodeDeployOptions) (*Nod
 	if err != nil {
 		return nil, fmt.Errorf("waiting for node registration: %w", err)
 	}
+	if err = d.ensureWorkerBootstrapTaint(ctx, opts.NodeName); err != nil {
+		return nil, fmt.Errorf("protect worker during bootstrap: %w", err)
+	}
 
 	if err = d.startKubeProxy(ctx, runner); err != nil {
 		return nil, err
@@ -184,6 +189,7 @@ func (d *NodeDeployer) ensureNodeCIDR(ctx context.Context, nodeName string) (str
 			continue
 		}
 		cidr := nodeCIDRFromSpec(&nodes.Items[i])
+		changed := ensureWorkerBootstrapTaint(&nodes.Items[i])
 		if cidr == "" {
 			cidr, err = allocateNodeCIDR(nodes.Items)
 			if err != nil {
@@ -191,8 +197,11 @@ func (d *NodeDeployer) ensureNodeCIDR(ctx context.Context, nodeName string) (str
 			}
 			nodes.Items[i].Spec.PodCIDR = cidr
 			nodes.Items[i].Spec.PodCIDRs = []string{cidr}
+			changed = true
+		}
+		if changed {
 			if _, err = client.CoreV1().Nodes().Update(ctx, &nodes.Items[i], metav1.UpdateOptions{}); err != nil {
-				return "", fmt.Errorf("reserve PodCIDR for node %s: %w", nodeName, err)
+				return "", fmt.Errorf("reserve PodCIDR and bootstrap taint for node %s: %w", nodeName, err)
 			}
 		}
 		return cidr, nil
@@ -207,12 +216,97 @@ func (d *NodeDeployer) ensureNodeCIDR(ctx context.Context, nodeName string) (str
 			Name:   nodeName,
 			Labels: map[string]string{corev1.LabelOSStable: "linux"},
 		},
-		Spec: corev1.NodeSpec{PodCIDR: cidr, PodCIDRs: []string{cidr}},
+		Spec: corev1.NodeSpec{
+			PodCIDR:  cidr,
+			PodCIDRs: []string{cidr},
+			Taints:   []corev1.Taint{{Key: workerBootstrapTaintKey, Value: "true", Effect: corev1.TaintEffectNoSchedule}},
+		},
 	}
 	if _, err = client.CoreV1().Nodes().Create(ctx, node, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
 		return "", fmt.Errorf("create worker node with PodCIDR: %w", err)
 	}
 	return cidr, nil
+}
+
+func ensureWorkerBootstrapTaint(node *corev1.Node) bool {
+	if node == nil {
+		return false
+	}
+	desired := corev1.Taint{Key: workerBootstrapTaintKey, Value: "true", Effect: corev1.TaintEffectNoSchedule}
+	changed := false
+	found := false
+	taints := make([]corev1.Taint, 0, len(node.Spec.Taints)+1)
+	for _, taint := range node.Spec.Taints {
+		if taint.Key != workerBootstrapTaintKey {
+			taints = append(taints, taint)
+			continue
+		}
+		if !found {
+			found = true
+			taints = append(taints, desired)
+			if taint != desired {
+				changed = true
+			}
+		} else {
+			changed = true
+		}
+	}
+	if !found {
+		taints = append(taints, desired)
+		changed = true
+	}
+	if changed {
+		node.Spec.Taints = taints
+	}
+	return changed
+}
+
+func removeWorkerBootstrapTaint(node *corev1.Node) bool {
+	if node == nil {
+		return false
+	}
+	taints := make([]corev1.Taint, 0, len(node.Spec.Taints))
+	changed := false
+	for _, taint := range node.Spec.Taints {
+		if taint.Key == workerBootstrapTaintKey {
+			changed = true
+			continue
+		}
+		taints = append(taints, taint)
+	}
+	if changed {
+		node.Spec.Taints = taints
+	}
+	return changed
+}
+
+func (d *NodeDeployer) ensureWorkerBootstrapTaint(ctx context.Context, nodeName string) error {
+	return d.updateWorkerBootstrapTaint(ctx, nodeName, ensureWorkerBootstrapTaint)
+}
+
+func (d *NodeDeployer) removeWorkerBootstrapTaint(ctx context.Context, nodeName string) error {
+	return d.updateWorkerBootstrapTaint(ctx, nodeName, removeWorkerBootstrapTaint)
+}
+
+func (d *NodeDeployer) updateWorkerBootstrapTaint(ctx context.Context, nodeName string, mutate func(*corev1.Node) bool) error {
+	if d.restConfig == nil {
+		return fmt.Errorf("apiserver rest config is required")
+	}
+	client, err := kubernetes.NewForConfig(d.restConfig)
+	if err != nil {
+		return err
+	}
+	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		node, err := client.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		if !mutate(node) {
+			return nil
+		}
+		_, err = client.CoreV1().Nodes().Update(ctx, node, metav1.UpdateOptions{})
+		return err
+	})
 }
 
 func nodeCIDRFromSpec(node *corev1.Node) string {
@@ -506,6 +600,9 @@ func (d *NodeDeployer) WaitForOperational(ctx context.Context, nodeName string) 
 				return err
 			}
 			if ready {
+				if err := d.removeWorkerBootstrapTaint(ctx, nodeName); err != nil {
+					return fmt.Errorf("remove worker bootstrap taint: %w", err)
+				}
 				return nil
 			}
 			lastReason = reason
