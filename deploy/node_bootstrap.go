@@ -317,7 +317,7 @@ func flannelPodReadinessReason(pod *corev1.Pod) string {
 	}
 	for _, status := range append(pod.Status.InitContainerStatuses, pod.Status.ContainerStatuses...) {
 		if status.State.Waiting != nil {
-			if status.LastTerminationState.Terminated != nil {
+			if status.LastTerminationState.Terminated != nil && status.LastTerminationState.Terminated.ExitCode != 0 {
 				terminated := status.LastTerminationState.Terminated
 				return fmt.Sprintf("Flannel container %s is %s after termination (%s, exit code %d): %s", status.Name, status.State.Waiting.Reason, terminated.Reason, terminated.ExitCode, terminated.Message)
 			}
@@ -331,6 +331,9 @@ func flannelPodReadinessReason(pod *corev1.Pod) string {
 			return fmt.Sprintf("Flannel container %s is %s", status.Name, reason)
 		}
 		if status.State.Terminated != nil {
+			if status.State.Terminated.ExitCode == 0 {
+				continue
+			}
 			return fmt.Sprintf("Flannel container %s terminated with %s (exit code %d): %s", status.Name, status.State.Terminated.Reason, status.State.Terminated.ExitCode, status.State.Terminated.Message)
 		}
 	}
