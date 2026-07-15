@@ -781,7 +781,12 @@ func waitForStorageProbe(ctx context.Context, client kubernetes.Interface, nodeN
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: map[string]string{"casos.io/probe": "worker-storage"}},
 		Spec: corev1.PodSpec{
-			NodeSelector:  map[string]string{"kubernetes.io/hostname": hostname},
+			NodeSelector: map[string]string{"kubernetes.io/hostname": hostname},
+			Tolerations: []corev1.Toleration{{
+				Key:      "casos.io/bootstrap",
+				Operator: corev1.TolerationOpExists,
+				Effect:   corev1.TaintEffectNoSchedule,
+			}},
 			RestartPolicy: corev1.RestartPolicyNever,
 			Containers: []corev1.Container{{
 				Name: "storage-probe", Image: image, ImagePullPolicy: corev1.PullIfNotPresent,
