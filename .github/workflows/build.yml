@@ -94,6 +94,11 @@ jobs:
       - name: Run UI smoke tests
         working-directory: ./web
         shell: bash
+        env:
+          # Smoke tests include asynchronous worker deployment requests. Keep
+          # their in-process controller state out of the worker readiness run.
+          E2E_DATA_DIR: ${{ runner.temp }}/casos-e2e-${{ github.run_id }}-${{ github.run_attempt }}-smoke
+          dbName: casos_smoke
         run: |
           set -o pipefail
           yarn run ui:test:smoke 2>&1 | tee ui-smoke-test.log
