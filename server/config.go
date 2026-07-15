@@ -24,6 +24,7 @@ type Config struct {
 	LocalPathProvisionerImage string // local-path-provisioner controller image
 	LocalPathHelperImage      string // helper pod image used by local-path-provisioner
 	FlannelImage              string // Flannel daemon image used by the built-in network bootstrap
+	IngressControllerImage    string // Traefik image used by the built-in Ingress controller
 	StorageProbeImage         string // Image used by worker storage readiness probes
 	StorageProvisionerEnabled bool   // install the built-in local-path provisioner for local clusters
 }
@@ -79,6 +80,7 @@ func ConfigFromAppConf() (Config, error) {
 	localPathHelperImage := configStringDefault("localPathHelperImage", "docker.io/library/busybox:1.37.0")
 	flannelImage := configStringDefault("flannelImage", "ghcr.io/flannel-io/flannel:v0.27.4")
 	storageProbeImage := configStringDefault("storageProbeImage", "docker.io/library/busybox:1.37.0")
+	ingressControllerImage := configStringDefault("ingressControllerImage", "docker.io/traefik:v3.3.4")
 
 	return Config{
 		DataDir:                   dataDir,
@@ -94,6 +96,7 @@ func ConfigFromAppConf() (Config, error) {
 		LocalPathHelperImage:      localPathHelperImage,
 		FlannelImage:              flannelImage,
 		StorageProbeImage:         storageProbeImage,
+		IngressControllerImage:    ingressControllerImage,
 		StorageProvisionerEnabled: storageProvisionerEnabled,
 	}, nil
 }
