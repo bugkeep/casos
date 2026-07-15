@@ -138,17 +138,8 @@ func buildFlannelDaemonSet(cfg Config) *appsv1.DaemonSet {
 	if flannelPluginImage == "" {
 		flannelPluginImage = defaultFlannelCNIPluginImage
 	}
-	flannelUtilityImage := cfg.FlannelInitImage
-	if flannelUtilityImage == "" {
-		flannelUtilityImage = "docker.1ms.run/library/busybox:1.37.0"
-	}
 	labels := flannelLabels()
 	selector := map[string]string{"app": "flannel", "k8s-app": "flannel"}
-	cleanupLegacyCNI := corev1.Container{
-		Name: "cleanup-legacy-cni", Image: flannelUtilityImage, ImagePullPolicy: corev1.PullIfNotPresent,
-		Command:      []string{"sh", "-c", "rm -f /etc/cni/net.d/10-casos-bridge.conflist /run/flannel/subnet.env"},
-		VolumeMounts: []corev1.VolumeMount{{Name: "cni-conf", MountPath: "/etc/cni/net.d"}, {Name: "run", MountPath: "/run/flannel"}},
-	}
 	initCNI := corev1.Container{
 		Name: "install-cni-plugin", Image: flannelPluginImage, ImagePullPolicy: corev1.PullIfNotPresent,
 		Command:      []string{"cp", "/flannel", "/opt/cni/bin/flannel"},
@@ -185,7 +176,7 @@ func buildFlannelDaemonSet(cfg Config) *appsv1.DaemonSet {
 				ServiceAccountName: flannelServiceAccount, HostNetwork: true,
 				NodeSelector:   map[string]string{"kubernetes.io/os": "linux"},
 				Tolerations:    []corev1.Toleration{{Operator: corev1.TolerationOpExists}},
-				InitContainers: []corev1.Container{cleanupLegacyCNI, initCNI, initConfig}, Containers: []corev1.Container{flannel},
+				InitContainers: []corev1.Container{initCNI, initConfig}, Containers: []corev1.Container{flannel},
 				Volumes: []corev1.Volume{
 					{Name: "run", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/run/flannel"}}},
 					{Name: "cni-bin", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/opt/cni/bin"}}},
