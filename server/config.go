@@ -73,7 +73,7 @@ func ConfigFromAppConf() (Config, error) {
 	}
 
 	storageProvisionerEnabled := configBool("storageProvisionerEnabled", true)
-	coreDNSImage := configStringDefault("coreDNSImage", "docker.1ms.run/coredns/coredns:1.12.4")
+	coreDNSImage := configStringDefault("coreDNSImage", "registry.k8s.io/coredns/coredns:v1.12.4")
 	localPathProvisionerImage := configStringDefault("localPathProvisionerImage", "docker.1ms.run/rancher/local-path-provisioner:v0.0.32")
 	localPathHelperImage := configStringDefault("localPathHelperImage", "docker.1ms.run/library/busybox:1.37.0")
 	flannelImage := configStringDefault("flannelImage", "ghcr.io/flannel-io/flannel:v0.27.4")
