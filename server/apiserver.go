@@ -8,8 +8,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
-	"sync"
 	"time"
 
 	"github.com/casosorg/casos/util"
@@ -17,31 +15,12 @@ import (
 	"github.com/k3s-io/kine/pkg/endpoint"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
-	"google.golang.org/grpc"
 
 	globalflag "k8s.io/component-base/cli/globalflag"
 	"k8s.io/component-base/logs"
 	apiserverapp "k8s.io/kubernetes/cmd/kube-apiserver/app"
 	"k8s.io/kubernetes/cmd/kube-apiserver/app/options"
 )
-
-var kineWriteMu sync.Mutex
-
-func kineWriteInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-	if isKineWriteMethod(info.FullMethod) {
-		kineWriteMu.Lock()
-		defer kineWriteMu.Unlock()
-	}
-	return handler(ctx, req)
-}
-
-func isKineWriteMethod(method string) bool {
-	return strings.HasSuffix(method, "/Txn") ||
-		strings.HasSuffix(method, "/Put") ||
-		strings.HasSuffix(method, "/DeleteRange") ||
-		strings.HasSuffix(method, "/Grant") ||
-		strings.HasSuffix(method, "/Revoke")
-}
 
 // Start launches kine and the apiserver in-process.
 // The returned channel is closed once the apiserver /readyz endpoint responds 200.
@@ -63,7 +42,6 @@ func Start(ctx context.Context, cfg Config) (<-chan struct{}, error) {
 	etcdCfg, err := endpoint.Listen(ctx, endpoint.Config{
 		Endpoint:         "mysql://" + cfg.DSN,
 		Listener:         "tcp://127.0.0.1:2379",
-		GRPCServer:       grpc.NewServer(grpc.UnaryInterceptor(kineWriteInterceptor)),
 		CompactBatchSize: 100,
 		NotifyInterval:   time.Second,
 	})
