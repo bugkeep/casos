@@ -30,7 +30,10 @@ type NodeDeployer struct {
 	log        NodeDeployLogger
 }
 
-const workerProbeAttemptTimeout = 2 * time.Minute
+const (
+	workerProbeAttemptTimeout = 2 * time.Minute
+	flannelDaemonSetName      = "kube-flannel-ds"
+)
 
 var nodeCIDRReservationMu sync.Mutex
 
@@ -254,27 +257,85 @@ func (d *NodeDeployer) waitForFlannelReady(ctx context.Context, nodeName string)
 	ticker := time.NewTicker(2 * time.Second)
 	defer deadlineTimer.Stop()
 	defer ticker.Stop()
+	lastReason := "Flannel Pod has not been created"
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return fmt.Errorf("%s: %w", lastReason, ctx.Err())
 		case <-deadline:
-			return fmt.Errorf("timed out waiting for Flannel to become Ready on worker %s", nodeName)
+			return fmt.Errorf("timed out waiting for Flannel to become Ready on worker %s: %s", nodeName, lastReason)
 		case <-ticker.C:
 			pods, err := client.CoreV1().Pods("kube-flannel").List(ctx, metav1.ListOptions{
 				LabelSelector: "k8s-app=flannel",
-				FieldSelector: "spec.nodeName=" + nodeName,
 			})
 			if err != nil {
 				return err
 			}
+			matched := false
 			for i := range pods.Items {
-				if flannelPodReady(&pods.Items[i]) {
+				pod := &pods.Items[i]
+				if pod.Spec.NodeName != nodeName {
+					continue
+				}
+				matched = true
+				if flannelPodReady(pod) {
 					return nil
 				}
+				lastReason = flannelPodReadinessReason(pod)
+			}
+			if !matched {
+				lastReason = flannelDaemonSetReadinessReason(ctx, client, nodeName)
 			}
 		}
 	}
+}
+
+func flannelDaemonSetReadinessReason(ctx context.Context, client kubernetes.Interface, nodeName string) string {
+	daemonSet, err := client.AppsV1().DaemonSets("kube-flannel").Get(ctx, flannelDaemonSetName, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return "Flannel DaemonSet has not been created"
+	}
+	if err != nil {
+		return "unable to inspect Flannel DaemonSet: " + err.Error()
+	}
+	return fmt.Sprintf("Flannel Pod has not been scheduled on %s (desired=%d current=%d ready=%d available=%d updated=%d)",
+		nodeName,
+		daemonSet.Status.DesiredNumberScheduled,
+		daemonSet.Status.CurrentNumberScheduled,
+		daemonSet.Status.NumberReady,
+		daemonSet.Status.NumberAvailable,
+		daemonSet.Status.UpdatedNumberScheduled,
+	)
+}
+
+func flannelPodReadinessReason(pod *corev1.Pod) string {
+	if pod == nil {
+		return "Flannel Pod is missing"
+	}
+	for _, status := range append(pod.Status.InitContainerStatuses, pod.Status.ContainerStatuses...) {
+		if status.State.Waiting != nil {
+			reason := status.State.Waiting.Reason
+			if reason == "" {
+				reason = "waiting"
+			}
+			if status.State.Waiting.Message != "" {
+				return fmt.Sprintf("Flannel container %s is %s: %s", status.Name, reason, status.State.Waiting.Message)
+			}
+			return fmt.Sprintf("Flannel container %s is %s", status.Name, reason)
+		}
+		if status.State.Terminated != nil {
+			return fmt.Sprintf("Flannel container %s terminated with %s (exit code %d): %s", status.Name, status.State.Terminated.Reason, status.State.Terminated.ExitCode, status.State.Terminated.Message)
+		}
+	}
+	for _, condition := range pod.Status.Conditions {
+		if condition.Type == corev1.PodReady && condition.Status != corev1.ConditionTrue && condition.Message != "" {
+			return "Flannel Pod is not Ready: " + condition.Message
+		}
+	}
+	if pod.Status.Reason != "" || pod.Status.Message != "" {
+		return fmt.Sprintf("Flannel Pod is %s: %s", pod.Status.Reason, pod.Status.Message)
+	}
+	return "Flannel Pod is not Ready"
 }
 
 func newRunnerForMachine(machine NodeDeployMachine) (*NodeDeploySSHRunner, error) {
