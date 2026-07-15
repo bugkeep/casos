@@ -4,7 +4,7 @@ go 1.26.0
 
 replace (
 	// kine -> our own fork
-	github.com/k3s-io/kine => github.com/casosorg/kine v0.16.2-a
+	github.com/k3s-io/kine => github.com/bugkeep/kine v0.16.2-a.0.20260718052839-aad974da5060
 
 	// beego pins v2.0.3+incompatible (pre-modules tag) but kine needs SetFileControlInt
 	// from v1.14.x; force the newer v1 release via replace

@@ -5,22 +5,67 @@ import (
 	"crypto/tls"
 	"database/sql"
 	"fmt"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/casosorg/casos/util"
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/k3s-io/kine/pkg/drivers/generic"
 	"github.com/k3s-io/kine/pkg/endpoint"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
+	"go.etcd.io/etcd/server/v3/embed"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
 
 	globalflag "k8s.io/component-base/cli/globalflag"
 	"k8s.io/component-base/logs"
 	apiserverapp "k8s.io/kubernetes/cmd/kube-apiserver/app"
 	"k8s.io/kubernetes/cmd/kube-apiserver/app/options"
 )
+
+var kineWriteMu sync.Mutex
+
+const kineGRPCOverheadBytes = 512 * 1024
+
+func kineWriteInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+	if isKineWriteMethod(info.FullMethod) {
+		kineWriteMu.Lock()
+		defer kineWriteMu.Unlock()
+	}
+	return handler(ctx, req)
+}
+
+func isKineWriteMethod(method string) bool {
+	return strings.HasSuffix(method, "/Txn") ||
+		strings.HasSuffix(method, "/Put") ||
+		strings.HasSuffix(method, "/DeleteRange") ||
+		strings.HasSuffix(method, "/Compact") ||
+		strings.HasSuffix(method, "/Grant") ||
+		strings.HasSuffix(method, "/Revoke")
+}
+
+func newKineGRPCServer() *grpc.Server {
+	return grpc.NewServer(
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             embed.DefaultGRPCKeepAliveMinTime,
+			PermitWithoutStream: false,
+		}),
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			Time:    embed.DefaultGRPCKeepAliveInterval,
+			Timeout: embed.DefaultGRPCKeepAliveTimeout,
+		}),
+		grpc.MaxConcurrentStreams(embed.DefaultMaxConcurrentStreams),
+		grpc.MaxRecvMsgSize(int(embed.DefaultMaxRequestBytes)+kineGRPCOverheadBytes),
+		grpc.MaxSendMsgSize(math.MaxInt32),
+		grpc.UnaryInterceptor(kineWriteInterceptor),
+	)
+}
 
 // Start launches kine and the apiserver in-process.
 // The returned channel is closed once the apiserver /readyz endpoint responds 200.
@@ -40,10 +85,14 @@ func Start(ctx context.Context, cfg Config) (<-chan struct{}, error) {
 		logrus.Warnf("failed to stop old instance on port 2379: %v", err)
 	}
 	etcdCfg, err := endpoint.Listen(ctx, endpoint.Config{
-		Endpoint:         "mysql://" + cfg.DSN,
-		Listener:         "tcp://127.0.0.1:2379",
-		CompactBatchSize: 100,
-		NotifyInterval:   time.Second,
+		Endpoint: "mysql://" + cfg.DSN,
+		Listener: "tcp://127.0.0.1:2379",
+		// Bound Kine below MySQL's server connection limit while retaining
+		// enough capacity for the poller, apiserver, and compactor.
+		ConnectionPoolConfig: generic.ConnectionPoolConfig{MaxIdle: 20, MaxOpen: 20},
+		GRPCServer:           newKineGRPCServer(),
+		CompactBatchSize:     100,
+		NotifyInterval:       time.Second,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("kine listen: %w", err)
