@@ -665,6 +665,12 @@ func workerOperationalState(ctx context.Context, client kubernetes.Interface, no
 	if err != nil {
 		return "storage probe: " + err.Error(), false, nil
 	}
+	probeCtx, cancel = context.WithTimeout(ctx, workerProbeAttemptTimeout)
+	err = waitForSchedulerProbe(probeCtx, client, nodeName, hostname, storageProbeImage)
+	cancel()
+	if err != nil {
+		return "scheduler probe: " + err.Error(), false, nil
+	}
 	return "", true, nil
 }
 
@@ -824,6 +830,75 @@ func waitForStorageProbe(ctx context.Context, client kubernetes.Interface, nodeN
 				return nil
 			case corev1.PodFailed:
 				return fmt.Errorf("storage probe Pod failed")
+			}
+		}
+	}
+}
+
+func schedulerProbeName(nodeName string) string {
+	digest := sha256.Sum256([]byte(nodeName))
+	return "casos-scheduler-" + hex.EncodeToString(digest[:])[:16]
+}
+
+func workerProbeImage(image string) string {
+	if image == "" {
+		return "docker.io/library/busybox:1.37.0"
+	}
+	return image
+}
+
+func waitForSchedulerProbe(ctx context.Context, client kubernetes.Interface, nodeName, hostname, image string) error {
+	const namespace = "kube-system"
+	name := schedulerProbeName(nodeName)
+	cleanup := func() {
+		_ = client.CoreV1().Pods(namespace).Delete(context.Background(), name, metav1.DeleteOptions{})
+	}
+	cleanup()
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: map[string]string{"casos.io/probe": "scheduler-placement"}},
+		Spec: corev1.PodSpec{
+			RestartPolicy: corev1.RestartPolicyNever,
+			NodeSelector:  map[string]string{"kubernetes.io/hostname": hostname},
+			Containers: []corev1.Container{{
+				Name: "scheduler-probe", Image: workerProbeImage(image), ImagePullPolicy: corev1.PullIfNotPresent,
+				Command: []string{"sh", "-c", "echo casos-scheduler"},
+			}},
+		},
+	}
+	if _, err := client.CoreV1().Pods(namespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
+		cleanup()
+		return fmt.Errorf("create scheduler probe Pod: %w", err)
+	}
+	defer cleanup()
+	deadlineTimer, deadline := deploymentWaitDeadline(ctx)
+	ticker := time.NewTicker(2 * time.Second)
+	defer deadlineTimer.Stop()
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline:
+			return fmt.Errorf("timed out waiting for scheduler probe")
+		case <-ticker.C:
+			current, err := client.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			if err != nil {
+				return fmt.Errorf("get scheduler probe Pod: %w", err)
+			}
+			if current.Spec.NodeName != "" && current.Spec.NodeName != nodeName {
+				return fmt.Errorf("scheduler placed probe on %s instead of %s", current.Spec.NodeName, nodeName)
+			}
+			switch current.Status.Phase {
+			case corev1.PodSucceeded:
+				if current.Spec.NodeName != nodeName {
+					return fmt.Errorf("scheduler probe succeeded without binding to %s", nodeName)
+				}
+				return nil
+			case corev1.PodFailed:
+				return fmt.Errorf("scheduler probe Pod failed")
 			}
 		}
 	}
