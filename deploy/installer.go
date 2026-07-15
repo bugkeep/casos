@@ -63,8 +63,9 @@ fi`, version, version, arch, version, arch, cniVersion, arch, cniVersion)
 	installCmd += fmt.Sprintf(`
 if [ ! -x /opt/cni/bin/flannel ]; then
   download -o /tmp/flannel-cni-plugin.tgz https://github.com/flannel-io/cni-plugin/releases/download/%s/cni-plugin-flannel-linux-%s-%s.tgz
-  tar -xzf /tmp/flannel-cni-plugin.tgz -C /opt/cni/bin flannel
-fi`, flannelCNIPluginVersion, arch, flannelCNIPluginVersion)
+  tar -xzf /tmp/flannel-cni-plugin.tgz -C /tmp flannel-%s
+  install -o root -g root -m 0755 /tmp/flannel-%s /opt/cni/bin/flannel
+fi`, flannelCNIPluginVersion, arch, flannelCNIPluginVersion, arch, arch)
 	if _, err := runner.RunRootContext(ctx, installCmd); err != nil {
 		return fmt.Errorf("install node binaries: %w", err)
 	}
