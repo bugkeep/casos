@@ -22,6 +22,9 @@ func Bootstrap(ctx context.Context, cfg *rest.Config, srvCfg Config) error {
 	if err != nil {
 		return fmt.Errorf("bootstrap client: %w", err)
 	}
+	if err := ensureCasbinWebhook(ctx, client, srvCfg); err != nil {
+		return err
+	}
 	if err := ensureNodeProxierBinding(ctx, client); err != nil {
 		return err
 	}
@@ -33,7 +36,7 @@ func Bootstrap(ctx context.Context, cfg *rest.Config, srvCfg Config) error {
 			return err
 		}
 	}
-	return ensureCasbinWebhook(ctx, client, srvCfg)
+	return nil
 }
 
 func admissionFailurePolicy() admissionregv1.FailurePolicyType {
