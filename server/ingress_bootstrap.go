@@ -207,7 +207,7 @@ func buildIngressControllerDeployment(cfg Config) *appsv1.Deployment {
 	replicas := int32(1)
 	image := cfg.IngressControllerImage
 	if image == "" {
-		image = "docker.1ms.run/traefik:v3.3.4"
+		image = "docker.io/traefik:v3.3.4"
 	}
 	labels := ingressControllerLabels()
 	deployment := &appsv1.Deployment{

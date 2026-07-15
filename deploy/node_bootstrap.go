@@ -690,7 +690,7 @@ func serviceProbeName(nodeName string) string {
 
 func workerProbeImage(image string) string {
 	if image == "" {
-		return "docker.1ms.run/library/busybox:1.37.0"
+		return "docker.io/library/busybox:1.37.0"
 	}
 	return image
 }
