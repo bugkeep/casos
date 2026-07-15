@@ -30,6 +30,8 @@ type NodeDeployer struct {
 	log        NodeDeployLogger
 }
 
+const workerProbeAttemptTimeout = 2 * time.Minute
+
 var nodeCIDRReservationMu sync.Mutex
 
 func NewNodeDeployer(config Config, restConfig *rest.Config, log NodeDeployLogger) *NodeDeployer {
@@ -376,6 +378,9 @@ func (d *NodeDeployer) WaitForOperational(ctx context.Context, nodeName string) 
 	for {
 		select {
 		case <-ctx.Done():
+			if lastReason != "" {
+				return fmt.Errorf("worker operational readiness stopped: %s: %w", lastReason, ctx.Err())
+			}
 			return ctx.Err()
 		case <-deadline:
 			if lastReason == "" {
@@ -406,7 +411,7 @@ func workerOperationalState(ctx context.Context, client kubernetes.Interface, no
 	if !isNodeReady(node) {
 		return "node is not Ready", false, nil
 	}
-	if node.Spec.PodCIDR == "" {
+	if nodeCIDRFromSpec(node) == "" {
 		return "node has no PodCIDR", false, nil
 	}
 
@@ -417,7 +422,14 @@ func workerOperationalState(ctx context.Context, client kubernetes.Interface, no
 	if err != nil {
 		return "", false, err
 	}
-	if len(flannelPods.Items) == 0 || !isPodReady(flannelPods.Items[0]) {
+	flannelReady := false
+	for i := range flannelPods.Items {
+		if isPodReady(flannelPods.Items[i]) {
+			flannelReady = true
+			break
+		}
+	}
+	if !flannelReady {
 		return "Flannel is not Ready on the worker", false, nil
 	}
 
@@ -434,17 +446,26 @@ func workerOperationalState(ctx context.Context, client kubernetes.Interface, no
 	} else if err != nil {
 		return "", false, err
 	}
-	if err := waitForStorageProbe(ctx, client, nodeName, storageProbeImage); err != nil {
+	probeCtx, cancel := context.WithTimeout(ctx, workerProbeAttemptTimeout)
+	err = waitForStorageProbe(probeCtx, client, nodeName, storageProbeImage)
+	cancel()
+	if err != nil {
 		return err.Error(), false, nil
 	}
 	hostname := nodeName
 	if node.Labels["kubernetes.io/hostname"] != "" {
 		hostname = node.Labels["kubernetes.io/hostname"]
 	}
-	if err := waitForSchedulerProbe(ctx, client, nodeName, hostname, storageProbeImage); err != nil {
+	probeCtx, cancel = context.WithTimeout(ctx, workerProbeAttemptTimeout)
+	err = waitForSchedulerProbe(probeCtx, client, nodeName, hostname, storageProbeImage)
+	cancel()
+	if err != nil {
 		return err.Error(), false, nil
 	}
-	if err := waitForServiceProbe(ctx, client, nodeName, storageProbeImage); err != nil {
+	probeCtx, cancel = context.WithTimeout(ctx, workerProbeAttemptTimeout)
+	err = waitForServiceProbe(probeCtx, client, nodeName, storageProbeImage)
+	cancel()
+	if err != nil {
 		return err.Error(), false, nil
 	}
 	return "", true, nil

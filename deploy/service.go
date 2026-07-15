@@ -232,6 +232,7 @@ func (s *Service) runMachineNodeDeployTask(parentCtx context.Context, taskId int
 		parentCtx = context.Background()
 	}
 	logTask := func(level, message string) {
+		logs.Info("node deployment task %d [%s]: %s", taskId, level, message)
 		if err := object.AddMachineNodeDeployLog(taskId, level, message); err != nil {
 			logs.Warning("failed to write node deployment log for task %d: %v", taskId, err)
 		}
