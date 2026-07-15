@@ -113,21 +113,23 @@ type NodeKubeconfig struct {
 type KubeconfigGenerator func(nodeName, apiserverURL string) (*NodeKubeconfig, error)
 
 type Config struct {
-	AdvertiseAddress   string
-	ApiserverBind      string
-	ApiserverPort      int
-	SandboxImage       string
-	Socks5Proxy        string
-	GenerateKubeconfig KubeconfigGenerator
+	AdvertiseAddress          string
+	ApiserverBind             string
+	ApiserverPort             int
+	SandboxImage              string
+	Socks5Proxy               string
+	StorageProvisionerEnabled bool
+	GenerateKubeconfig        KubeconfigGenerator
 }
 
 func ConfigFromServerConfig(cfg server.Config) Config {
 	return Config{
-		AdvertiseAddress: cfg.AdvertiseAddress,
-		ApiserverBind:    cfg.ApiserverBind,
-		ApiserverPort:    cfg.ApiserverPort,
-		SandboxImage:     cfg.SandboxImage,
-		Socks5Proxy:      cfg.Socks5Proxy,
+		AdvertiseAddress:          cfg.AdvertiseAddress,
+		ApiserverBind:             cfg.ApiserverBind,
+		ApiserverPort:             cfg.ApiserverPort,
+		SandboxImage:              cfg.SandboxImage,
+		Socks5Proxy:               cfg.Socks5Proxy,
+		StorageProvisionerEnabled: cfg.StorageProvisionerEnabled,
 		GenerateKubeconfig: func(nodeName, apiserverURL string) (*NodeKubeconfig, error) {
 			wk, err := server.GenerateWorkerKubeconfigForServer(cfg, nodeName, apiserverURL)
 			if err != nil {
