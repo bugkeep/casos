@@ -25,6 +25,13 @@ func Bootstrap(ctx context.Context, cfg *rest.Config, srvCfg Config) error {
 	if err != nil {
 		return fmt.Errorf("bootstrap client: %w", err)
 	}
+	// Refresh the webhook CA bundle before creating platform resources. A
+	// previous process may have left a stale bundle in the cluster store, and
+	// every later bootstrap request would otherwise hit the webhook with the
+	// wrong trust chain.
+	if err := ensureCasbinWebhook(ctx, client, srvCfg); err != nil {
+		return err
+	}
 	if err := ensureNodeCIDRConsistency(ctx, client); err != nil {
 		return err
 	}
@@ -42,10 +49,7 @@ func Bootstrap(ctx context.Context, cfg *rest.Config, srvCfg Config) error {
 			return err
 		}
 	}
-	if err := ensureIngressController(ctx, client, srvCfg); err != nil {
-		return err
-	}
-	return ensureCasbinWebhook(ctx, client, srvCfg)
+	return nil
 }
 
 // normalizeNodeCIDRs keeps the legacy PodCIDR field and the NodeIPAM source
