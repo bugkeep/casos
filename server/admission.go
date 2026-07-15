@@ -62,7 +62,7 @@ func admissionValidateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Image vulnerability check: only for Pod-creating operations.
-	if req.Resource.Resource == "pods" && !platformRequest && !controllerPodRequest && (req.Operation == admissionv1.Create || req.Operation == admissionv1.Update) {
+	if shouldCheckPodImages(req) {
 		if denyMsg := checkPodImages(req.Object.Raw); denyMsg != "" {
 			resp.Response.Allowed = false
 			resp.Response.Result = &metav1.Status{Message: denyMsg}
@@ -93,7 +93,24 @@ func isPlatformPodRequest(req *admissionv1.AdmissionRequest) bool {
 	if req.Operation != admissionv1.Create && req.Operation != admissionv1.Update {
 		return false
 	}
-	return isPlatformNamespace(req.Namespace)
+	if !isPlatformNamespace(req.Namespace) {
+		return false
+	}
+	var pod corev1.Pod
+	if err := json.Unmarshal(req.Object.Raw, &pod); err != nil {
+		return false
+	}
+	return pod.Labels["app.kubernetes.io/managed-by"] == "casos"
+}
+
+func shouldCheckPodImages(req *admissionv1.AdmissionRequest) bool {
+	if req == nil || req.Resource.Resource != "pods" {
+		return false
+	}
+	if req.Operation != admissionv1.Create && req.Operation != admissionv1.Update {
+		return false
+	}
+	return !isPlatformPodRequest(req)
 }
 
 func isWorkloadControllerPodRequest(req *admissionv1.AdmissionRequest) bool {

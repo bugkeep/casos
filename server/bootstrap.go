@@ -36,6 +36,10 @@ func Bootstrap(ctx context.Context, cfg *rest.Config, srvCfg Config) error {
 	return ensureCasbinWebhook(ctx, client, srvCfg)
 }
 
+func admissionFailurePolicy() admissionregv1.FailurePolicyType {
+	return admissionregv1.Fail
+}
+
 // ensureCasbinWebhook registers the ValidatingWebhookConfiguration that routes
 // admission requests to the casos Casbin enforcement server.
 func ensureCasbinWebhook(ctx context.Context, client kubernetes.Interface, cfg Config) error {
@@ -47,7 +51,7 @@ func ensureCasbinWebhook(ctx context.Context, client kubernetes.Interface, cfg C
 
 	url := fmt.Sprintf("https://127.0.0.1:%d/admission/validate", cfg.WebhookPort)
 	sideEffects := admissionregv1.SideEffectClassNone
-	failurePolicy := admissionregv1.Ignore
+	failurePolicy := admissionFailurePolicy()
 	all := admissionregv1.AllScopes
 	whConfig := &admissionregv1.ValidatingWebhookConfiguration{
 		ObjectMeta: metav1.ObjectMeta{Name: "casbin-admission"},
