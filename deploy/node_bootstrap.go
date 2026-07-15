@@ -111,7 +111,7 @@ func (d *NodeDeployer) Deploy(ctx context.Context, opts NodeDeployOptions) (*Nod
 	d.logStep(nodeDeployPhaseWaiting, "Waiting for node registration")
 	bootstrapState, err := d.waitForNodeBootstrapState(ctx, opts.NodeName)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("waiting for node registration: %w", err)
 	}
 
 	if err = d.startKubeProxy(ctx, runner); err != nil {
@@ -121,7 +121,7 @@ func (d *NodeDeployer) Deploy(ctx context.Context, opts NodeDeployOptions) (*Nod
 	if !bootstrapState.ready {
 		d.logStep(nodeDeployPhaseWaiting, "Waiting for Node Ready")
 		if err = d.waitForNodeReady(ctx, opts.NodeName); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("waiting for Node Ready: %w", err)
 		}
 	} else {
 		d.logStep(nodeDeployPhaseWaiting, "Node is already Ready")
@@ -129,7 +129,7 @@ func (d *NodeDeployer) Deploy(ctx context.Context, opts NodeDeployOptions) (*Nod
 
 	d.logStep(nodeDeployPhaseWaiting, "Waiting for Flannel to become Ready on the worker")
 	if err = d.waitForFlannelReady(ctx, opts.NodeName); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("waiting for Flannel readiness: %w", err)
 	}
 	d.logStep(nodeDeployPhaseConfiguring, "Removing legacy bridge-only CNI config")
 	if _, err = runner.RunRootContext(ctx, removeLegacyBridgeCNICommand()); err != nil {
