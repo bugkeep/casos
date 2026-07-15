@@ -63,8 +63,9 @@ func main() {
 			controllers.SetAdminRestConfig(adminCfg)
 			deploy.SetRestConfig(adminCfg)
 			logs.Info("apiserver ready — kubectl endpoint: https://127.0.0.1:%d", srvCfg.ApiserverPort)
-			if err := server.Bootstrap(ctx, adminCfg, srvCfg); err != nil {
-				logs.Warning("bootstrap: %v", err)
+			if err := server.BootstrapUntilReady(ctx, adminCfg, srvCfg); err != nil {
+				logs.Warning("bootstrap stopped: %v", err)
+				return
 			}
 			if err := server.StartScheduler(ctx, srvCfg); err != nil {
 				logs.Warning("start scheduler: %v", err)
