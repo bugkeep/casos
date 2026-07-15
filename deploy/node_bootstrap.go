@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -537,11 +538,14 @@ func workerOperationalState(ctx context.Context, client kubernetes.Interface, no
 	}
 
 	dns, err := client.AppsV1().Deployments("kube-system").Get(ctx, "coredns", metav1.GetOptions{})
-	if apierrors.IsNotFound(err) || (err == nil && dns.Status.AvailableReplicas < 1) {
-		return "CoreDNS is not Available", false, nil
+	if apierrors.IsNotFound(err) {
+		return "CoreDNS Deployment is missing", false, nil
 	}
 	if err != nil {
 		return "", false, err
+	}
+	if dns.Status.AvailableReplicas < 1 {
+		return coreDNSReadinessReason(ctx, client, dns), false, nil
 	}
 
 	if _, err := client.StorageV1().StorageClasses().Get(ctx, "local-path", metav1.GetOptions{}); apierrors.IsNotFound(err) {
@@ -550,6 +554,42 @@ func workerOperationalState(ctx context.Context, client kubernetes.Interface, no
 		return "", false, err
 	}
 	return "", true, nil
+}
+
+func coreDNSReadinessReason(ctx context.Context, client kubernetes.Interface, deployment *appsv1.Deployment) string {
+	pods, err := client.CoreV1().Pods("kube-system").List(ctx, metav1.ListOptions{
+		LabelSelector: "app.kubernetes.io/name=coredns,app.kubernetes.io/managed-by=casos",
+	})
+	if err != nil {
+		return "CoreDNS is not Available (unable to inspect Pods: " + err.Error() + ")"
+	}
+	for _, pod := range pods.Items {
+		for _, status := range append(pod.Status.InitContainerStatuses, pod.Status.ContainerStatuses...) {
+			if status.State.Waiting != nil {
+				reason := status.State.Waiting.Reason
+				if reason == "" {
+					reason = "waiting"
+				}
+				if status.State.Waiting.Message != "" {
+					return fmt.Sprintf("CoreDNS Pod %s container %s is %s: %s", pod.Name, status.Name, reason, status.State.Waiting.Message)
+				}
+				return fmt.Sprintf("CoreDNS Pod %s container %s is %s", pod.Name, status.Name, reason)
+			}
+			if status.State.Terminated != nil && status.State.Terminated.ExitCode != 0 {
+				terminated := status.State.Terminated
+				return fmt.Sprintf("CoreDNS Pod %s container %s terminated with %s (exit code %d): %s", pod.Name, status.Name, terminated.Reason, terminated.ExitCode, terminated.Message)
+			}
+		}
+		if pod.Status.Phase != corev1.PodRunning {
+			return fmt.Sprintf("CoreDNS Pod %s is %s: %s", pod.Name, pod.Status.Phase, pod.Status.Message)
+		}
+	}
+	return fmt.Sprintf("CoreDNS is not Available (desired=%d ready=%d available=%d updated=%d)",
+		deployment.Status.Replicas,
+		deployment.Status.ReadyReplicas,
+		deployment.Status.AvailableReplicas,
+		deployment.Status.UpdatedReplicas,
+	)
 }
 
 func isPodReady(pod corev1.Pod) bool {
