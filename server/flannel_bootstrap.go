@@ -13,11 +13,13 @@ import (
 )
 
 const (
-	flannelNamespace      = "kube-flannel"
-	flannelServiceAccount = "flannel"
-	flannelConfigMap      = "kube-flannel-cfg"
-	flannelDaemonSet      = "kube-flannel-ds"
-	flannelNetwork        = "10.244.0.0/16"
+	defaultFlannelImage          = "docker.1ms.run/flannelcni/flannel:v0.27.4"
+	defaultFlannelCNIPluginImage = "docker.1ms.run/flannelcni/flannel-cni-plugin:v1.7.1-flannel1"
+	flannelNamespace             = "kube-flannel"
+	flannelServiceAccount        = "flannel"
+	flannelConfigMap             = "kube-flannel-cfg"
+	flannelDaemonSet             = "kube-flannel-ds"
+	flannelNetwork               = "10.244.0.0/16"
 )
 
 func ensureFlannel(ctx context.Context, client kubernetes.Interface, cfg Config) error {
@@ -124,13 +126,17 @@ func flannelCNIConfigData() string {
 }
 
 func ensureFlannelDaemonSet(ctx context.Context, client kubernetes.Interface, cfg Config) error {
+	return createOrUpdateDaemonSet(ctx, client, buildFlannelDaemonSet(cfg))
+}
+
+func buildFlannelDaemonSet(cfg Config) *appsv1.DaemonSet {
 	flannelDaemonImage := cfg.FlannelImage
 	if flannelDaemonImage == "" {
-		flannelDaemonImage = "docker.1ms.run/flannelcni/flannel:v0.27.4"
+		flannelDaemonImage = defaultFlannelImage
 	}
 	flannelPluginImage := cfg.FlannelCNIPluginImage
 	if flannelPluginImage == "" {
-		flannelPluginImage = "docker.1ms.run/flannelcni/flannel-cni-plugin:v1.7.1-flannel1"
+		flannelPluginImage = defaultFlannelCNIPluginImage
 	}
 	flannelUtilityImage := cfg.FlannelInitImage
 	if flannelUtilityImage == "" {
@@ -140,8 +146,8 @@ func ensureFlannelDaemonSet(ctx context.Context, client kubernetes.Interface, cf
 	selector := map[string]string{"app": "flannel", "k8s-app": "flannel"}
 	cleanupLegacyCNI := corev1.Container{
 		Name: "cleanup-legacy-cni", Image: flannelUtilityImage, ImagePullPolicy: corev1.PullIfNotPresent,
-		Command:      []string{"sh", "-c", "rm -f /etc/cni/net.d/10-casos-bridge.conflist"},
-		VolumeMounts: []corev1.VolumeMount{{Name: "cni-conf", MountPath: "/etc/cni/net.d"}},
+		Command:      []string{"sh", "-c", "rm -f /etc/cni/net.d/10-casos-bridge.conflist /run/flannel/subnet.env"},
+		VolumeMounts: []corev1.VolumeMount{{Name: "cni-conf", MountPath: "/etc/cni/net.d"}, {Name: "run", MountPath: "/run/flannel"}},
 	}
 	initCNI := corev1.Container{
 		Name: "install-cni-plugin", Image: flannelPluginImage, ImagePullPolicy: corev1.PullIfNotPresent,
@@ -163,9 +169,13 @@ func ensureFlannelDaemonSet(ctx context.Context, client kubernetes.Interface, cf
 			{Name: "POD_NAME", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.name"}}},
 			{Name: "POD_NAMESPACE", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.namespace"}}},
 		},
-		SecurityContext: &corev1.SecurityContext{Privileged: ptr(false), Capabilities: &corev1.Capabilities{Add: []corev1.Capability{"NET_ADMIN", "NET_RAW"}}},
+		SecurityContext: &corev1.SecurityContext{Privileged: ptr(true)},
 		Ports:           []corev1.ContainerPort{{Name: "vxlan", ContainerPort: 8472, Protocol: corev1.ProtocolUDP}},
-		VolumeMounts:    []corev1.VolumeMount{{Name: "run", MountPath: "/run/flannel"}, {Name: "flannel-cfg", MountPath: "/etc/kube-flannel", ReadOnly: true}, {Name: "xtables-lock", MountPath: "/run/xtables.lock"}},
+		ReadinessProbe: &corev1.Probe{
+			ProbeHandler:  corev1.ProbeHandler{Exec: &corev1.ExecAction{Command: []string{"sh", "-c", "test -s /run/flannel/subnet.env"}}},
+			PeriodSeconds: 3,
+		},
+		VolumeMounts: []corev1.VolumeMount{{Name: "run", MountPath: "/run/flannel"}, {Name: "flannel-cfg", MountPath: "/etc/kube-flannel", ReadOnly: true}, {Name: "xtables-lock", MountPath: "/run/xtables.lock"}},
 	}
 	daemonSet := &appsv1.DaemonSet{
 		ObjectMeta: metav1.ObjectMeta{Name: flannelDaemonSet, Namespace: flannelNamespace, Labels: labels},
@@ -186,7 +196,7 @@ func ensureFlannelDaemonSet(ctx context.Context, client kubernetes.Interface, cf
 			}},
 		},
 	}
-	return createOrUpdateDaemonSet(ctx, client, daemonSet)
+	return daemonSet
 }
 
 func createOrUpdateDaemonSet(ctx context.Context, client kubernetes.Interface, desired *appsv1.DaemonSet) error {
