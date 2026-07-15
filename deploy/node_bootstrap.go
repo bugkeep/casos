@@ -568,15 +568,15 @@ func workerOperationalState(ctx context.Context, client kubernetes.Interface, no
 	} else if err != nil {
 		return "", false, err
 	}
-	probeCtx, cancel := context.WithTimeout(ctx, workerProbeAttemptTimeout)
-	err = waitForStorageProbe(probeCtx, client, nodeName, storageProbeImage)
-	cancel()
-	if err != nil {
-		return "storage probe: " + err.Error(), false, nil
-	}
 	hostname := nodeName
 	if node.Labels["kubernetes.io/hostname"] != "" {
 		hostname = node.Labels["kubernetes.io/hostname"]
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, workerProbeAttemptTimeout)
+	err = waitForStorageProbe(probeCtx, client, nodeName, hostname, storageProbeImage)
+	cancel()
+	if err != nil {
+		return "storage probe: " + err.Error(), false, nil
 	}
 	probeCtx, cancel = context.WithTimeout(ctx, workerProbeAttemptTimeout)
 	err = waitForSchedulerProbe(probeCtx, client, nodeName, hostname, storageProbeImage)
@@ -695,7 +695,7 @@ func workerProbeImage(image string) string {
 	return image
 }
 
-func waitForStorageProbe(ctx context.Context, client kubernetes.Interface, nodeName, image string) error {
+func waitForStorageProbe(ctx context.Context, client kubernetes.Interface, nodeName, hostname, image string) error {
 	image = workerProbeImage(image)
 	const namespace = "kube-system"
 	name := storageProbeName(nodeName)
@@ -720,7 +720,7 @@ func waitForStorageProbe(ctx context.Context, client kubernetes.Interface, nodeN
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: map[string]string{"casos.io/probe": "worker-storage"}},
 		Spec: corev1.PodSpec{
-			NodeName:      nodeName,
+			NodeSelector:  map[string]string{"kubernetes.io/hostname": hostname},
 			RestartPolicy: corev1.RestartPolicyNever,
 			Containers: []corev1.Container{{
 				Name: "storage-probe", Image: image, ImagePullPolicy: corev1.PullIfNotPresent,
