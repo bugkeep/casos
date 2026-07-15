@@ -43,6 +43,16 @@ func admissionFailurePolicy() admissionregv1.FailurePolicyType {
 	return admissionregv1.Fail
 }
 
+func admissionNamespaceSelector() *metav1.LabelSelector {
+	return &metav1.LabelSelector{
+		MatchExpressions: []metav1.LabelSelectorRequirement{{
+			Key:      "kubernetes.io/metadata.name",
+			Operator: metav1.LabelSelectorOpNotIn,
+			Values:   []string{"kube-system", "kube-flannel", "local-path-storage"},
+		}},
+	}
+}
+
 // ensureCasbinWebhook registers the ValidatingWebhookConfiguration that routes
 // admission requests to the casos Casbin enforcement server.
 func ensureCasbinWebhook(ctx context.Context, client kubernetes.Interface, cfg Config) error {
@@ -78,7 +88,7 @@ func ensureCasbinWebhook(ctx context.Context, client kubernetes.Interface, cfg C
 						},
 					},
 				},
-				NamespaceSelector:       &metav1.LabelSelector{},
+				NamespaceSelector:       admissionNamespaceSelector(),
 				SideEffects:             &sideEffects,
 				FailurePolicy:           &failurePolicy,
 				AdmissionReviewVersions: []string{"v1"},
