@@ -81,7 +81,7 @@ func ConfigFromAppConf() (Config, error) {
 	localPathProvisionerImage := configStringDefault("localPathProvisionerImage", "docker.1ms.run/rancher/local-path-provisioner:v0.0.32")
 	localPathHelperImage := configStringDefault("localPathHelperImage", "docker.1ms.run/library/busybox:1.37.0")
 	flannelImage := configStringDefault("flannelImage", "docker.1ms.run/flannelcni/flannel:v0.27.4")
-	flannelCNIPluginImage := configStringDefault("flannelCNIPluginImage", "docker.1ms.run/flannelcni/flannel-cni-plugin:v1.7.1-flannel1")
+	flannelCNIPluginImage := configStringDefault("flannelCNIPluginImage", "docker.1ms.run/flannel/flannel-cni-plugin:v1.7.1-flannel1")
 	flannelInitImage := configStringDefault("flannelInitImage", "docker.1ms.run/library/busybox:1.37.0")
 	storageProbeImage := configStringDefault("storageProbeImage", "docker.1ms.run/library/busybox:1.37.0")
 	ingressControllerImage := configStringDefault("ingressControllerImage", "docker.1ms.run/traefik:v3.3.4")
