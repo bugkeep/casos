@@ -135,6 +135,13 @@ func readyNodeAddresses(nodes []corev1.Node, controlPlaneOnly bool) []serviceLBN
 func serviceLBNodeIPs(ctx context.Context, client kubernetes.Interface, service *corev1.Service, nodes []corev1.Node) ([]string, error) {
 	candidates := readyServiceLBNodes(nodes)
 	if service.Spec.ExternalTrafficPolicy != corev1.ServiceExternalTrafficPolicyTypeLocal {
+		ready, err := serviceHasReadyEndpoint(ctx, client, service)
+		if err != nil {
+			return nil, err
+		}
+		if !ready {
+			return []string{}, nil
+		}
 		ips := make([]string, 0)
 		for _, node := range candidates {
 			ips = append(ips, node.ips...)
@@ -167,6 +174,23 @@ func serviceLBNodeIPs(ctx context.Context, client kubernetes.Interface, service 
 		ips = append(ips, node.ips...)
 	}
 	return uniqueStrings(ips), nil
+}
+
+func serviceHasReadyEndpoint(ctx context.Context, client kubernetes.Interface, service *corev1.Service) (bool, error) {
+	endpointSlices, err := client.DiscoveryV1().EndpointSlices(service.Namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: "kubernetes.io/service-name=" + service.Name,
+	})
+	if err != nil {
+		return false, fmt.Errorf("list EndpointSlices: %w", err)
+	}
+	for _, endpointSlice := range endpointSlices.Items {
+		for _, endpoint := range endpointSlice.Endpoints {
+			if endpoint.Conditions.Ready == nil || *endpoint.Conditions.Ready {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 func isReadyWorkerNode(node corev1.Node) bool {
