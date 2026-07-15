@@ -162,7 +162,7 @@ func buildFlannelDaemonSet(cfg Config) *appsv1.DaemonSet {
 	selector := map[string]string{"app": "flannel", "k8s-app": "flannel"}
 	initConfig := corev1.Container{
 		Name: "install-cni", Image: flannelDaemonImage, ImagePullPolicy: corev1.PullIfNotPresent,
-		Command: []string{"/opt/bin/install-conf"}, Args: []string{"/etc/kube-flannel/cni-conf.json", "/etc/cni/net.d/10-flannel.conflist"},
+		Command: []string{"cp"}, Args: []string{"-f", "/etc/kube-flannel/cni-conf.json", "/etc/cni/net.d/10-flannel.conflist"},
 		VolumeMounts: []corev1.VolumeMount{
 			{Name: "cni-conf", MountPath: "/etc/cni/net.d"},
 			{Name: "flannel-cfg", MountPath: "/etc/kube-flannel", ReadOnly: true},
