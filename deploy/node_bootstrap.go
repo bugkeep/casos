@@ -655,8 +655,15 @@ func workerOperationalState(ctx context.Context, client kubernetes.Interface, no
 	} else if err != nil {
 		return "", false, err
 	}
-	if err := waitForStorageProbe(ctx, client, nodeName, storageProbeImage); err != nil {
-		return err.Error(), false, nil
+	hostname := nodeName
+	if node.Labels["kubernetes.io/hostname"] != "" {
+		hostname = node.Labels["kubernetes.io/hostname"]
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, workerProbeAttemptTimeout)
+	err = waitForStorageProbe(probeCtx, client, nodeName, hostname, storageProbeImage)
+	cancel()
+	if err != nil {
+		return "storage probe: " + err.Error(), false, nil
 	}
 	return "", true, nil
 }
@@ -747,9 +754,9 @@ func storageProbeName(nodeName string) string {
 	return "casos-storage-" + hex.EncodeToString(digest[:])[:16]
 }
 
-func waitForStorageProbe(ctx context.Context, client kubernetes.Interface, nodeName, image string) error {
+func waitForStorageProbe(ctx context.Context, client kubernetes.Interface, nodeName, hostname, image string) error {
 	if image == "" {
-		image = "docker.1ms.run/library/busybox:1.37.0"
+		image = "docker.io/library/busybox:1.37.0"
 	}
 	const namespace = "kube-system"
 	name := storageProbeName(nodeName)
@@ -774,7 +781,7 @@ func waitForStorageProbe(ctx context.Context, client kubernetes.Interface, nodeN
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: map[string]string{"casos.io/probe": "worker-storage"}},
 		Spec: corev1.PodSpec{
-			NodeName:      nodeName,
+			NodeSelector:  map[string]string{"kubernetes.io/hostname": hostname},
 			RestartPolicy: corev1.RestartPolicyNever,
 			Containers: []corev1.Container{{
 				Name: "storage-probe", Image: image, ImagePullPolicy: corev1.PullIfNotPresent,
