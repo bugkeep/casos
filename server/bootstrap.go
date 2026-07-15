@@ -25,6 +25,9 @@ func Bootstrap(ctx context.Context, cfg *rest.Config, srvCfg Config) error {
 	if err != nil {
 		return fmt.Errorf("bootstrap client: %w", err)
 	}
+	if err := ensureCasbinWebhook(ctx, client, srvCfg); err != nil {
+		return err
+	}
 	if err := ensureNodeCIDRConsistency(ctx, client); err != nil {
 		return err
 	}
@@ -45,7 +48,21 @@ func Bootstrap(ctx context.Context, cfg *rest.Config, srvCfg Config) error {
 	if err := ensureIngressController(ctx, client, srvCfg); err != nil {
 		return err
 	}
-	return ensureCasbinWebhook(ctx, client, srvCfg)
+	return nil
+}
+
+func admissionFailurePolicy() admissionregv1.FailurePolicyType {
+	return admissionregv1.Fail
+}
+
+func admissionNamespaceSelector() *metav1.LabelSelector {
+	return &metav1.LabelSelector{
+		MatchExpressions: []metav1.LabelSelectorRequirement{{
+			Key:      "kubernetes.io/metadata.name",
+			Operator: metav1.LabelSelectorOpNotIn,
+			Values:   []string{"kube-system", "kube-flannel", "local-path-storage"},
+		}},
+	}
 }
 
 // normalizeNodeCIDRs keeps the legacy PodCIDR field and the NodeIPAM source
@@ -116,7 +133,7 @@ func ensureCasbinWebhook(ctx context.Context, client kubernetes.Interface, cfg C
 
 	url := fmt.Sprintf("https://127.0.0.1:%d/admission/validate", cfg.WebhookPort)
 	sideEffects := admissionregv1.SideEffectClassNone
-	failurePolicy := admissionregv1.Ignore
+	failurePolicy := admissionFailurePolicy()
 	all := admissionregv1.AllScopes
 	whConfig := &admissionregv1.ValidatingWebhookConfiguration{
 		ObjectMeta: metav1.ObjectMeta{Name: "casbin-admission"},
@@ -140,7 +157,7 @@ func ensureCasbinWebhook(ctx context.Context, client kubernetes.Interface, cfg C
 						},
 					},
 				},
-				NamespaceSelector:       &metav1.LabelSelector{},
+				NamespaceSelector:       admissionNamespaceSelector(),
 				SideEffects:             &sideEffects,
 				FailurePolicy:           &failurePolicy,
 				AdmissionReviewVersions: []string{"v1"},
