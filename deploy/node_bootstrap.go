@@ -31,6 +31,7 @@ const (
 	workerProbeAttemptTimeout = 2 * time.Minute
 	flannelDaemonSetName      = "kube-flannel-ds"
 )
+
 var nodeCIDRReservationMu sync.Mutex
 
 func NewNodeDeployer(config Config, restConfig *rest.Config, log NodeDeployLogger) *NodeDeployer {
@@ -337,7 +338,8 @@ func flannelDaemonSetReadinessReason(ctx context.Context, client kubernetes.Inte
 	if err != nil {
 		return "unable to inspect Flannel DaemonSet: " + err.Error()
 	}
-	return fmt.Sprintf("Flannel Pod has not been scheduled on %s (desired=%d current=%d ready=%d available=%d updated=%d)",
+	return fmt.Sprintf(
+		"Flannel Pod has not been scheduled on %s (desired=%d current=%d ready=%d available=%d updated=%d)",
 		nodeName,
 		daemonSet.Status.DesiredNumberScheduled,
 		daemonSet.Status.CurrentNumberScheduled,
