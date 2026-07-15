@@ -105,8 +105,14 @@ func (d *NodeDeployer) Deploy(ctx context.Context, opts NodeDeployOptions) (*Nod
 	}
 
 	d.logStep(nodeDeployPhaseConfiguring, "Reserving a unique PodCIDR for the worker")
-	if err = d.ensureNodeCIDR(ctx, opts.NodeName); err != nil {
+	podCIDR, err := d.ensureNodeCIDR(ctx, opts.NodeName)
+	if err != nil {
 		return nil, err
+	}
+	// Keep kubelet's network readiness independent of Flannel startup. The
+	// Flannel DaemonSet removes this temporary config after installing its CNI.
+	if err = runner.WriteFileContext(ctx, legacyBridgeCNIConfigPath, bridgeCNIConfig(podCIDR), "0644"); err != nil {
+		return nil, fmt.Errorf("write bootstrap bridge CNI config: %w", err)
 	}
 	if err = d.startKubelet(ctx, runner); err != nil {
 		return nil, err
@@ -153,13 +159,13 @@ func (d *NodeDeployer) Deploy(ctx context.Context, opts NodeDeployOptions) (*Nod
 	return &NodeDeployResult{ManagedPrivateKey: keyPair.PrivateKey}, nil
 }
 
-func (d *NodeDeployer) ensureNodeCIDR(ctx context.Context, nodeName string) error {
+func (d *NodeDeployer) ensureNodeCIDR(ctx context.Context, nodeName string) (string, error) {
 	if d.restConfig == nil {
-		return fmt.Errorf("apiserver rest config is required")
+		return "", fmt.Errorf("apiserver rest config is required")
 	}
 	client, err := kubernetes.NewForConfig(d.restConfig)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	nodeCIDRReservationMu.Lock()
@@ -167,7 +173,7 @@ func (d *NodeDeployer) ensureNodeCIDR(ctx context.Context, nodeName string) erro
 
 	nodes, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return fmt.Errorf("list nodes for PodCIDR reservation: %w", err)
+		return "", fmt.Errorf("list nodes for PodCIDR reservation: %w", err)
 	}
 	for i := range nodes.Items {
 		if nodes.Items[i].Name != nodeName {
@@ -177,20 +183,20 @@ func (d *NodeDeployer) ensureNodeCIDR(ctx context.Context, nodeName string) erro
 		if cidr == "" {
 			cidr, err = allocateNodeCIDR(nodes.Items)
 			if err != nil {
-				return err
+				return "", err
 			}
 			nodes.Items[i].Spec.PodCIDR = cidr
 			nodes.Items[i].Spec.PodCIDRs = []string{cidr}
 			if _, err = client.CoreV1().Nodes().Update(ctx, &nodes.Items[i], metav1.UpdateOptions{}); err != nil {
-				return fmt.Errorf("reserve PodCIDR for node %s: %w", nodeName, err)
+				return "", fmt.Errorf("reserve PodCIDR for node %s: %w", nodeName, err)
 			}
 		}
-		return nil
+		return cidr, nil
 	}
 
 	cidr, err := allocateNodeCIDR(nodes.Items)
 	if err != nil {
-		return err
+		return "", err
 	}
 	node := &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
@@ -200,9 +206,9 @@ func (d *NodeDeployer) ensureNodeCIDR(ctx context.Context, nodeName string) erro
 		Spec: corev1.NodeSpec{PodCIDR: cidr, PodCIDRs: []string{cidr}},
 	}
 	if _, err = client.CoreV1().Nodes().Create(ctx, node, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
-		return fmt.Errorf("create worker node with PodCIDR: %w", err)
+		return "", fmt.Errorf("create worker node with PodCIDR: %w", err)
 	}
-	return nil
+	return cidr, nil
 }
 
 func nodeCIDRFromSpec(node *corev1.Node) string {
