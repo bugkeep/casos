@@ -572,7 +572,7 @@ func workerOperationalState(ctx context.Context, client kubernetes.Interface, no
 	err = waitForStorageProbe(probeCtx, client, nodeName, storageProbeImage)
 	cancel()
 	if err != nil {
-		return err.Error(), false, nil
+		return "storage probe: " + err.Error(), false, nil
 	}
 	hostname := nodeName
 	if node.Labels["kubernetes.io/hostname"] != "" {
@@ -582,13 +582,13 @@ func workerOperationalState(ctx context.Context, client kubernetes.Interface, no
 	err = waitForSchedulerProbe(probeCtx, client, nodeName, hostname, storageProbeImage)
 	cancel()
 	if err != nil {
-		return err.Error(), false, nil
+		return "scheduler probe: " + err.Error(), false, nil
 	}
 	probeCtx, cancel = context.WithTimeout(ctx, workerProbeAttemptTimeout)
 	err = waitForServiceProbe(probeCtx, client, nodeName, storageProbeImage)
 	cancel()
 	if err != nil {
-		return err.Error(), false, nil
+		return "service probe: " + err.Error(), false, nil
 	}
 	return "", true, nil
 }
