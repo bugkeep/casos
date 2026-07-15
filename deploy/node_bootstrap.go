@@ -343,7 +343,8 @@ func flannelDaemonSetReadinessReason(ctx context.Context, client kubernetes.Inte
 	if err != nil {
 		return "unable to inspect Flannel DaemonSet: " + err.Error()
 	}
-	return fmt.Sprintf("Flannel Pod has not been scheduled on %s (desired=%d current=%d ready=%d available=%d updated=%d)",
+	return fmt.Sprintf(
+		"Flannel Pod has not been scheduled on %s (desired=%d current=%d ready=%d available=%d updated=%d)",
 		nodeName,
 		daemonSet.Status.DesiredNumberScheduled,
 		daemonSet.Status.CurrentNumberScheduled,
@@ -621,7 +622,8 @@ func coreDNSReadinessReason(ctx context.Context, client kubernetes.Interface, de
 			return fmt.Sprintf("CoreDNS Pod %s is %s: %s", pod.Name, pod.Status.Phase, pod.Status.Message)
 		}
 	}
-	return fmt.Sprintf("CoreDNS is not Available (desired=%d ready=%d available=%d updated=%d)",
+	return fmt.Sprintf(
+		"CoreDNS is not Available (desired=%d ready=%d available=%d updated=%d)",
 		deployment.Status.Replicas,
 		deployment.Status.ReadyReplicas,
 		deployment.Status.AvailableReplicas,
