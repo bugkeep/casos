@@ -12,7 +12,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/retry"
@@ -429,15 +428,9 @@ func (d *NodeDeployer) ensureNodeBootstrapTaint(ctx context.Context, nodeName st
 	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		node, err := client.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 		if apierrors.IsNotFound(err) {
-			node = &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
-			if _, err := ensureWorkerBootstrapTaint(node); err != nil {
-				return err
-			}
-			_, err = client.CoreV1().Nodes().Create(ctx, node, metav1.CreateOptions{})
-			if apierrors.IsAlreadyExists(err) {
-				return apierrors.NewConflict(schema.GroupResource{Resource: "nodes"}, nodeName, err)
-			}
-			return err
+			// Let kubelet create the Node so standard registration and
+			// controller-manager PodCIDR allocation remain authoritative.
+			return nil
 		}
 		if err != nil {
 			return err

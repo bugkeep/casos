@@ -37,6 +37,7 @@ ExecStart=/usr/local/bin/kubelet \
   --config=/var/lib/kubelet/config.yaml \
   --client-ca-file=/etc/kubernetes/ca.crt \
   --register-node=true \
+  --register-with-taints=%s \
   --hostname-override=%s \
   --v=2
 Restart=always
@@ -44,5 +45,5 @@ RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
-`, nodeName)
+`, workerBootstrapTaintKey+"="+workerBootstrapTaintValue+":NoSchedule", nodeName)
 }
