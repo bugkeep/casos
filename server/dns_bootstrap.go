@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/sirupsen/logrus"
 	appsv1 "k8s.io/api/apps/v1"
@@ -198,6 +199,7 @@ func ensureCoreDNSDeployment(ctx context.Context, client kubernetes.Interface, c
 							Image:           cfg.CoreDNSImage,
 							ImagePullPolicy: corev1.PullIfNotPresent,
 							Args:            []string{"-conf", "/etc/coredns/Corefile"},
+							Env:             coreDNSEnv(cfg),
 							Ports: []corev1.ContainerPort{
 								{Name: "dns", ContainerPort: 53, Protocol: corev1.ProtocolUDP},
 								{Name: "dns-tcp", ContainerPort: 53, Protocol: corev1.ProtocolTCP},
@@ -281,6 +283,17 @@ func ensureCoreDNSDeployment(ctx context.Context, client kubernetes.Interface, c
 		},
 	}
 	return createOrUpdateDeployment(ctx, client, deployment)
+}
+
+func coreDNSEnv(cfg Config) []corev1.EnvVar {
+	if cfg.AdvertiseAddress == "" || cfg.ApiserverPort <= 0 {
+		return nil
+	}
+	return []corev1.EnvVar{
+		{Name: "KUBERNETES_SERVICE_HOST", Value: cfg.AdvertiseAddress},
+		{Name: "KUBERNETES_SERVICE_PORT", Value: strconv.Itoa(cfg.ApiserverPort)},
+		{Name: "KUBERNETES_SERVICE_PORT_HTTPS", Value: strconv.Itoa(cfg.ApiserverPort)},
+	}
 }
 
 func coreDNSLabels() map[string]string {

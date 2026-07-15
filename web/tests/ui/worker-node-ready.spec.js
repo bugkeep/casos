@@ -3,10 +3,10 @@ const {e2eSshPassword, signInAsCiUser} = require("./e2e-helpers");
 const {
   createdMachinesFixture,
   createMachineFromUi,
+  getMachineNodeTasks,
   makeMachineName,
   startWorkerNodeDeployment,
   workerNodeDialog,
-  workerNodeTaskTable,
 } = require("./worker-node-helpers");
 
 // This test only runs in CI jobs that provisioned a real worker VM
@@ -32,10 +32,20 @@ function nodeRow(page, nodeName) {
 }
 
 async function waitForDeployTaskToSucceed(page, machineName, taskId) {
-  const taskRow = workerNodeTaskTable(page, machineName).locator(`tr[data-row-key="${taskId}"]`);
-  await expect(taskRow.getByRole("cell", {name: "succeeded", exact: true})).toBeVisible({
+  await expect.poll(async() => {
+    const tasksBody = await getMachineNodeTasks(page, machineName);
+    const task = tasksBody.data.find((candidate) => candidate.id === taskId);
+    if (!task) {
+      return "missing";
+    }
+    if (task.status === "failed") {
+      return `failed: ${task.errorMsg || "unknown deployment error"}`;
+    }
+    return task.status;
+  }, {
     timeout: E2E_WORKER_DEPLOY_TIMEOUT_MS,
-  });
+    intervals: [5000],
+  }).toBe("succeeded");
 }
 
 async function waitForNodeReady(page, nodeName) {
