@@ -158,6 +158,10 @@ func (d *NodeDeployer) Deploy(ctx context.Context, opts NodeDeployOptions) (*Nod
 		d.logStep(nodeDeployPhaseWaiting, "Node is already Ready")
 	}
 
+	d.logStep(nodeDeployPhaseConfiguring, "Refreshing Flannel on the worker")
+	if err = d.refreshFlannelPod(ctx, opts.NodeName); err != nil {
+		return nil, fmt.Errorf("refresh Flannel on worker: %w", err)
+	}
 	d.logStep(nodeDeployPhaseWaiting, "Waiting for Flannel to become Ready on the worker")
 	if err = d.waitForFlannelReady(ctx, opts.NodeName); err != nil {
 		return nil, fmt.Errorf("waiting for Flannel readiness: %w", err)
@@ -1594,7 +1598,7 @@ func isNodeReady(node *corev1.Node) bool {
 }
 
 func flannelPodReady(pod *corev1.Pod) bool {
-	if pod == nil || pod.Status.Phase != corev1.PodRunning {
+	if pod == nil || pod.DeletionTimestamp != nil || pod.Status.Phase != corev1.PodRunning {
 		return false
 	}
 	for _, condition := range pod.Status.Conditions {
@@ -1603,6 +1607,39 @@ func flannelPodReady(pod *corev1.Pod) bool {
 		}
 	}
 	return false
+}
+
+func (d *NodeDeployer) refreshFlannelPod(ctx context.Context, nodeName string) error {
+	if d.restConfig == nil {
+		return fmt.Errorf("apiserver rest config is required")
+	}
+	client, err := kubernetes.NewForConfig(d.restConfig)
+	if err != nil {
+		return err
+	}
+	pods, err := client.CoreV1().Pods("kube-flannel").List(ctx, metav1.ListOptions{
+		LabelSelector: "k8s-app=flannel",
+		FieldSelector: "spec.nodeName=" + nodeName,
+	})
+	if err != nil {
+		return fmt.Errorf("list Flannel Pods on %s: %w", nodeName, err)
+	}
+	for _, pod := range pods.Items {
+		err := client.CoreV1().Pods("kube-flannel").Delete(ctx, pod.Name, metav1.DeleteOptions{})
+		if apierrors.IsNotFound(err) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("delete Flannel Pod %s: %w", pod.Name, err)
+		}
+		deleteCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		err = waitForProbePodDeleted(deleteCtx, client, "kube-flannel", pod.Name)
+		cancel()
+		if err != nil {
+			return fmt.Errorf("wait for Flannel Pod %s deletion: %w", pod.Name, err)
+		}
+	}
+	return nil
 }
 
 func (d *NodeDeployer) apiserverVersion() (string, error) {
