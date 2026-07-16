@@ -43,10 +43,8 @@ func admissionValidateHandler(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	platformRequest := isPlatformPodRequest(req)
-	controllerPodRequest := isWorkloadControllerPodRequest(req)
 	allowed, err := true, error(nil)
-	if !platformRequest && !controllerPodRequest {
+	if shouldEnforceAdmissionPolicy(req) {
 		allowed, err = object.EnforceAdmissionPolicy(
 			req.UserInfo.Username,
 			req.Namespace,
@@ -93,6 +91,13 @@ func admissionValidateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeAdmissionResponse(w, resp)
+}
+
+func shouldEnforceAdmissionPolicy(req *admissionv1.AdmissionRequest) bool {
+	if req == nil || isSystemUser(req.UserInfo.Username, req.UserInfo.Groups) {
+		return false
+	}
+	return !isPlatformPodRequest(req) && !isWorkloadControllerPodRequest(req)
 }
 
 // Platform components must be able to restart and scale even when an image's
@@ -166,7 +171,23 @@ func isWorkloadControllerPodRequest(req *admissionv1.AdmissionRequest) bool {
 	if req.Operation != admissionv1.Create && req.Operation != admissionv1.Update && req.Operation != admissionv1.Delete {
 		return false
 	}
-	return isWorkloadControllerUser(req.UserInfo.Username)
+	if isWorkloadControllerUser(req.UserInfo.Username) {
+		return true
+	}
+	raw := req.Object.Raw
+	if len(raw) == 0 {
+		raw = req.OldObject.Raw
+	}
+	var pod corev1.Pod
+	if err := json.Unmarshal(raw, &pod); err != nil {
+		return false
+	}
+	for _, owner := range pod.OwnerReferences {
+		if owner.Controller != nil && *owner.Controller {
+			return true
+		}
+	}
+	return false
 }
 
 func isWorkloadControllerUser(username string) bool {
