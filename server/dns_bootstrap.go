@@ -338,7 +338,8 @@ func createOrUpdateService(ctx context.Context, client kubernetes.Interface, svc
 	svc.Labels = mergeStringMap(current.Labels, svc.Labels)
 	svc.Annotations = mergeStringMap(current.Annotations, svc.Annotations)
 	svc.ResourceVersion = current.ResourceVersion
-	svc.Spec.Type = current.Spec.Type
+	// The caller owns the Service type. Keeping the old type here prevents a
+	// previously ClusterIP Traefik Service from being upgraded to LoadBalancer.
 	if current.Spec.ClusterIP != "" {
 		svc.Spec.ClusterIP = current.Spec.ClusterIP
 	}
