@@ -175,7 +175,8 @@ func buildApiserverArgs(cfg Config, certDir, etcdEndpoint, authzKubeconfig strin
 		"--kubelet-client-key=" + filepath.Join(certDir, "apiserver-kubelet-client.key"),
 	}
 	if authzKubeconfig != "" {
-		args = append(args,
+		args = append(
+			args,
 			"--authorization-webhook-config-file="+authzKubeconfig,
 			"--authorization-webhook-cache-authorized-ttl=30s",
 			"--authorization-webhook-cache-unauthorized-ttl=10s",
