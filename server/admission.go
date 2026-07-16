@@ -111,14 +111,18 @@ func isPlatformPodRequest(req *admissionv1.AdmissionRequest) bool {
 	if req == nil || req.Resource.Resource != "pods" {
 		return false
 	}
-	if req.Operation != admissionv1.Create && req.Operation != admissionv1.Update {
+	if req.Operation != admissionv1.Create && req.Operation != admissionv1.Update && req.Operation != admissionv1.Delete {
 		return false
 	}
 	if !isPlatformNamespace(req.Namespace) {
 		return false
 	}
 	var pod corev1.Pod
-	if err := json.Unmarshal(req.Object.Raw, &pod); err != nil {
+	raw := req.Object.Raw
+	if len(raw) == 0 {
+		raw = req.OldObject.Raw
+	}
+	if err := json.Unmarshal(raw, &pod); err != nil {
 		return false
 	}
 	return pod.Labels["app.kubernetes.io/managed-by"] == "casos"
