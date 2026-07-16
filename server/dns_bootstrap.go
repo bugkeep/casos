@@ -20,6 +20,7 @@ import (
 const (
 	clusterDNSNamespace = "kube-system"
 	clusterDNSName      = "coredns"
+	clusterDNSServiceIP = "10.43.0.10"
 	// coreDNSRolloutRev forces a rollout when the managed CoreDNS pod template changes.
 	coreDNSRolloutRev = "4"
 )
@@ -146,13 +147,22 @@ func ensureCoreDNSService(ctx context.Context, client kubernetes.Interface) erro
 			Labels:    coreDNSLabels(),
 		},
 		Spec: corev1.ServiceSpec{
-			Selector: coreDNSSelectorLabels(),
+			ClusterIP: clusterDNSServiceIP,
+			Selector:  coreDNSSelectorLabels(),
 			Ports: []corev1.ServicePort{
 				{Name: "dns", Port: 53, Protocol: corev1.ProtocolUDP, TargetPort: intstr.FromInt(53)},
 				{Name: "dns-tcp", Port: 53, Protocol: corev1.ProtocolTCP, TargetPort: intstr.FromInt(53)},
 				{Name: "metrics", Port: 9153, Protocol: corev1.ProtocolTCP, TargetPort: intstr.FromInt(9153)},
 			},
 		},
+	}
+	current, err := client.CoreV1().Services(clusterDNSNamespace).Get(ctx, svc.Name, metav1.GetOptions{})
+	if err == nil && current.Spec.ClusterIP != "" && current.Spec.ClusterIP != clusterDNSServiceIP {
+		if err := client.CoreV1().Services(clusterDNSNamespace).Delete(ctx, svc.Name, metav1.DeleteOptions{}); err != nil {
+			return fmt.Errorf("replace CoreDNS service %s/%s: %w", clusterDNSNamespace, svc.Name, err)
+		}
+	} else if err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("get CoreDNS service %s/%s: %w", clusterDNSNamespace, svc.Name, err)
 	}
 	return createOrUpdateService(ctx, client, svc)
 }

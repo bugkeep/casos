@@ -178,6 +178,7 @@ func buildApiserverArgs(cfg Config, certDir, etcdEndpoint, authzKubeconfig strin
 		args = append(
 			args,
 			"--authorization-webhook-config-file="+authzKubeconfig,
+			"--authorization-webhook-version=v1",
 			"--authorization-webhook-cache-authorized-ttl=30s",
 			"--authorization-webhook-cache-unauthorized-ttl=10s",
 		)
