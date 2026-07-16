@@ -769,11 +769,31 @@ func canonicalContainers(containers []corev1.Container) []managedContainer {
 			Resources:        container.Resources,
 			SecurityContext:  container.SecurityContext,
 			VolumeMounts:     container.VolumeMounts,
-			ReadinessProbe:   container.ReadinessProbe,
-			LivenessProbe:    container.LivenessProbe,
-			StartupProbe:     container.StartupProbe,
+			ReadinessProbe:   canonicalProbe(container.ReadinessProbe),
+			LivenessProbe:    canonicalProbe(container.LivenessProbe),
+			StartupProbe:     canonicalProbe(container.StartupProbe),
 			WorkingDirectory: container.WorkingDir,
 		})
+	}
+	return result
+}
+
+func canonicalProbe(probe *corev1.Probe) *corev1.Probe {
+	if probe == nil {
+		return nil
+	}
+	result := probe.DeepCopy()
+	if result.SuccessThreshold == 0 {
+		result.SuccessThreshold = 1
+	}
+	if result.FailureThreshold == 0 {
+		result.FailureThreshold = 3
+	}
+	if result.PeriodSeconds == 0 {
+		result.PeriodSeconds = 10
+	}
+	if result.TimeoutSeconds == 0 {
+		result.TimeoutSeconds = 1
 	}
 	return result
 }
