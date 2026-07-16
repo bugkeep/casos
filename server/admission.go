@@ -229,7 +229,6 @@ func checkWorkloadTemplateImages(resource string, raw []byte) string {
 }
 
 func checkPodSpecImages(spec corev1.PodSpec) string {
-
 	var images []string
 	for _, c := range spec.InitContainers {
 		images = append(images, c.Image)
