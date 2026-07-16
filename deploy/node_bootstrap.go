@@ -636,7 +636,14 @@ func workerOperationalState(ctx context.Context, client kubernetes.Interface, no
 	if err != nil {
 		return "", false, err
 	}
-	if len(flannelPods.Items) == 0 || !isPodReady(flannelPods.Items[0]) {
+	flannelReady := false
+	for i := range flannelPods.Items {
+		if isPodReady(flannelPods.Items[i]) {
+			flannelReady = true
+			break
+		}
+	}
+	if !flannelReady {
 		return "Flannel is not Ready on the worker", false, nil
 	}
 
@@ -751,7 +758,7 @@ func coreDNSPodFailureReason(reason string, client kubernetes.Interface, pod cor
 }
 
 func isPodReady(pod corev1.Pod) bool {
-	if pod.Status.Phase != corev1.PodRunning {
+	if pod.DeletionTimestamp != nil || pod.Status.Phase != corev1.PodRunning {
 		return false
 	}
 	for _, condition := range pod.Status.Conditions {
