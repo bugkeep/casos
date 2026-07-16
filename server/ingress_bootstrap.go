@@ -8,6 +8,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -138,9 +139,14 @@ func ensureIngressClass(ctx context.Context, client kubernetes.Interface) error 
 	if current.Spec.Controller != desired.Spec.Controller {
 		return fmt.Errorf("IngressClass %s is owned by controller %s", desired.Name, current.Spec.Controller)
 	}
-	desired.ResourceVersion = current.ResourceVersion
 	desired.Labels = mergeStringMap(current.Labels, desired.Labels)
 	desired.Annotations = mergeStringMap(current.Annotations, desired.Annotations)
+	if apiequality.Semantic.DeepEqual(current.Labels, desired.Labels) &&
+		apiequality.Semantic.DeepEqual(current.Annotations, desired.Annotations) &&
+		apiequality.Semantic.DeepEqual(current.Spec, desired.Spec) {
+		return nil
+	}
+	desired.ResourceVersion = current.ResourceVersion
 	if _, err := classes.Update(ctx, desired, metav1.UpdateOptions{}); err != nil {
 		return fmt.Errorf("update IngressClass %s: %w", desired.Name, err)
 	}
@@ -160,12 +166,20 @@ func ensureIngressControllerService(ctx context.Context, client kubernetes.Inter
 	if err != nil {
 		return fmt.Errorf("get Ingress controller Service: %w", err)
 	}
-	desired.ResourceVersion = current.ResourceVersion
+	desired.Labels = mergeStringMap(current.Labels, desired.Labels)
+	desired.Annotations = mergeStringMap(current.Annotations, desired.Annotations)
 	desired.Spec.ClusterIP = current.Spec.ClusterIP
 	desired.Spec.ClusterIPs = current.Spec.ClusterIPs
 	desired.Spec.IPFamilies = current.Spec.IPFamilies
 	desired.Spec.IPFamilyPolicy = current.Spec.IPFamilyPolicy
 	desired.Spec.ExternalIPs = current.Spec.ExternalIPs
+	desired.Spec.SessionAffinity = current.Spec.SessionAffinity
+	desired.Spec.InternalTrafficPolicy = current.Spec.InternalTrafficPolicy
+	desired.Spec.LoadBalancerIP = current.Spec.LoadBalancerIP
+	desired.Spec.LoadBalancerClass = current.Spec.LoadBalancerClass
+	desired.Spec.LoadBalancerSourceRanges = current.Spec.LoadBalancerSourceRanges
+	desired.Spec.AllocateLoadBalancerNodePorts = current.Spec.AllocateLoadBalancerNodePorts
+	desired.Spec.HealthCheckNodePort = current.Spec.HealthCheckNodePort
 	for i := range desired.Spec.Ports {
 		for _, currentPort := range current.Spec.Ports {
 			if desired.Spec.Ports[i].Name == currentPort.Name {
@@ -174,6 +188,12 @@ func ensureIngressControllerService(ctx context.Context, client kubernetes.Inter
 			}
 		}
 	}
+	if apiequality.Semantic.DeepEqual(current.Labels, desired.Labels) &&
+		apiequality.Semantic.DeepEqual(current.Annotations, desired.Annotations) &&
+		apiequality.Semantic.DeepEqual(current.Spec, desired.Spec) {
+		return nil
+	}
+	desired.ResourceVersion = current.ResourceVersion
 	if _, err := services.Update(ctx, desired, metav1.UpdateOptions{}); err != nil {
 		return fmt.Errorf("update Ingress controller Service: %w", err)
 	}
