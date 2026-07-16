@@ -8,6 +8,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -29,7 +30,7 @@ func ingressControllerLabels() map[string]string {
 	}
 }
 
-func ensureIngressController(ctx context.Context, client kubernetes.Interface, cfg Config) error {
+func ensureIngressController(ctx context.Context, client kubernetes.Interface, apiExtensionsClient apiextensionsclient.Interface, cfg Config) error {
 	if err := ensureNamespace(ctx, client, ingressControllerNamespace); err != nil {
 		return err
 	}
@@ -46,6 +47,9 @@ func ensureIngressController(ctx context.Context, client kubernetes.Interface, c
 		return err
 	}
 	if err := ensureIngressControllerClusterRoleBinding(ctx, client); err != nil {
+		return err
+	}
+	if err := ensureTraefikCRDs(ctx, apiExtensionsClient); err != nil {
 		return err
 	}
 	if err := ensureIngressClass(ctx, client); err != nil {
@@ -88,6 +92,15 @@ func ensureIngressControllerClusterRole(ctx context.Context, client kubernetes.I
 				APIGroups: []string{"networking.k8s.io"},
 				Resources: []string{"ingresses/status"},
 				Verbs:     []string{"update", "patch"},
+			},
+			{
+				APIGroups: []string{"traefik.io"},
+				Resources: []string{
+					"middlewares", "middlewaretcps", "ingressroutes", "traefikservices",
+					"ingressroutetcps", "ingressrouteudps", "tlsoptions", "tlsstores",
+					"serverstransports", "serverstransporttcps",
+				},
+				Verbs: []string{"get", "list", "watch"},
 			},
 		},
 	}
@@ -218,6 +231,8 @@ func buildIngressControllerDeployment(cfg Config) *appsv1.Deployment {
 						Args: []string{
 							"--providers.kubernetesingress=true",
 							"--providers.kubernetesingress.ingressclass=" + ingressControllerClass,
+							"--providers.kubernetescrd=true",
+							"--providers.kubernetescrd.ingressclass=" + ingressControllerClass,
 							"--providers.kubernetesingress.ingressendpoint.publishedservice=" + ingressControllerNamespace + "/" + ingressControllerName,
 							"--entrypoints.web.address=:8000",
 							"--entrypoints.websecure.address=:8443",

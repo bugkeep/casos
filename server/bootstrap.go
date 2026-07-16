@@ -12,6 +12,7 @@ import (
 	admissionregv1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -36,6 +37,10 @@ func Bootstrap(ctx context.Context, cfg *rest.Config, srvCfg Config) error {
 	if err := ensureNodeProxierBinding(ctx, client); err != nil {
 		return err
 	}
+	apiExtensionsClient, err := apiextensionsclient.NewForConfig(cfg)
+	if err != nil {
+		return fmt.Errorf("bootstrap API extensions client: %w", err)
+	}
 	if err := ensureFlannel(ctx, client, srvCfg); err != nil {
 		return err
 	}
@@ -47,7 +52,7 @@ func Bootstrap(ctx context.Context, cfg *rest.Config, srvCfg Config) error {
 			return err
 		}
 	}
-	if err := ensureIngressController(ctx, client, srvCfg); err != nil {
+	if err := ensureIngressController(ctx, client, apiExtensionsClient, srvCfg); err != nil {
 		return err
 	}
 	return nil
