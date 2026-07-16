@@ -1043,7 +1043,7 @@ func coreDNSPodFailureReason(reason string, client kubernetes.Interface, pod cor
 }
 
 func isPodReady(pod corev1.Pod) bool {
-	if pod.Status.Phase != corev1.PodRunning {
+	if pod.DeletionTimestamp != nil || pod.Status.Phase != corev1.PodRunning {
 		return false
 	}
 	for _, condition := range pod.Status.Conditions {
@@ -1591,7 +1591,7 @@ func isNodeReady(node *corev1.Node) bool {
 }
 
 func flannelPodReady(pod *corev1.Pod) bool {
-	if pod == nil || pod.Status.Phase != corev1.PodRunning {
+	if pod == nil || pod.DeletionTimestamp != nil || pod.Status.Phase != corev1.PodRunning {
 		return false
 	}
 	for _, condition := range pod.Status.Conditions {
