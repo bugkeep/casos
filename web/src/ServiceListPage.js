@@ -238,10 +238,10 @@ class ServiceListPage extends React.Component {
         title: "Access URL",
         key: "accessUrl",
         render: (_, record) => {
-          const loadBalancerIPs = record.loadBalancerIPs?.length > 0 ? record.loadBalancerIPs : (nodeIP ? [nodeIP] : []);
           if (record.type !== "NodePort" && record.type !== "LoadBalancer") {
             return null;
           }
+          const loadBalancerIPs = record.loadBalancerIPs ?? [];
           const ports = record.type === "LoadBalancer"
             ? (record.ports ?? []).filter(p => p.port)
             : (record.ports ?? []).filter(p => p.nodePort);
