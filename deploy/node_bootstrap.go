@@ -883,7 +883,7 @@ func selectServiceProbePlacement(nodes []corev1.Node, targetNodeName string) (se
 	}
 	for i := range nodes {
 		node := &nodes[i]
-		if node.Name == targetNodeName || isControlPlaneNode(node) || !isNodeReady(node) || nodeCIDRFromSpec(node) == "" {
+		if node.Name == targetNodeName || isControlPlaneNode(node) || hasWorkerBootstrapTaint(node) || !isNodeReady(node) || nodeCIDRFromSpec(node) == "" {
 			continue
 		}
 		placement.serverNodeName = node.Name
@@ -891,6 +891,18 @@ func selectServiceProbePlacement(nodes []corev1.Node, targetNodeName string) (se
 		break
 	}
 	return placement, nil
+}
+
+func hasWorkerBootstrapTaint(node *corev1.Node) bool {
+	if node == nil {
+		return false
+	}
+	for _, taint := range node.Spec.Taints {
+		if taint.Key == workerBootstrapTaintKey && taint.Effect == corev1.TaintEffectNoSchedule {
+			return true
+		}
+	}
+	return false
 }
 
 func nodeHostname(node *corev1.Node) string {
