@@ -832,6 +832,10 @@ func reconcileLocalPathDeployment(ctx context.Context, client kubernetes.Interfa
 
 	desiredLabels := mergeStringMap(current.Labels, deployment.Labels)
 	desiredAnnotations := mergeStringMap(current.Annotations, deployment.Annotations)
+	if desiredAnnotations == nil {
+		desiredAnnotations = map[string]string{}
+	}
+	desiredAnnotations[localPathManagedSpecHashAnnotation] = desiredHash
 	if current.Annotations[localPathManagedSpecHashAnnotation] == desiredHash &&
 		equality.Semantic.DeepEqual(current.Labels, desiredLabels) &&
 		equality.Semantic.DeepEqual(current.Annotations, desiredAnnotations) &&
@@ -839,9 +843,6 @@ func reconcileLocalPathDeployment(ctx context.Context, client kubernetes.Interfa
 		return nil
 	}
 
-	deployment.Annotations = mergeStringMap(deployment.Annotations, map[string]string{
-		localPathManagedSpecHashAnnotation: desiredHash,
-	})
 	deployment.ResourceVersion = current.ResourceVersion
 	deployment.Labels = desiredLabels
 	deployment.Annotations = desiredAnnotations
