@@ -5,8 +5,6 @@ import (
 	"fmt"
 )
 
-const flannelCNIPluginVersion = "v1.7.1-flannel1"
-
 func (d *NodeDeployer) installNodeBinaries(ctx context.Context, runner *NodeDeploySSHRunner, arch, k8sVersion string) error {
 	version := k8sVersion
 	cniVersion := defaultNodeDeployCNIVersion
@@ -82,13 +80,6 @@ if [ ! -x /opt/cni/bin/bridge ] || [ ! -x /opt/cni/bin/loopback ] || [ ! -x /opt
   download -o /tmp/cni-plugins.tgz https://github.com/containernetworking/plugins/releases/download/%s/cni-plugins-linux-%s-%s.tgz
   tar -xzf /tmp/cni-plugins.tgz -C /opt/cni/bin
 fi`, version, version, arch, version, arch, cniVersion, arch, cniVersion)
-
-	installCmd += fmt.Sprintf(`
-if [ ! -x /opt/cni/bin/flannel ]; then
-  download -o /tmp/flannel-cni-plugin.tgz https://github.com/flannel-io/cni-plugin/releases/download/%s/cni-plugin-flannel-linux-%s-%s.tgz
-  tar -xzf /tmp/flannel-cni-plugin.tgz -C /tmp flannel-%s
-  install -o root -g root -m 0755 /tmp/flannel-%s /opt/cni/bin/flannel
-fi`, flannelCNIPluginVersion, arch, flannelCNIPluginVersion, arch, arch)
 	if _, err := runner.RunRootContext(ctx, installCmd); err != nil {
 		return fmt.Errorf("install node binaries: %w", err)
 	}
