@@ -232,7 +232,7 @@ func deleteStaleKubernetesEndpoints(dsn string) error {
 		return err
 	}
 	defer db.Close()
-	const q = `UPDATE kine SET deleted=1 WHERE name='/registry/endpoints/default/kubernetes' AND deleted=0`
+	const q = `UPDATE kine SET deleted=1 WHERE name='/registry/services/endpoints/default/kubernetes' AND deleted=0`
 	_, err = db.Exec(q)
 	return err
 }
