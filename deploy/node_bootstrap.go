@@ -625,7 +625,7 @@ func workerOperationalState(ctx context.Context, client kubernetes.Interface, no
 	if !isNodeReady(node) {
 		return "node is not Ready", false, nil
 	}
-	if node.Spec.PodCIDR == "" {
+	if nodeCIDRFromSpec(node) == "" {
 		return "node has no PodCIDR", false, nil
 	}
 
