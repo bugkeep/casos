@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/casosorg/casos/object"
+	"github.com/casosorg/casos/server"
 	"github.com/casosorg/casos/store"
 )
 
@@ -194,6 +195,10 @@ func (c *ApiController) InstallHelmChart() {
 	if c.RequireAdmin() {
 		return
 	}
+	if !server.PlatformReady() {
+		c.ResponseError("embedded control plane is not ready")
+		return
+	}
 	cfg := getAdminRestConfig()
 	if cfg == nil {
 		c.ResponseError("cluster not ready")
@@ -215,6 +220,12 @@ func (c *ApiController) InstallHelmChart() {
 // @router /api/install-helm-chart-stream [post]
 func (c *ApiController) InstallHelmChartStream() {
 	if c.RequireAdmin() {
+		return
+	}
+	if !server.PlatformReady() {
+		c.Ctx.ResponseWriter.ResponseWriter.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprintf(c.Ctx.ResponseWriter.ResponseWriter, "data: ERROR: embedded control plane is not ready\n\n")
+		c.StopRun()
 		return
 	}
 	cfg := getAdminRestConfig()
@@ -258,6 +269,10 @@ func (c *ApiController) UpgradeHelmRelease() {
 	if c.RequireAdmin() {
 		return
 	}
+	if !server.PlatformReady() {
+		c.ResponseError("embedded control plane is not ready")
+		return
+	}
 	cfg := getAdminRestConfig()
 	if cfg == nil {
 		c.ResponseError("cluster not ready")
@@ -287,6 +302,10 @@ func (c *ApiController) RollbackHelmRelease() {
 	if c.RequireAdmin() {
 		return
 	}
+	if !server.PlatformReady() {
+		c.ResponseError("embedded control plane is not ready")
+		return
+	}
 	cfg := getAdminRestConfig()
 	if cfg == nil {
 		c.ResponseError("cluster not ready")
@@ -313,6 +332,10 @@ type helmUninstallReq struct {
 // @router /api/uninstall-helm-release [post]
 func (c *ApiController) UninstallHelmRelease() {
 	if c.RequireAdmin() {
+		return
+	}
+	if !server.PlatformReady() {
+		c.ResponseError("embedded control plane is not ready")
 		return
 	}
 	cfg := getAdminRestConfig()

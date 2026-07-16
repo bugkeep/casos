@@ -76,6 +76,11 @@ func main() {
 			if err := server.StartControllerManager(ctx, srvCfg); err != nil {
 				logs.Warning("start controller-manager: %v", err)
 			}
+			if err := server.WaitForControlPlaneReady(ctx); err != nil {
+				logs.Warning("embedded control plane is not ready: %v", err)
+				return
+			}
+			server.StartPlatformReadinessMonitor(ctx)
 		case <-ctx.Done():
 		}
 	}()
