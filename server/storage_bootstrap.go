@@ -52,6 +52,12 @@ func ensureDefaultStorageProvisioner(ctx context.Context, client kubernetes.Inte
 	if err := ensureLocalPathServiceAccount(ctx, client); err != nil {
 		return err
 	}
+	if err := ensureLocalPathRole(ctx, client); err != nil {
+		return err
+	}
+	if err := ensureLocalPathRoleBinding(ctx, client); err != nil {
+		return err
+	}
 	if err := ensureLocalPathClusterRole(ctx, client); err != nil {
 		return err
 	}
@@ -90,6 +96,43 @@ func ensureLocalPathServiceAccount(ctx context.Context, client kubernetes.Interf
 	return createOrUpdateServiceAccount(ctx, client, sa)
 }
 
+func ensureLocalPathRole(ctx context.Context, client kubernetes.Interface) error {
+	role := &rbacv1.Role{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "local-path-provisioner-role",
+			Namespace: localPathNamespace,
+			Labels:    localPathLabels(),
+		},
+		Rules: []rbacv1.PolicyRule{{
+			APIGroups: []string{""},
+			Resources: []string{"pods"},
+			Verbs:     []string{"get", "list", "watch", "create", "patch", "update", "delete"},
+		}},
+	}
+	return createOrUpdateRole(ctx, client, role)
+}
+
+func ensureLocalPathRoleBinding(ctx context.Context, client kubernetes.Interface) error {
+	binding := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "local-path-provisioner-bind",
+			Namespace: localPathNamespace,
+			Labels:    localPathLabels(),
+		},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: "rbac.authorization.k8s.io",
+			Kind:     "Role",
+			Name:     "local-path-provisioner-role",
+		},
+		Subjects: []rbacv1.Subject{{
+			Kind:      "ServiceAccount",
+			Name:      "local-path-provisioner-service-account",
+			Namespace: localPathNamespace,
+		}},
+	}
+	return createOrUpdateRoleBinding(ctx, client, binding)
+}
+
 func ensureLocalPathClusterRole(ctx context.Context, client kubernetes.Interface) error {
 	role := &rbacv1.ClusterRole{
 		ObjectMeta: metav1.ObjectMeta{
@@ -100,7 +143,7 @@ func ensureLocalPathClusterRole(ctx context.Context, client kubernetes.Interface
 			{
 				APIGroups: []string{""},
 				Resources: []string{"nodes", "configmaps", "pods", "pods/log"},
-				Verbs:     []string{"get", "list", "watch", "create", "delete"},
+				Verbs:     []string{"get", "list", "watch"},
 			},
 			{
 				APIGroups: []string{""},
@@ -110,7 +153,7 @@ func ensureLocalPathClusterRole(ctx context.Context, client kubernetes.Interface
 			{
 				APIGroups: []string{""},
 				Resources: []string{"persistentvolumes"},
-				Verbs:     []string{"get", "list", "watch", "create", "patch", "delete"},
+				Verbs:     []string{"get", "list", "watch", "create", "patch", "update", "delete"},
 			},
 			{
 				APIGroups: []string{""},
@@ -507,6 +550,61 @@ func createOrUpdateConfigMap(ctx context.Context, client kubernetes.Interface, c
 	cm.ResourceVersion = current.ResourceVersion
 	if _, err := client.CoreV1().ConfigMaps(cm.Namespace).Update(ctx, cm, metav1.UpdateOptions{}); err != nil {
 		return fmt.Errorf("update configmap %s/%s: %w", cm.Namespace, cm.Name, err)
+	}
+	return nil
+}
+
+func createOrUpdateRole(ctx context.Context, client kubernetes.Interface, role *rbacv1.Role) error {
+	roles := client.RbacV1().Roles(role.Namespace)
+	current, err := roles.Get(ctx, role.Name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		if _, err = roles.Create(ctx, role, metav1.CreateOptions{}); err != nil {
+			return fmt.Errorf("create role %s/%s: %w", role.Namespace, role.Name, err)
+		}
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("get role %s/%s: %w", role.Namespace, role.Name, err)
+	}
+	role.Labels = mergeStringMap(current.Labels, role.Labels)
+	role.Annotations = mergeStringMap(current.Annotations, role.Annotations)
+	if equality.Semantic.DeepEqual(current.Labels, role.Labels) &&
+		equality.Semantic.DeepEqual(current.Annotations, role.Annotations) &&
+		equality.Semantic.DeepEqual(current.Rules, role.Rules) {
+		return nil
+	}
+	role.ResourceVersion = current.ResourceVersion
+	if _, err := roles.Update(ctx, role, metav1.UpdateOptions{}); err != nil {
+		return fmt.Errorf("update role %s/%s: %w", role.Namespace, role.Name, err)
+	}
+	return nil
+}
+
+func createOrUpdateRoleBinding(ctx context.Context, client kubernetes.Interface, binding *rbacv1.RoleBinding) error {
+	bindings := client.RbacV1().RoleBindings(binding.Namespace)
+	current, err := bindings.Get(ctx, binding.Name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		if _, err = bindings.Create(ctx, binding, metav1.CreateOptions{}); err != nil {
+			return fmt.Errorf("create rolebinding %s/%s: %w", binding.Namespace, binding.Name, err)
+		}
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("get rolebinding %s/%s: %w", binding.Namespace, binding.Name, err)
+	}
+	if !equality.Semantic.DeepEqual(current.RoleRef, binding.RoleRef) {
+		return fmt.Errorf("rolebinding %s/%s has immutable roleRef %v", binding.Namespace, binding.Name, current.RoleRef)
+	}
+	binding.Labels = mergeStringMap(current.Labels, binding.Labels)
+	binding.Annotations = mergeStringMap(current.Annotations, binding.Annotations)
+	if equality.Semantic.DeepEqual(current.Labels, binding.Labels) &&
+		equality.Semantic.DeepEqual(current.Annotations, binding.Annotations) &&
+		equality.Semantic.DeepEqual(current.Subjects, binding.Subjects) {
+		return nil
+	}
+	binding.ResourceVersion = current.ResourceVersion
+	if _, err := bindings.Update(ctx, binding, metav1.UpdateOptions{}); err != nil {
+		return fmt.Errorf("update rolebinding %s/%s: %w", binding.Namespace, binding.Name, err)
 	}
 	return nil
 }
