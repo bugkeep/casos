@@ -775,6 +775,11 @@ func waitForDNSProbe(ctx context.Context, client kubernetes.Interface, nodeName,
 		_ = client.CoreV1().Pods(namespace).Delete(context.Background(), name, metav1.DeleteOptions{})
 	}
 	cleanup()
+	cleanupCtx, cancelCleanup := context.WithTimeout(ctx, 15*time.Second)
+	defer cancelCleanup()
+	if err := waitForProbePodDeleted(cleanupCtx, client, namespace, name); err != nil {
+		return fmt.Errorf("wait for stale DNS probe Pod deletion: %w", err)
+	}
 	pod := buildDNSProbePod(name, hostname, image)
 	if _, err := client.CoreV1().Pods(namespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
 		cleanup()
@@ -831,6 +836,44 @@ func podFailureReason(pod corev1.Pod) string {
 		return "phase=" + string(pod.Status.Phase)
 	}
 	return strings.Join(parts, "; ")
+}
+
+func waitForProbePodDeleted(ctx context.Context, client kubernetes.Interface, namespace, name string) error {
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		_, err := client.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func waitForProbePVCDeleted(ctx context.Context, client kubernetes.Interface, namespace, name string) error {
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		_, err := client.CoreV1().PersistentVolumeClaims(namespace).Get(ctx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 func coreDNSReadinessReason(ctx context.Context, client kubernetes.Interface, deployment *appsv1.Deployment) string {
@@ -930,6 +973,14 @@ func waitForStorageProbe(ctx context.Context, client kubernetes.Interface, nodeN
 		_ = client.CoreV1().PersistentVolumeClaims(namespace).Delete(context.Background(), name, metav1.DeleteOptions{})
 	}
 	cleanup()
+	cleanupCtx, cancelCleanup := context.WithTimeout(ctx, 15*time.Second)
+	defer cancelCleanup()
+	if err := waitForProbePodDeleted(cleanupCtx, client, namespace, name); err != nil {
+		return fmt.Errorf("wait for stale storage probe Pod deletion: %w", err)
+	}
+	if err := waitForProbePVCDeleted(cleanupCtx, client, namespace, name); err != nil {
+		return fmt.Errorf("wait for stale storage probe PVC deletion: %w", err)
+	}
 	pvc := &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: map[string]string{
 			"app.kubernetes.io/managed-by": "casos",
@@ -1155,6 +1206,11 @@ func waitForSchedulerProbe(ctx context.Context, client kubernetes.Interface, nod
 		_ = client.CoreV1().Pods(namespace).Delete(context.Background(), name, metav1.DeleteOptions{})
 	}
 	cleanup()
+	cleanupCtx, cancelCleanup := context.WithTimeout(ctx, 15*time.Second)
+	defer cancelCleanup()
+	if err := waitForProbePodDeleted(cleanupCtx, client, namespace, name); err != nil {
+		return fmt.Errorf("wait for stale scheduler probe Pod deletion: %w", err)
+	}
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: map[string]string{
 			"app.kubernetes.io/managed-by": "casos",
