@@ -107,6 +107,9 @@ func shouldCheckPodImages(req *admissionv1.AdmissionRequest) bool {
 	if req == nil || req.Resource.Resource != "pods" {
 		return false
 	}
+	if req.SubResource != "" {
+		return false
+	}
 	if req.Operation != admissionv1.Create && req.Operation != admissionv1.Update {
 		return false
 	}
