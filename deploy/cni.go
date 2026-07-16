@@ -2,7 +2,10 @@ package deploy
 
 import "fmt"
 
-const legacyBridgeCNIConfigPath = "/etc/cni/net.d/10-casos-bridge.conflist"
+const (
+	legacyBridgeCNIConfigPath     = "/etc/cni/net.d/10-casos-bridge.conflist"
+	historicalBridgeCNIConfigPath = "/etc/cni/net.d/10-bridge.conflist"
+)
 
 func bridgeCNIConfig(podCIDR string) string {
 	return fmt.Sprintf(`{
@@ -53,5 +56,5 @@ func flannelCNIConfig() string {
 }
 
 func removeLegacyBridgeCNICommand() string {
-	return fmt.Sprintf("rm -f %s", shellSingleQuote(legacyBridgeCNIConfigPath))
+	return fmt.Sprintf("rm -f %s %s", shellSingleQuote(legacyBridgeCNIConfigPath), shellSingleQuote(historicalBridgeCNIConfigPath))
 }

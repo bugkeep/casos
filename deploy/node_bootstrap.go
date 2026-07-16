@@ -121,8 +121,11 @@ func (d *NodeDeployer) Deploy(ctx context.Context, opts NodeDeployOptions) (*Nod
 	if err != nil {
 		return nil, err
 	}
+	if _, err = runner.RunRootContext(ctx, removeLegacyBridgeCNICommand()); err != nil {
+		return nil, fmt.Errorf("clean stale bridge-only CNI config: %w", err)
+	}
 	// Keep kubelet's network readiness independent of Flannel startup. The
-	// Flannel DaemonSet removes this temporary config after installing its CNI.
+	// temporary config is removed after the worker's Flannel Pod is Ready.
 	if err = runner.WriteFileContext(ctx, legacyBridgeCNIConfigPath, bridgeCNIConfig(podCIDR), "0644"); err != nil {
 		return nil, fmt.Errorf("write bootstrap bridge CNI config: %w", err)
 	}
