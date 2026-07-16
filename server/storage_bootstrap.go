@@ -626,11 +626,35 @@ func canonicalPodSpec(spec corev1.PodSpec) managedPodSpec {
 		NodeSelector:       spec.NodeSelector,
 		HostNetwork:        spec.HostNetwork,
 		DNSPolicy:          dnsPolicy,
-		Tolerations:        spec.Tolerations,
+		Tolerations:        canonicalTolerations(spec.Tolerations),
 		InitContainers:     canonicalContainers(spec.InitContainers),
 		Containers:         canonicalContainers(spec.Containers),
 		Volumes:            spec.Volumes,
 	}
+}
+
+// Kubernetes adds these two tolerations through DefaultTolerationSeconds when
+// a Pod is admitted. They are not part of CasOS' managed Pod template, so
+// comparing them would make every bootstrap pass look like a spec change.
+func canonicalTolerations(tolerations []corev1.Toleration) []corev1.Toleration {
+	result := make([]corev1.Toleration, 0, len(tolerations))
+	for _, toleration := range tolerations {
+		if isDefaultNodeConditionToleration(toleration) {
+			continue
+		}
+		result = append(result, toleration)
+	}
+	return result
+}
+
+func isDefaultNodeConditionToleration(toleration corev1.Toleration) bool {
+	if toleration.Operator != corev1.TolerationOpExists ||
+		toleration.Effect != corev1.TaintEffectNoExecute ||
+		toleration.TolerationSeconds == nil || *toleration.TolerationSeconds != 300 {
+		return false
+	}
+	return toleration.Key == "node.kubernetes.io/not-ready" ||
+		toleration.Key == "node.kubernetes.io/unreachable"
 }
 
 func canonicalContainers(containers []corev1.Container) []managedContainer {
