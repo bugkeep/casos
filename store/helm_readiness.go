@@ -16,17 +16,18 @@ import (
 	"k8s.io/client-go/rest"
 )
 
-const helmPostInstallReadinessTimeout = 2 * time.Minute
-
-func waitForHelmReleaseResources(parent context.Context, cfg *rest.Config, releaseName, namespace string) error {
+func waitForHelmReleaseResources(parent context.Context, cfg *rest.Config, releaseName, namespace string, timeout time.Duration) error {
 	if parent == nil {
 		parent = context.Background()
+	}
+	if timeout <= 0 {
+		timeout = helmOperationTimeout
 	}
 	client, err := kubernetes.NewForConfig(cfg)
 	if err != nil {
 		return fmt.Errorf("create Helm readiness client: %w", err)
 	}
-	ctx, cancel := context.WithTimeout(parent, helmPostInstallReadinessTimeout)
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()

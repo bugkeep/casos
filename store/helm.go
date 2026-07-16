@@ -1221,7 +1221,7 @@ func InstallHelmChart(cfg *rest.Config, releaseName, namespace, chartName, repoU
 	if err != nil {
 		return withHelmReleaseDiagnostics(context.Background(), cfg, releaseName, namespace, err)
 	}
-	if err := waitForHelmReleaseResources(context.Background(), cfg, releaseName, namespace); err != nil {
+	if err := waitForHelmReleaseResources(context.Background(), cfg, releaseName, namespace, helmInstallTimeout); err != nil {
 		return withHelmReleaseDiagnostics(context.Background(), cfg, releaseName, namespace, err)
 	}
 	return nil
@@ -1307,7 +1307,7 @@ func InstallHelmChartStream(owner string, ctx context.Context, cfg *rest.Config,
 			_ = object.FinishHelmOperationTask(task.Id, false, err.Error())
 			return
 		}
-		if err := waitForHelmReleaseResources(installCtx, cfg, releaseName, namespace); err != nil {
+		if err := waitForHelmReleaseResources(installCtx, cfg, releaseName, namespace, helmInstallTimeout); err != nil {
 			for _, line := range helmReleaseDiagnostics(installCtx, cfg, releaseName, namespace) {
 				send(line)
 			}
@@ -1359,7 +1359,7 @@ func UpgradeHelmRelease(cfg *rest.Config, releaseName, namespace, chartName, rep
 	if err != nil {
 		return withHelmReleaseDiagnostics(context.Background(), cfg, releaseName, namespace, err)
 	}
-	if err := waitForHelmReleaseResources(context.Background(), cfg, releaseName, namespace); err != nil {
+	if err := waitForHelmReleaseResources(context.Background(), cfg, releaseName, namespace, helmOperationTimeout); err != nil {
 		return withHelmReleaseDiagnostics(context.Background(), cfg, releaseName, namespace, err)
 	}
 	return nil
@@ -1377,7 +1377,7 @@ func RollbackHelmRelease(cfg *rest.Config, releaseName, namespace string, revisi
 	if err := rollback.Run(releaseName); err != nil {
 		return withHelmReleaseDiagnostics(context.Background(), cfg, releaseName, namespace, err)
 	}
-	if err := waitForHelmReleaseResources(context.Background(), cfg, releaseName, namespace); err != nil {
+	if err := waitForHelmReleaseResources(context.Background(), cfg, releaseName, namespace, helmOperationTimeout); err != nil {
 		return withHelmReleaseDiagnostics(context.Background(), cfg, releaseName, namespace, err)
 	}
 	return nil
