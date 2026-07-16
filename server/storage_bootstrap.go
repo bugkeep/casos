@@ -309,7 +309,6 @@ func ensureLocalPathDeployment(ctx context.Context, client kubernetes.Interface,
 					Tolerations: []corev1.Toleration{
 						{Key: "node-role.kubernetes.io/control-plane", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule},
 						{Key: "node-role.kubernetes.io/master", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule},
-						{Key: "casos.io/bootstrap", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule},
 					},
 					Containers: []corev1.Container{
 						{

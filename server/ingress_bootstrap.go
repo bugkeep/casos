@@ -222,7 +222,6 @@ func buildIngressControllerDeployment(cfg Config) *appsv1.Deployment {
 						{Key: "CriticalAddonsOnly", Operator: corev1.TolerationOpExists},
 						{Key: "node-role.kubernetes.io/control-plane", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule},
 						{Key: "node-role.kubernetes.io/master", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule},
-						{Key: "casos.io/bootstrap", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule},
 					},
 					Containers: []corev1.Container{{
 						Name:            ingressControllerName,
