@@ -1,0 +1,321 @@
+package server
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net"
+	"reflect"
+	"time"
+
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+
+	"github.com/sirupsen/logrus"
+)
+
+const (
+	serviceLBManagedIPsAnnotation = "casos.io/service-lb-managed-ips"
+	serviceLBDisabledAnnotation   = "casos.io/service-lb-disabled"
+	workerBootstrapTaintKey       = "casos.io/bootstrap"
+)
+
+// StartServiceLB starts the built-in bare-metal LoadBalancer reconciler. It
+// publishes Ready Worker addresses and uses Service externalIPs so kube-proxy
+// can route LoadBalancer traffic without a cloud provider.
+func StartServiceLB(ctx context.Context, cfg *rest.Config) error {
+	if cfg == nil {
+		return fmt.Errorf("apiserver rest config is required")
+	}
+	client, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return fmt.Errorf("service load balancer client: %w", err)
+	}
+	return startServiceLBWithClient(ctx, client)
+}
+
+func startServiceLBWithClient(ctx context.Context, client kubernetes.Interface) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := reconcileServiceLB(ctx, client); err != nil {
+		logrus.Warnf("initial service load balancer reconciliation failed; retrying: %v", err)
+	}
+	go runServiceLB(ctx, client)
+	return nil
+}
+
+func runServiceLB(ctx context.Context, client kubernetes.Interface) {
+	if err := reconcileServiceLB(ctx, client); err != nil && ctx.Err() == nil {
+		logrus.Warnf("service load balancer reconciliation failed: %v", err)
+	}
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for {
+		if err := reconcileServiceLB(ctx, client); err != nil && ctx.Err() == nil {
+			logrus.Warnf("service load balancer reconciliation failed: %v", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func reconcileServiceLB(ctx context.Context, client kubernetes.Interface) error {
+	nodes, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("list nodes: %w", err)
+	}
+	services, err := client.CoreV1().Services(metav1.NamespaceAll).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("list LoadBalancer services: %w", err)
+	}
+	for i := range services.Items {
+		service := &services.Items[i]
+		if service.Spec.Type != corev1.ServiceTypeLoadBalancer || service.Annotations[serviceLBDisabledAnnotation] == "true" {
+			continue
+		}
+		nodeIPs, err := serviceLBNodeIPs(ctx, client, service, nodes.Items)
+		if err != nil {
+			logrus.Warnf("select LoadBalancer nodes for %s/%s failed: %v", service.Namespace, service.Name, err)
+			continue
+		}
+		if err := reconcileLoadBalancerService(ctx, client, service, nodeIPs); err != nil {
+			logrus.Warnf("reconcile LoadBalancer service %s/%s failed: %v", service.Namespace, service.Name, err)
+		}
+	}
+	return nil
+}
+
+func readyWorkerIPs(nodes []corev1.Node) []string {
+	result := make([]string, 0)
+	for _, node := range readyServiceLBNodes(nodes) {
+		result = append(result, node.ips...)
+	}
+	return uniqueStrings(result)
+}
+
+type serviceLBNode struct {
+	name string
+	ips  []string
+}
+
+func readyServiceLBNodes(nodes []corev1.Node) []serviceLBNode {
+	workerNodes := readyNodeAddresses(nodes, false)
+	if len(workerNodes) > 0 {
+		return workerNodes
+	}
+	return readyNodeAddresses(nodes, true)
+}
+
+func readyNodeAddresses(nodes []corev1.Node, controlPlaneOnly bool) []serviceLBNode {
+	seen := map[string]struct{}{}
+	result := make([]serviceLBNode, 0)
+	for _, node := range nodes {
+		if !isReadyWorkerNode(node) || (controlPlaneOnly != isControlPlaneNode(node)) {
+			continue
+		}
+		if !controlPlaneOnly && hasNodeTaint(node, workerBootstrapTaintKey, corev1.TaintEffectNoSchedule) {
+			continue
+		}
+		addresses := make([]string, 0)
+		for _, address := range node.Status.Addresses {
+			if address.Type != corev1.NodeExternalIP && address.Type != corev1.NodeInternalIP {
+				continue
+			}
+			ip := net.ParseIP(address.Address)
+			if ip == nil {
+				continue
+			}
+			value := ip.String()
+			if _, ok := seen[value]; ok {
+				continue
+			}
+			seen[value] = struct{}{}
+			addresses = append(addresses, value)
+		}
+		if len(addresses) > 0 {
+			result = append(result, serviceLBNode{name: node.Name, ips: addresses})
+		}
+	}
+	return result
+}
+
+func hasNodeTaint(node corev1.Node, key string, effect corev1.TaintEffect) bool {
+	for _, taint := range node.Spec.Taints {
+		if taint.Key == key && (effect == "" || taint.Effect == effect) {
+			return true
+		}
+	}
+	return false
+}
+
+func serviceLBNodeIPs(ctx context.Context, client kubernetes.Interface, service *corev1.Service, nodes []corev1.Node) ([]string, error) {
+	candidates := readyServiceLBNodes(nodes)
+	if service.Spec.ExternalTrafficPolicy != corev1.ServiceExternalTrafficPolicyTypeLocal {
+		ready, err := serviceHasReadyEndpoint(ctx, client, service)
+		if err != nil {
+			return nil, err
+		}
+		if !ready {
+			return []string{}, nil
+		}
+		ips := make([]string, 0)
+		for _, node := range candidates {
+			ips = append(ips, node.ips...)
+		}
+		return uniqueStrings(ips), nil
+	}
+	candidates = readyNodeAddresses(nodes, false)
+	candidates = append(candidates, readyNodeAddresses(nodes, true)...)
+
+	endpointSlices, err := client.DiscoveryV1().EndpointSlices(service.Namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: "kubernetes.io/service-name=" + service.Name,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list EndpointSlices: %w", err)
+	}
+	localNodes := map[string]struct{}{}
+	for _, endpointSlice := range endpointSlices.Items {
+		for _, endpoint := range endpointSlice.Endpoints {
+			if endpoint.NodeName == nil || (endpoint.Conditions.Ready != nil && !*endpoint.Conditions.Ready) {
+				continue
+			}
+			localNodes[*endpoint.NodeName] = struct{}{}
+		}
+	}
+	ips := make([]string, 0)
+	for _, node := range candidates {
+		if _, ok := localNodes[node.name]; !ok {
+			continue
+		}
+		ips = append(ips, node.ips...)
+	}
+	return uniqueStrings(ips), nil
+}
+
+func serviceHasReadyEndpoint(ctx context.Context, client kubernetes.Interface, service *corev1.Service) (bool, error) {
+	endpointSlices, err := client.DiscoveryV1().EndpointSlices(service.Namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: "kubernetes.io/service-name=" + service.Name,
+	})
+	if err != nil {
+		return false, fmt.Errorf("list EndpointSlices: %w", err)
+	}
+	for _, endpointSlice := range endpointSlices.Items {
+		for _, endpoint := range endpointSlice.Endpoints {
+			if endpoint.Conditions.Ready == nil || *endpoint.Conditions.Ready {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+func isReadyWorkerNode(node corev1.Node) bool {
+	for _, condition := range node.Status.Conditions {
+		if condition.Type == corev1.NodeReady {
+			return condition.Status == corev1.ConditionTrue
+		}
+	}
+	return false
+}
+
+func isControlPlaneNode(node corev1.Node) bool {
+	_, controlPlane := node.Labels["node-role.kubernetes.io/control-plane"]
+	_, master := node.Labels["node-role.kubernetes.io/master"]
+	return controlPlane || master
+}
+
+func reconcileLoadBalancerService(ctx context.Context, client kubernetes.Interface, service *corev1.Service, nodeIPs []string) error {
+	managedIPs, err := serviceLBManagedIPs(service.Annotations)
+	if err != nil {
+		return err
+	}
+	managedSet := make(map[string]struct{}, len(managedIPs))
+	for _, ip := range managedIPs {
+		managedSet[ip] = struct{}{}
+	}
+	userIPs := make([]string, 0, len(service.Spec.ExternalIPs))
+	for _, ip := range service.Spec.ExternalIPs {
+		if _, ok := managedSet[ip]; !ok && !containsString(userIPs, ip) {
+			userIPs = append(userIPs, ip)
+		}
+	}
+	desiredManagedIPs := make([]string, 0, len(nodeIPs))
+	for _, ip := range nodeIPs {
+		if !containsString(userIPs, ip) {
+			desiredManagedIPs = append(desiredManagedIPs, ip)
+		}
+	}
+	desiredExternalIPs := append(append([]string{}, userIPs...), nodeIPs...)
+	desiredExternalIPs = uniqueStrings(desiredExternalIPs)
+	encodedManagedIPs, err := json.Marshal(desiredManagedIPs)
+	if err != nil {
+		return fmt.Errorf("encode managed LoadBalancer IPs: %w", err)
+	}
+	desiredAnnotation := string(encodedManagedIPs)
+
+	updated := service.DeepCopy()
+	if !reflect.DeepEqual(updated.Spec.ExternalIPs, desiredExternalIPs) || updated.Annotations[serviceLBManagedIPsAnnotation] != desiredAnnotation {
+		if updated.Annotations == nil {
+			updated.Annotations = map[string]string{}
+		}
+		updated.Spec.ExternalIPs = desiredExternalIPs
+		updated.Annotations[serviceLBManagedIPsAnnotation] = desiredAnnotation
+		current, err := client.CoreV1().Services(service.Namespace).Update(ctx, updated, metav1.UpdateOptions{})
+		if err != nil {
+			return fmt.Errorf("update LoadBalancer service spec: %w", err)
+		}
+		updated = current
+	}
+
+	desiredStatus := updated.Status.DeepCopy()
+	desiredStatus.LoadBalancer.Ingress = make([]corev1.LoadBalancerIngress, 0, len(nodeIPs))
+	for _, ip := range nodeIPs {
+		desiredStatus.LoadBalancer.Ingress = append(desiredStatus.LoadBalancer.Ingress, corev1.LoadBalancerIngress{IP: ip})
+	}
+	if reflect.DeepEqual(updated.Status, *desiredStatus) {
+		return nil
+	}
+	updated.Status = *desiredStatus
+	if _, err := client.CoreV1().Services(service.Namespace).UpdateStatus(ctx, updated, metav1.UpdateOptions{}); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("update LoadBalancer service status: %w", err)
+	}
+	return nil
+}
+
+func serviceLBManagedIPs(annotations map[string]string) ([]string, error) {
+	value := annotations[serviceLBManagedIPsAnnotation]
+	if value == "" {
+		return nil, nil
+	}
+	var ips []string
+	if err := json.Unmarshal([]byte(value), &ips); err != nil {
+		return nil, fmt.Errorf("decode managed LoadBalancer IPs: %w", err)
+	}
+	return uniqueStrings(ips), nil
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func uniqueStrings(values []string) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if value != "" && !containsString(result, value) {
+			result = append(result, value)
+		}
+	}
+	return result
+}

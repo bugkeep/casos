@@ -13,16 +13,17 @@ func (d *NodeDeployer) startKubelet(ctx context.Context, runner *NodeDeploySSHRu
 	return nil
 }
 
-func kubeletConfig() string {
+func kubeletConfig(clusterDNS string) string {
 	return fmt.Sprintf(`apiVersion: kubelet.config.k8s.io/v1beta1
 kind: KubeletConfiguration
 cgroupDriver: systemd
 failSwapOn: false
 containerRuntimeEndpoint: unix:///run/containerd/containerd.sock
+resolvConf: /etc/casos-resolv.conf
 clusterDNS:
   - %s
 clusterDomain: cluster.local
-`, nodeDeployClusterDNS)
+`, clusterDNS)
 }
 
 func kubeletService(nodeName string) string {

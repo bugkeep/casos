@@ -152,14 +152,23 @@ class DeploymentListPage extends React.Component {
   getAccessUrls(deploy) {
     const {services, ingresses, nodeIP} = this.state;
     const urls = [];
+    const ingressService = services.find(s =>
+      s.namespace === "kube-system" && s.name === "traefik" && s.type === "LoadBalancer"
+    );
+    const ingressAddresses = ingressService?.loadBalancerIPs ?? [];
 
-    if (nodeIP) {
-      const svc = services.find(s => s.name === deploy.name && s.namespace === deploy.namespace && s.type === "NodePort");
-      if (svc) {
-        (svc.ports ?? []).filter(p => p.nodePort).forEach(p => {
-          urls.push({url: `http://${nodeIP}:${p.nodePort}`, type: "nodeport"});
-        });
-      }
+    const svc = services.find(s => s.name === deploy.name && s.namespace === deploy.namespace && (s.type === "NodePort" || s.type === "LoadBalancer"));
+    if (svc) {
+      const addresses = svc.type === "LoadBalancer"
+        ? (svc.loadBalancerIPs ?? [])
+        : (nodeIP ? [nodeIP] : []);
+      const ports = svc.type === "LoadBalancer"
+        ? (svc.ports ?? []).filter(p => p.port)
+        : (svc.ports ?? []).filter(p => p.nodePort);
+      addresses.forEach(address => ports.forEach(p => {
+        const port = svc.type === "LoadBalancer" ? p.port : p.nodePort;
+        urls.push({url: `http://${address}:${port}`, type: svc.type === "LoadBalancer" ? "loadbalancer" : "nodeport"});
+      }));
     }
 
     const deployServiceNames = new Set(
@@ -173,9 +182,16 @@ class DeploymentListPage extends React.Component {
       .filter(ing => ing.namespace === deploy.namespace)
       .forEach(ing => {
         (ing.rules ?? []).forEach(rule => {
-          if (deployServiceNames.has(rule.serviceName) && rule.host) {
-            const path = rule.path && rule.path !== "/" ? rule.path : "";
+          if (!deployServiceNames.has(rule.serviceName)) {
+            return;
+          }
+          const path = rule.path && rule.path !== "/" ? rule.path : "";
+          if (rule.host) {
             urls.push({url: `http://${rule.host}${path}`, type: "domain"});
+          } else {
+            ingressAddresses.forEach(address => {
+              urls.push({url: `http://${address}${path}`, type: "ingress"});
+            });
           }
         });
       });

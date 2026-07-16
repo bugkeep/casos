@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/beego/beego/logs"
 	"github.com/casosorg/casos/object"
@@ -30,12 +31,17 @@ func admissionValidateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	req := review.Request
-	allowed, err := object.EnforceAdmissionPolicy(
-		req.UserInfo.Username,
-		req.Namespace,
-		req.Resource.Resource,
-		string(req.Operation),
-	)
+	platformRequest := isPlatformPodRequest(req)
+	controllerPodRequest := isWorkloadControllerPodRequest(req)
+	allowed, err := true, error(nil)
+	if !platformRequest && !controllerPodRequest {
+		allowed, err = object.EnforceAdmissionPolicy(
+			req.UserInfo.Username,
+			req.Namespace,
+			req.Resource.Resource,
+			string(req.Operation),
+		)
+	}
 
 	resp := &admissionv1.AdmissionReview{
 		TypeMeta: metav1.TypeMeta{APIVersion: "admission.k8s.io/v1", Kind: "AdmissionReview"},
@@ -56,7 +62,7 @@ func admissionValidateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Image vulnerability check: only for Pod-creating operations.
-	if req.Resource.Resource == "pods" && (req.Operation == admissionv1.Create || req.Operation == admissionv1.Update) {
+	if shouldCheckPodImages(req) {
 		if denyMsg := checkPodImages(req.Object.Raw); denyMsg != "" {
 			resp.Response.Allowed = false
 			resp.Response.Result = &metav1.Status{Message: denyMsg}
@@ -66,6 +72,68 @@ func admissionValidateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeAdmissionResponse(w, resp)
+}
+
+// Platform components must be able to restart and scale even when an image's
+// cached Trivy result is stale or critical. Application namespaces remain
+// subject to the normal image admission policy.
+func isPlatformNamespace(namespace string) bool {
+	switch namespace {
+	case "kube-system", "kube-flannel", "local-path-storage":
+		return true
+	default:
+		return false
+	}
+}
+
+func isPlatformPodRequest(req *admissionv1.AdmissionRequest) bool {
+	if req == nil || req.Resource.Resource != "pods" {
+		return false
+	}
+	if req.Operation != admissionv1.Create && req.Operation != admissionv1.Update {
+		return false
+	}
+	if !isPlatformNamespace(req.Namespace) {
+		return false
+	}
+	var pod corev1.Pod
+	if err := json.Unmarshal(req.Object.Raw, &pod); err != nil {
+		return false
+	}
+	return pod.Labels["app.kubernetes.io/managed-by"] == "casos"
+}
+
+func shouldCheckPodImages(req *admissionv1.AdmissionRequest) bool {
+	if req == nil || req.Resource.Resource != "pods" {
+		return false
+	}
+	if req.Operation != admissionv1.Create && req.Operation != admissionv1.Update {
+		return false
+	}
+	return !isPlatformPodRequest(req)
+}
+
+func isWorkloadControllerPodRequest(req *admissionv1.AdmissionRequest) bool {
+	if req == nil || req.Resource.Resource != "pods" {
+		return false
+	}
+	if req.Operation != admissionv1.Create && req.Operation != admissionv1.Update {
+		return false
+	}
+	return isWorkloadControllerUser(req.UserInfo.Username)
+}
+
+func isWorkloadControllerUser(username string) bool {
+	const serviceAccountPrefix = "system:serviceaccount:kube-system:"
+	if !strings.HasPrefix(username, serviceAccountPrefix) {
+		return username == "system:kube-controller-manager"
+	}
+	switch strings.TrimPrefix(username, serviceAccountPrefix) {
+	case "replicaset-controller", "replication-controller", "statefulset-controller", "daemon-set-controller", "job-controller", "cronjob-controller", "deployment-controller":
+		return true
+	default:
+		return false
+	}
 }
 
 // checkPodImages extracts images from the Pod spec, checks Trivy cache, and

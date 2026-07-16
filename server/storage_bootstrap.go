@@ -13,6 +13,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	storagev1 "k8s.io/api/storage/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -99,7 +100,7 @@ func ensureLocalPathClusterRole(ctx context.Context, client kubernetes.Interface
 			{
 				APIGroups: []string{""},
 				Resources: []string{"nodes", "configmaps", "pods", "pods/log"},
-				Verbs:     []string{"get", "list", "watch"},
+				Verbs:     []string{"get", "list", "watch", "create", "delete"},
 			},
 			{
 				APIGroups: []string{""},
@@ -169,10 +170,16 @@ func localPathConfigData(rootDir, helperImage string) (map[string]string, error)
 kind: Pod
 metadata:
   name: helper-pod
+  labels:
+    app.kubernetes.io/name: local-path-helper
+    app.kubernetes.io/managed-by: casos
 spec:
   restartPolicy: Never
   automountServiceAccountToken: false
   tolerations:
+    - key: casos.io/bootstrap
+      operator: Exists
+      effect: NoSchedule
     - key: node.kubernetes.io/disk-pressure
       operator: Exists
       effect: NoSchedule
@@ -259,6 +266,7 @@ func ensureLocalPathDeployment(ctx context.Context, client kubernetes.Interface,
 					Tolerations: []corev1.Toleration{
 						{Key: "node-role.kubernetes.io/control-plane", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule},
 						{Key: "node-role.kubernetes.io/master", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule},
+						{Key: "casos.io/bootstrap", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule},
 					},
 					Containers: []corev1.Container{
 						{
@@ -408,6 +416,13 @@ func createOrUpdateServiceAccount(ctx context.Context, client kubernetes.Interfa
 	sa.Secrets = current.Secrets
 	sa.ImagePullSecrets = current.ImagePullSecrets
 	sa.AutomountServiceAccountToken = current.AutomountServiceAccountToken
+	if equality.Semantic.DeepEqual(current.Labels, sa.Labels) &&
+		equality.Semantic.DeepEqual(current.Annotations, sa.Annotations) &&
+		equality.Semantic.DeepEqual(current.Secrets, sa.Secrets) &&
+		equality.Semantic.DeepEqual(current.ImagePullSecrets, sa.ImagePullSecrets) &&
+		equality.Semantic.DeepEqual(current.AutomountServiceAccountToken, sa.AutomountServiceAccountToken) {
+		return nil
+	}
 	sa.ResourceVersion = current.ResourceVersion
 	if _, err := client.CoreV1().ServiceAccounts(sa.Namespace).Update(ctx, sa, metav1.UpdateOptions{}); err != nil {
 		return fmt.Errorf("update serviceaccount %s/%s: %w", sa.Namespace, sa.Name, err)
@@ -429,6 +444,11 @@ func createOrUpdateClusterRole(ctx context.Context, client kubernetes.Interface,
 	}
 	role.Labels = mergeStringMap(current.Labels, role.Labels)
 	role.Annotations = mergeStringMap(current.Annotations, role.Annotations)
+	if equality.Semantic.DeepEqual(current.Labels, role.Labels) &&
+		equality.Semantic.DeepEqual(current.Annotations, role.Annotations) &&
+		equality.Semantic.DeepEqual(current.Rules, role.Rules) {
+		return nil
+	}
 	role.ResourceVersion = current.ResourceVersion
 	if _, err := client.RbacV1().ClusterRoles().Update(ctx, role, metav1.UpdateOptions{}); err != nil {
 		return fmt.Errorf("update clusterrole %s: %w", role.Name, err)
@@ -450,6 +470,12 @@ func createOrUpdateClusterRoleBinding(ctx context.Context, client kubernetes.Int
 	}
 	binding.Labels = mergeStringMap(current.Labels, binding.Labels)
 	binding.Annotations = mergeStringMap(current.Annotations, binding.Annotations)
+	if equality.Semantic.DeepEqual(current.Labels, binding.Labels) &&
+		equality.Semantic.DeepEqual(current.Annotations, binding.Annotations) &&
+		equality.Semantic.DeepEqual(current.RoleRef, binding.RoleRef) &&
+		equality.Semantic.DeepEqual(current.Subjects, binding.Subjects) {
+		return nil
+	}
 	binding.ResourceVersion = current.ResourceVersion
 	if _, err := client.RbacV1().ClusterRoleBindings().Update(ctx, binding, metav1.UpdateOptions{}); err != nil {
 		return fmt.Errorf("update clusterrolebinding %s: %w", binding.Name, err)
@@ -471,6 +497,13 @@ func createOrUpdateConfigMap(ctx context.Context, client kubernetes.Interface, c
 	}
 	cm.Labels = mergeStringMap(current.Labels, cm.Labels)
 	cm.Annotations = mergeStringMap(current.Annotations, cm.Annotations)
+	if equality.Semantic.DeepEqual(current.Labels, cm.Labels) &&
+		equality.Semantic.DeepEqual(current.Annotations, cm.Annotations) &&
+		equality.Semantic.DeepEqual(current.Data, cm.Data) &&
+		equality.Semantic.DeepEqual(current.BinaryData, cm.BinaryData) &&
+		equality.Semantic.DeepEqual(current.Immutable, cm.Immutable) {
+		return nil
+	}
 	cm.ResourceVersion = current.ResourceVersion
 	if _, err := client.CoreV1().ConfigMaps(cm.Namespace).Update(ctx, cm, metav1.UpdateOptions{}); err != nil {
 		return fmt.Errorf("update configmap %s/%s: %w", cm.Namespace, cm.Name, err)
@@ -492,11 +525,135 @@ func createOrUpdateDeployment(ctx context.Context, client kubernetes.Interface, 
 	}
 	deployment.Labels = mergeStringMap(current.Labels, deployment.Labels)
 	deployment.Annotations = mergeStringMap(current.Annotations, deployment.Annotations)
+	if equality.Semantic.DeepEqual(current.Labels, deployment.Labels) &&
+		equality.Semantic.DeepEqual(current.Annotations, deployment.Annotations) &&
+		deploymentSpecsEqual(current, deployment) {
+		return nil
+	}
 	deployment.ResourceVersion = current.ResourceVersion
 	if _, err := client.AppsV1().Deployments(deployment.Namespace).Update(ctx, deployment, metav1.UpdateOptions{}); err != nil {
 		return fmt.Errorf("update deployment %s/%s: %w", deployment.Namespace, deployment.Name, err)
 	}
 	return nil
+}
+
+func deploymentSpecsEqual(current, desired *appsv1.Deployment) bool {
+	if current == nil || desired == nil {
+		return current == desired
+	}
+	return equality.Semantic.DeepEqual(canonicalDeploymentSpec(current.Spec), canonicalDeploymentSpec(desired.Spec))
+}
+
+type managedDeploymentSpec struct {
+	Replicas            int32
+	Selector            *metav1.LabelSelector
+	StrategyType        appsv1.DeploymentStrategyType
+	TemplateLabels      map[string]string
+	TemplateAnnotations map[string]string
+	Pod                 managedPodSpec
+}
+
+type managedDaemonSetSpec struct {
+	Selector            *metav1.LabelSelector
+	TemplateLabels      map[string]string
+	TemplateAnnotations map[string]string
+	Pod                 managedPodSpec
+}
+
+type managedPodSpec struct {
+	ServiceAccountName string
+	NodeSelector       map[string]string
+	HostNetwork        bool
+	DNSPolicy          corev1.DNSPolicy
+	Tolerations        []corev1.Toleration
+	InitContainers     []managedContainer
+	Containers         []managedContainer
+	Volumes            []corev1.Volume
+}
+
+type managedContainer struct {
+	Name             string
+	Image            string
+	ImagePullPolicy  corev1.PullPolicy
+	Command          []string
+	Args             []string
+	Env              []corev1.EnvVar
+	Ports            []corev1.ContainerPort
+	Resources        corev1.ResourceRequirements
+	SecurityContext  *corev1.SecurityContext
+	VolumeMounts     []corev1.VolumeMount
+	ReadinessProbe   *corev1.Probe
+	LivenessProbe    *corev1.Probe
+	StartupProbe     *corev1.Probe
+	WorkingDirectory string
+}
+
+func canonicalDeploymentSpec(spec appsv1.DeploymentSpec) managedDeploymentSpec {
+	replicas := int32(1)
+	if spec.Replicas != nil {
+		replicas = *spec.Replicas
+	}
+	strategyType := spec.Strategy.Type
+	if strategyType == "" {
+		strategyType = appsv1.RollingUpdateDeploymentStrategyType
+	}
+	return managedDeploymentSpec{
+		Replicas:            replicas,
+		Selector:            spec.Selector,
+		StrategyType:        strategyType,
+		TemplateLabels:      spec.Template.Labels,
+		TemplateAnnotations: spec.Template.Annotations,
+		Pod:                 canonicalPodSpec(spec.Template.Spec),
+	}
+}
+
+func canonicalDaemonSetSpec(spec appsv1.DaemonSetSpec) managedDaemonSetSpec {
+	return managedDaemonSetSpec{
+		Selector:            spec.Selector,
+		TemplateLabels:      spec.Template.Labels,
+		TemplateAnnotations: spec.Template.Annotations,
+		Pod:                 canonicalPodSpec(spec.Template.Spec),
+	}
+}
+
+func canonicalPodSpec(spec corev1.PodSpec) managedPodSpec {
+	dnsPolicy := spec.DNSPolicy
+	if dnsPolicy == "" {
+		dnsPolicy = corev1.DNSClusterFirst
+	}
+	return managedPodSpec{
+		ServiceAccountName: spec.ServiceAccountName,
+		NodeSelector:       spec.NodeSelector,
+		HostNetwork:        spec.HostNetwork,
+		DNSPolicy:          dnsPolicy,
+		Tolerations:        spec.Tolerations,
+		InitContainers:     canonicalContainers(spec.InitContainers),
+		Containers:         canonicalContainers(spec.Containers),
+		Volumes:            spec.Volumes,
+	}
+}
+
+func canonicalContainers(containers []corev1.Container) []managedContainer {
+	result := make([]managedContainer, 0, len(containers))
+	for _, container := range containers {
+		result = append(result, managedContainer{
+			Name:             container.Name,
+			Image:            container.Image,
+			ImagePullPolicy:  container.ImagePullPolicy,
+			Command:          container.Command,
+			Args:             container.Args,
+			Env:              container.Env,
+			Ports:            container.Ports,
+			Resources:        container.Resources,
+			SecurityContext:  container.SecurityContext,
+			VolumeMounts:     container.VolumeMounts,
+			ReadinessProbe:   container.ReadinessProbe,
+			LivenessProbe:    container.LivenessProbe,
+			StartupProbe:     container.StartupProbe,
+			WorkingDirectory: container.WorkingDir,
+		})
+	}
+	return result
 }
 
 func reconcileLocalPathDeployment(ctx context.Context, client kubernetes.Interface, deployment *appsv1.Deployment) error {
@@ -523,17 +680,21 @@ func reconcileLocalPathDeployment(ctx context.Context, client kubernetes.Interfa
 		updated := current.DeepCopy()
 		updated.Labels = mergeStringMap(updated.Labels, deployment.Labels)
 		updated.Annotations = mergeStringMap(updated.Annotations, deployment.Annotations)
+		if equality.Semantic.DeepEqual(current.Labels, updated.Labels) && equality.Semantic.DeepEqual(current.Annotations, updated.Annotations) {
+			return nil
+		}
 		if _, err := client.AppsV1().Deployments(updated.Namespace).Update(ctx, updated, metav1.UpdateOptions{}); err != nil {
 			return fmt.Errorf("patch deployment %s/%s metadata: %w", deployment.Namespace, deployment.Name, err)
 		}
 		return nil
 	}
 
-	currentHash, err := hashLocalPathDeploymentSpec(current.Spec)
-	if err != nil {
-		return fmt.Errorf("hash current deployment %s/%s spec: %w", deployment.Namespace, deployment.Name, err)
-	}
-	if currentHash == desiredHash && current.Annotations[localPathManagedSpecHashAnnotation] == desiredHash {
+	desiredLabels := mergeStringMap(current.Labels, deployment.Labels)
+	desiredAnnotations := mergeStringMap(current.Annotations, deployment.Annotations)
+	if current.Annotations[localPathManagedSpecHashAnnotation] == desiredHash &&
+		equality.Semantic.DeepEqual(current.Labels, desiredLabels) &&
+		equality.Semantic.DeepEqual(current.Annotations, desiredAnnotations) &&
+		deploymentSpecsEqual(current, deployment) {
 		return nil
 	}
 
@@ -541,8 +702,8 @@ func reconcileLocalPathDeployment(ctx context.Context, client kubernetes.Interfa
 		localPathManagedSpecHashAnnotation: desiredHash,
 	})
 	deployment.ResourceVersion = current.ResourceVersion
-	deployment.Labels = mergeStringMap(current.Labels, deployment.Labels)
-	deployment.Annotations = mergeStringMap(current.Annotations, deployment.Annotations)
+	deployment.Labels = desiredLabels
+	deployment.Annotations = desiredAnnotations
 	if _, err := client.AppsV1().Deployments(deployment.Namespace).Update(ctx, deployment, metav1.UpdateOptions{}); err != nil {
 		return fmt.Errorf("update deployment %s/%s: %w", deployment.Namespace, deployment.Name, err)
 	}
@@ -550,30 +711,7 @@ func reconcileLocalPathDeployment(ctx context.Context, client kubernetes.Interfa
 }
 
 func hashLocalPathDeploymentSpec(spec appsv1.DeploymentSpec) (string, error) {
-	managed := struct {
-		Replicas *int32
-		Selector *metav1.LabelSelector
-		Template struct {
-			Labels      map[string]string
-			Annotations map[string]string
-			Spec        struct {
-				ServiceAccountName string
-				Tolerations        []corev1.Toleration
-				Containers         []corev1.Container
-				Volumes            []corev1.Volume
-			}
-		}
-	}{
-		Replicas: spec.Replicas,
-		Selector: spec.Selector,
-	}
-	managed.Template.Labels = spec.Template.Labels
-	managed.Template.Annotations = spec.Template.Annotations
-	managed.Template.Spec.ServiceAccountName = spec.Template.Spec.ServiceAccountName
-	managed.Template.Spec.Tolerations = spec.Template.Spec.Tolerations
-	managed.Template.Spec.Containers = spec.Template.Spec.Containers
-	managed.Template.Spec.Volumes = spec.Template.Spec.Volumes
-	return hashJSON(managed)
+	return hashJSON(canonicalDeploymentSpec(spec))
 }
 
 func createOrPatchStorageClassDefaultAnnotations(ctx context.Context, client kubernetes.Interface, class *storagev1.StorageClass) error {
@@ -602,6 +740,9 @@ func createOrPatchStorageClassDefaultAnnotations(ctx context.Context, client kub
 	} else {
 		delete(copied.Annotations, "storageclass.kubernetes.io/is-default-class")
 		delete(copied.Annotations, "storageclass.beta.kubernetes.io/is-default-class")
+	}
+	if equality.Semantic.DeepEqual(current.Annotations, copied.Annotations) {
+		return nil
 	}
 	if _, err := client.StorageV1().StorageClasses().Update(ctx, copied, metav1.UpdateOptions{}); err != nil {
 		return fmt.Errorf("update storageclass %s: %w", class.Name, err)

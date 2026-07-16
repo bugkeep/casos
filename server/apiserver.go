@@ -5,22 +5,88 @@ import (
 	"crypto/tls"
 	"database/sql"
 	"fmt"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/casosorg/casos/util"
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/k3s-io/kine/pkg/drivers/generic"
 	"github.com/k3s-io/kine/pkg/endpoint"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
+	"go.etcd.io/etcd/server/v3/embed"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
 
 	globalflag "k8s.io/component-base/cli/globalflag"
 	"k8s.io/component-base/logs"
 	apiserverapp "k8s.io/kubernetes/cmd/kube-apiserver/app"
 	"k8s.io/kubernetes/cmd/kube-apiserver/app/options"
 )
+
+var kineWriteMu sync.Mutex
+
+const (
+	kineGRPCOverheadBytes   = 512 * 1024
+	kineGRPCMaxSendBytes    = math.MaxInt32
+	kineEmulatedETCDVersion = "3.6.11"
+)
+
+func kineWriteInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+	if isKineWriteMethod(info.FullMethod) {
+		kineWriteMu.Lock()
+		defer kineWriteMu.Unlock()
+	}
+	return handler(ctx, req)
+}
+
+func isKineWriteMethod(method string) bool {
+	return strings.HasSuffix(method, "/Txn") ||
+		strings.HasSuffix(method, "/Put") ||
+		strings.HasSuffix(method, "/DeleteRange") ||
+		strings.HasSuffix(method, "/Grant") ||
+		strings.HasSuffix(method, "/Revoke")
+}
+
+func newKineGRPCServer() *grpc.Server {
+	return grpc.NewServer(
+		grpc.UnaryInterceptor(kineWriteInterceptor),
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             embed.DefaultGRPCKeepAliveMinTime,
+			PermitWithoutStream: false,
+		}),
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			Time:    embed.DefaultGRPCKeepAliveInterval,
+			Timeout: embed.DefaultGRPCKeepAliveTimeout,
+		}),
+		grpc.MaxConcurrentStreams(embed.DefaultMaxConcurrentStreams),
+		grpc.MaxRecvMsgSize(int(embed.DefaultMaxRequestBytes)+kineGRPCOverheadBytes),
+		grpc.MaxSendMsgSize(kineGRPCMaxSendBytes),
+	)
+}
+
+func kineEndpointConfig(dsn string) endpoint.Config {
+	return endpoint.Config{
+		Endpoint:   "mysql://" + dsn,
+		Listener:   "tcp://127.0.0.1:2379",
+		GRPCServer: newKineGRPCServer(),
+		ConnectionPoolConfig: generic.ConnectionPoolConfig{
+			MaxIdle:     20,
+			MaxIdleTime: 2 * time.Minute,
+		},
+		EmulatedETCDVersion: kineEmulatedETCDVersion,
+		CompactBatchSize:    100,
+		CompactTimeout:      5 * time.Second,
+		CompactMinRetain:    1000,
+		PollBatchSize:       500,
+		NotifyInterval:      5 * time.Second,
+	}
+}
 
 // Start launches kine and the apiserver in-process.
 // The returned channel is closed once the apiserver /readyz endpoint responds 200.
@@ -39,12 +105,7 @@ func Start(ctx context.Context, cfg Config) (<-chan struct{}, error) {
 	if err := util.StopOldInstance(2379); err != nil {
 		logrus.Warnf("failed to stop old instance on port 2379: %v", err)
 	}
-	etcdCfg, err := endpoint.Listen(ctx, endpoint.Config{
-		Endpoint:         "mysql://" + cfg.DSN,
-		Listener:         "tcp://127.0.0.1:2379",
-		CompactBatchSize: 100,
-		NotifyInterval:   time.Second,
-	})
+	etcdCfg, err := endpoint.Listen(ctx, kineEndpointConfig(cfg.DSN))
 	if err != nil {
 		return nil, fmt.Errorf("kine listen: %w", err)
 	}
@@ -140,7 +201,7 @@ func buildApiserverArgs(cfg Config, certDir, etcdEndpoint, authzKubeconfig strin
 		"--service-cluster-ip-range=10.43.0.0/16",
 		"--allow-privileged=true",
 		"--authorization-mode=" + authzMode(authzKubeconfig),
-		"--enable-admission-plugins=NodeRestriction,ValidatingAdmissionWebhook",
+		"--enable-admission-plugins=NodeRestriction,DefaultIngressClass,ValidatingAdmissionWebhook",
 		"--tls-cert-file=" + filepath.Join(certDir, "apiserver.crt"),
 		"--tls-private-key-file=" + filepath.Join(certDir, "apiserver.key"),
 		"--client-ca-file=" + filepath.Join(certDir, "ca.crt"),
@@ -155,6 +216,7 @@ func buildApiserverArgs(cfg Config, certDir, etcdEndpoint, authzKubeconfig strin
 	if authzKubeconfig != "" {
 		args = append(args,
 			"--authorization-webhook-config-file="+authzKubeconfig,
+			"--authorization-webhook-version=v1",
 			"--authorization-webhook-cache-authorized-ttl=30s",
 			"--authorization-webhook-cache-unauthorized-ttl=10s",
 		)
