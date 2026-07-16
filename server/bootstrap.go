@@ -158,7 +158,7 @@ func admissionWebhooks(url string, caData []byte, rules []admissionregv1.RuleWit
 			// failure handling for other cluster-scoped resources.
 			Name:                    "cluster.admission.casbin.io",
 			ClientConfig:            clientConfig,
-			Rules:                   []admissionregv1.RuleWithOperations{rules[1]},
+			Rules:                   rules[1:],
 			SideEffects:             &sideEffects,
 			FailurePolicy:           &clusterFailurePolicy,
 			AdmissionReviewVersions: []string{"v1"},

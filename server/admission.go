@@ -9,6 +9,8 @@ import (
 	"github.com/beego/beego/logs"
 	"github.com/casosorg/casos/object"
 	admissionv1 "k8s.io/api/admission/v1"
+	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -31,6 +33,16 @@ func admissionValidateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	req := review.Request
+	if req == nil {
+		writeAdmissionResponse(w, &admissionv1.AdmissionReview{
+			TypeMeta: metav1.TypeMeta{APIVersion: "admission.k8s.io/v1", Kind: "AdmissionReview"},
+			Response: &admissionv1.AdmissionResponse{
+				Allowed: false,
+				Result:  &metav1.Status{Message: "admission request is missing"},
+			},
+		})
+		return
+	}
 	platformRequest := isPlatformPodRequest(req)
 	controllerPodRequest := isWorkloadControllerPodRequest(req)
 	allowed, err := true, error(nil)
@@ -61,8 +73,17 @@ func admissionValidateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Image vulnerability check: only for Pod-creating operations.
-	if shouldCheckPodImages(req) {
+	// Check user-owned workload templates before they are accepted. Pods later
+	// created by the workload controller inherit that already-approved template
+	// and must not be blocked by a scan result that changed after installation.
+	if shouldCheckWorkloadTemplateImages(req) {
+		if denyMsg := checkWorkloadTemplateImages(req.Resource.Resource, req.Object.Raw); denyMsg != "" {
+			resp.Response.Allowed = false
+			resp.Response.Result = &metav1.Status{Message: denyMsg}
+			writeAdmissionResponse(w, resp)
+			return
+		}
+	} else if shouldCheckPodImages(req) {
 		if denyMsg := checkPodImages(req.Object.Raw); denyMsg != "" {
 			resp.Response.Allowed = false
 			resp.Response.Result = &metav1.Status{Message: denyMsg}
@@ -90,14 +111,18 @@ func isPlatformPodRequest(req *admissionv1.AdmissionRequest) bool {
 	if req == nil || req.Resource.Resource != "pods" {
 		return false
 	}
-	if req.Operation != admissionv1.Create && req.Operation != admissionv1.Update {
+	if req.Operation != admissionv1.Create && req.Operation != admissionv1.Update && req.Operation != admissionv1.Delete {
 		return false
 	}
 	if !isPlatformNamespace(req.Namespace) {
 		return false
 	}
 	var pod corev1.Pod
-	if err := json.Unmarshal(req.Object.Raw, &pod); err != nil {
+	raw := req.Object.Raw
+	if len(raw) == 0 {
+		raw = req.OldObject.Raw
+	}
+	if err := json.Unmarshal(raw, &pod); err != nil {
 		return false
 	}
 	return pod.Labels["app.kubernetes.io/managed-by"] == "casos"
@@ -107,17 +132,38 @@ func shouldCheckPodImages(req *admissionv1.AdmissionRequest) bool {
 	if req == nil || req.Resource.Resource != "pods" {
 		return false
 	}
+	if req.SubResource != "" || isWorkloadControllerPodRequest(req) {
+		return false
+	}
 	if req.Operation != admissionv1.Create && req.Operation != admissionv1.Update {
 		return false
 	}
 	return !isPlatformPodRequest(req)
 }
 
+func shouldCheckWorkloadTemplateImages(req *admissionv1.AdmissionRequest) bool {
+	if req == nil || req.SubResource != "" {
+		return false
+	}
+	if req.Operation != admissionv1.Create && req.Operation != admissionv1.Update {
+		return false
+	}
+	if isPlatformNamespace(req.Namespace) {
+		return false
+	}
+	switch req.Resource.Resource {
+	case "deployments", "statefulsets", "daemonsets", "jobs", "cronjobs", "replicationcontrollers":
+		return true
+	default:
+		return false
+	}
+}
+
 func isWorkloadControllerPodRequest(req *admissionv1.AdmissionRequest) bool {
 	if req == nil || req.Resource.Resource != "pods" {
 		return false
 	}
-	if req.Operation != admissionv1.Create && req.Operation != admissionv1.Update {
+	if req.Operation != admissionv1.Create && req.Operation != admissionv1.Update && req.Operation != admissionv1.Delete {
 		return false
 	}
 	return isWorkloadControllerUser(req.UserInfo.Username)
@@ -144,12 +190,63 @@ func checkPodImages(raw []byte) string {
 	if err := json.Unmarshal(raw, &pod); err != nil {
 		return ""
 	}
+	return checkPodSpecImages(pod.Spec)
+}
 
+func checkWorkloadTemplateImages(resource string, raw []byte) string {
+	var podSpec corev1.PodSpec
+	switch resource {
+	case "deployments":
+		var workload appsv1.Deployment
+		if err := json.Unmarshal(raw, &workload); err != nil {
+			return ""
+		}
+		podSpec = workload.Spec.Template.Spec
+	case "statefulsets":
+		var workload appsv1.StatefulSet
+		if err := json.Unmarshal(raw, &workload); err != nil {
+			return ""
+		}
+		podSpec = workload.Spec.Template.Spec
+	case "daemonsets":
+		var workload appsv1.DaemonSet
+		if err := json.Unmarshal(raw, &workload); err != nil {
+			return ""
+		}
+		podSpec = workload.Spec.Template.Spec
+	case "jobs":
+		var workload batchv1.Job
+		if err := json.Unmarshal(raw, &workload); err != nil {
+			return ""
+		}
+		podSpec = workload.Spec.Template.Spec
+	case "cronjobs":
+		var workload batchv1.CronJob
+		if err := json.Unmarshal(raw, &workload); err != nil {
+			return ""
+		}
+		podSpec = workload.Spec.JobTemplate.Spec.Template.Spec
+	case "replicationcontrollers":
+		var workload corev1.ReplicationController
+		if err := json.Unmarshal(raw, &workload); err != nil {
+			return ""
+		}
+		if workload.Spec.Template == nil {
+			return ""
+		}
+		podSpec = workload.Spec.Template.Spec
+	default:
+		return ""
+	}
+	return checkPodSpecImages(podSpec)
+}
+
+func checkPodSpecImages(spec corev1.PodSpec) string {
 	var images []string
-	for _, c := range pod.Spec.InitContainers {
+	for _, c := range spec.InitContainers {
 		images = append(images, c.Image)
 	}
-	for _, c := range pod.Spec.Containers {
+	for _, c := range spec.Containers {
 		images = append(images, c.Image)
 	}
 
