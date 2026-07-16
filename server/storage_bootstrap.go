@@ -520,6 +520,7 @@ func createOrUpdateDeployment(ctx context.Context, client kubernetes.Interface, 
 	if err != nil {
 		return fmt.Errorf("get deployment %s/%s: %w", deployment.Namespace, deployment.Name, err)
 	}
+	preserveDeploymentSelector(current, deployment)
 	deployment.Labels = mergeStringMap(current.Labels, deployment.Labels)
 	deployment.Annotations = mergeStringMap(current.Annotations, deployment.Annotations)
 	currentSpec := defaultedDeploymentSpec(current.Spec)
@@ -536,16 +537,16 @@ func createOrUpdateDeployment(ctx context.Context, client kubernetes.Interface, 
 }
 
 func reconcileLocalPathDeployment(ctx context.Context, client kubernetes.Interface, deployment *appsv1.Deployment) error {
-	desiredHash, err := hashLocalPathDeploymentSpec(deployment.Spec)
-	if err != nil {
-		return fmt.Errorf("hash deployment %s/%s spec: %w", deployment.Namespace, deployment.Name, err)
-	}
 	current, err := client.AppsV1().Deployments(deployment.Namespace).Get(ctx, deployment.Name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
+		desiredHash, err := hashLocalPathDeploymentSpec(deployment.Spec)
+		if err != nil {
+			return fmt.Errorf("hash deployment %s/%s spec: %w", deployment.Namespace, deployment.Name, err)
+		}
 		deployment.Annotations = mergeStringMap(deployment.Annotations, map[string]string{
 			localPathManagedSpecHashAnnotation: desiredHash,
 		})
-		_, err := client.AppsV1().Deployments(deployment.Namespace).Create(ctx, deployment, metav1.CreateOptions{})
+		_, err = client.AppsV1().Deployments(deployment.Namespace).Create(ctx, deployment, metav1.CreateOptions{})
 		if err != nil {
 			return fmt.Errorf("create deployment %s/%s: %w", deployment.Namespace, deployment.Name, err)
 		}
@@ -553,6 +554,11 @@ func reconcileLocalPathDeployment(ctx context.Context, client kubernetes.Interfa
 	}
 	if err != nil {
 		return fmt.Errorf("get deployment %s/%s: %w", deployment.Namespace, deployment.Name, err)
+	}
+	preserveDeploymentSelector(current, deployment)
+	desiredHash, err := hashLocalPathDeploymentSpec(deployment.Spec)
+	if err != nil {
+		return fmt.Errorf("hash deployment %s/%s spec: %w", deployment.Namespace, deployment.Name, err)
 	}
 
 	if current.Annotations[localPathPreserveSpecAnnotation] == "true" {
@@ -587,6 +593,22 @@ func reconcileLocalPathDeployment(ctx context.Context, client kubernetes.Interfa
 		return fmt.Errorf("update deployment %s/%s: %w", deployment.Namespace, deployment.Name, err)
 	}
 	return nil
+}
+
+// Deployment selectors are immutable. Preserve an existing selector during
+// upgrades so a CasOS bootstrap version change cannot make the platform fail
+// to reconcile its own already-created Deployments.
+func preserveDeploymentSelector(current, desired *appsv1.Deployment) {
+	if current.Spec.Selector == nil {
+		return
+	}
+	desired.Spec.Selector = current.Spec.Selector.DeepCopy()
+	if desired.Spec.Template.Labels == nil {
+		desired.Spec.Template.Labels = make(map[string]string)
+	}
+	for key, value := range current.Spec.Selector.MatchLabels {
+		desired.Spec.Template.Labels[key] = value
+	}
 }
 
 func hashLocalPathDeploymentSpec(spec appsv1.DeploymentSpec) (string, error) {
