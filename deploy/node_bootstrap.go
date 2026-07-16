@@ -121,7 +121,7 @@ func (d *NodeDeployer) Deploy(ctx context.Context, opts NodeDeployOptions) (*Nod
 	if err = runner.WriteFileContext(ctx, legacyBridgeCNIConfigPath, bridgeCNIConfig(podCIDR), "0644"); err != nil {
 		return nil, fmt.Errorf("write bootstrap bridge CNI config: %w", err)
 	}
-	if _, err = runner.RunRootContext(ctx, "rm -f /etc/cni/net.d/10-flannel.conflist /run/flannel/subnet.env"); err != nil {
+	if _, err = runner.RunRootContext(ctx, removeStaleBridgeStateCommand()); err != nil {
 		return nil, fmt.Errorf("clean stale Flannel state: %w", err)
 	}
 	if err = d.startKubelet(ctx, runner); err != nil {

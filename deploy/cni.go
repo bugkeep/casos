@@ -55,3 +55,7 @@ func flannelCNIConfig() string {
 func removeLegacyBridgeCNICommand() string {
 	return fmt.Sprintf("rm -f %s", shellSingleQuote(legacyBridgeCNIConfigPath))
 }
+
+func removeStaleBridgeStateCommand() string {
+	return "rm -f /etc/cni/net.d/10-flannel.conflist /run/flannel/subnet.env; ip link delete cni0 2>/dev/null || true"
+}
