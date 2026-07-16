@@ -15,9 +15,10 @@ func (d *NodeDeployer) installNodeBinaries(ctx context.Context, runner *NodeDepl
 	}
 	if _, err := runner.RunRootContext(ctx, `set -e
 install -d /etc/modules-load.d /etc/sysctl.d
-printf '%s\n' overlay br_netfilter > /etc/modules-load.d/casos-kubernetes.conf
+printf '%s\n' overlay br_netfilter vxlan > /etc/modules-load.d/casos-kubernetes.conf
 modprobe overlay
 modprobe br_netfilter
+modprobe vxlan
 cat > /etc/sysctl.d/99-casos-kubernetes.conf <<'EOF'
 net.bridge.bridge-nf-call-iptables = 1
 net.bridge.bridge-nf-call-ip6tables = 1
