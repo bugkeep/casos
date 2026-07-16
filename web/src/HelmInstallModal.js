@@ -19,6 +19,57 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
   const [logs, setLogs] = useState([]);
   const logEndRef = useRef(null);
   const abortCtrlRef = useRef(null);
+  const taskIdRef = useRef(null);
+  const taskStorageKeyRef = useRef(null);
+  const pollTimerRef = useRef(null);
+
+  const stopTaskPolling = () => {
+    if (pollTimerRef.current) {
+      clearTimeout(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+  };
+
+  const monitorTask = (taskId) => {
+    stopTaskPolling();
+    const poll = () => {
+      HelmBackend.getHelmOperationTask(taskId)
+        .then(res => {
+          if (res.status !== "ok") {
+            setError(res.msg);
+            setInstalling(false);
+            return;
+          }
+          const task = res.data;
+          const taskLogs = (res.data2 ?? []).map(log => log.message);
+          setLogs(taskLogs);
+          if (task.status === "succeeded") {
+            setDone(true);
+            setAborted(false);
+            setInstalling(false);
+            if (taskStorageKeyRef.current) {
+              window.localStorage.removeItem(taskStorageKeyRef.current);
+            }
+            return;
+          }
+          if (task.status === "failed") {
+            setError(task.errorMsg || "Helm operation failed");
+            setInstalling(false);
+            if (taskStorageKeyRef.current) {
+              window.localStorage.removeItem(taskStorageKeyRef.current);
+            }
+            return;
+          }
+          setInstalling(true);
+          pollTimerRef.current = setTimeout(poll, 2000);
+        })
+        .catch(e => {
+          setError(e.message);
+          setInstalling(false);
+        });
+    };
+    poll();
+  };
 
   useEffect(() => {
     if (!open || !chart) {return;}
@@ -26,6 +77,16 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
     setLogs([]);
     setDone(false);
     setAborted(false);
+    setInstalling(false);
+    taskIdRef.current = null;
+    taskStorageKeyRef.current = `casos.helmTask.${chart.chartName}`;
+    stopTaskPolling();
+
+    const savedTaskId = window.localStorage.getItem(taskStorageKeyRef.current);
+    if (savedTaskId) {
+      taskIdRef.current = savedTaskId;
+      monitorTask(savedTaskId);
+    }
 
     NamespaceBackend.getNamespaces().then(res => {
       if (res.status === "ok") {
@@ -55,6 +116,8 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
     }
   }, [open, chart, form]);
 
+  useEffect(() => () => stopTaskPolling(), []);
+
   useEffect(() => {
     if (logEndRef.current) {
       logEndRef.current.scrollIntoView({behavior: "smooth"});
@@ -62,6 +125,10 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
   }, [logs]);
 
   const handleClose = () => {
+    stopTaskPolling();
+    abortCtrlRef.current = null;
+    taskIdRef.current = null;
+    taskStorageKeyRef.current = null;
     form.resetFields();
     setValuesYAML("");
     setError(null);
@@ -103,7 +170,12 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
           valuesYAML,
         },
         line => {
-          if (line === "ABORTED") {
+          if (line.startsWith("TASK_ID:")) {
+            const taskId = line.slice("TASK_ID:".length).trim();
+            taskIdRef.current = taskId;
+            taskStorageKeyRef.current = `casos.helmTask.${chart.chartName}`;
+            window.localStorage.setItem(taskStorageKeyRef.current, taskId);
+          } else if (line === "ABORTED") {
             setAborted(true);
           } else {
             setLogs(prev => [...prev, line]);
@@ -114,11 +186,18 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
         .then(status => {
           if (status === "DONE") {
             setDone(true);
+            const taskId = taskIdRef.current;
+            if (taskId && taskStorageKeyRef.current) {
+              window.localStorage.removeItem(taskStorageKeyRef.current);
+            }
           }
         })
         .catch(e => {
           if (e.name === "AbortError") {
             setAborted(true);
+            if (taskIdRef.current) {
+              monitorTask(taskIdRef.current);
+            }
           } else {
             setError(e.message);
           }
