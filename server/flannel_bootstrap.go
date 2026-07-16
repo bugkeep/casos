@@ -18,7 +18,7 @@ import (
 
 const (
 	defaultFlannelImage          = "ghcr.io/flannel-io/flannel:v0.27.4"
-	defaultFlannelCNIPluginImage = "docker.io/flannelcni/flannel-cni-plugin:v1.7.1-flannel1"
+	defaultFlannelCNIPluginImage = "ghcr.io/flannel-io/flannel-cni-plugin:v1.8.0-flannel1"
 	flannelNamespace             = "kube-flannel"
 	flannelServiceAccount        = "flannel"
 	flannelConfigMap             = "kube-flannel-cfg"

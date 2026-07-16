@@ -82,7 +82,7 @@ func ConfigFromAppConf() (Config, error) {
 	flannelImage := configStringDefault("flannelImage", "ghcr.io/flannel-io/flannel:v0.27.4")
 	storageProbeImage := configStringDefault("storageProbeImage", "docker.io/library/busybox:1.37.0")
 	ingressControllerImage := configStringDefault("ingressControllerImage", "docker.io/traefik:v3.3.4")
-	flannelCNIPluginImage := configStringDefault("flannelCNIPluginImage", "docker.io/flannelcni/flannel-cni-plugin:v1.7.1-flannel1")
+	flannelCNIPluginImage := configStringDefault("flannelCNIPluginImage", "ghcr.io/flannel-io/flannel-cni-plugin:v1.8.0-flannel1")
 
 	return Config{
 		DataDir:                   dataDir,
