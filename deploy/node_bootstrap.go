@@ -670,7 +670,7 @@ func (d *NodeDeployer) waitForNodeBootstrapState(ctx context.Context, nodeName s
 				continue
 			}
 			state := &nodeBootstrapState{
-				podCIDR: node.Spec.PodCIDR,
+				podCIDR: nodeCIDRFromSpec(node),
 				ready:   isNodeReady(node),
 			}
 			lastState = state
@@ -773,7 +773,7 @@ func workerOperationalState(ctx context.Context, client kubernetes.Interface, no
 	if !isNodeReady(node) {
 		return "node is not Ready", false, nil
 	}
-	if node.Spec.PodCIDR == "" {
+	if nodeCIDRFromSpec(node) == "" {
 		return "node has no PodCIDR", false, nil
 	}
 
