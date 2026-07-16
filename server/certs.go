@@ -216,7 +216,7 @@ func EnsureWebhookCert(certDir string) error {
 		// Verify the existing cert is still valid under the current CA.
 		// If the CA was regenerated, the old webhook cert will fail verification
 		// and must be replaced.
-		if webhookCertValidUnderCA(certFile, filepath.Join(certDir, "ca.crt")) {
+		if webhookCertValidUnderCA(certFile, keyFile, filepath.Join(certDir, "ca.crt")) {
 			return nil
 		}
 		_ = os.Remove(certFile)
@@ -266,13 +266,10 @@ func EnsureWebhookCert(certDir string) error {
 	return writePEM(keyFile, "RSA PRIVATE KEY", whKeyDER)
 }
 
-// EnsureAuthzWebhookConfig writes (once) the kubeconfig that the apiserver
-// uses to reach the Casbin authorization webhook.
+// EnsureAuthzWebhookConfig reconciles the kubeconfig that the apiserver uses
+// to reach the Casbin authorization webhook.
 func EnsureAuthzWebhookConfig(certDir string, webhookPort int) (string, error) {
 	path := filepath.Join(certDir, "authz-webhook.kubeconfig")
-	if fileExists(path) {
-		return path, nil
-	}
 
 	caData, err := os.ReadFile(filepath.Join(certDir, "ca.crt"))
 	if err != nil {
@@ -312,7 +309,11 @@ current-context: default
 		base64.StdEncoding.EncodeToString(keyData),
 	)
 
-	if err := os.WriteFile(path, []byte(kubeconfig), 0o600); err != nil {
+	desired := []byte(kubeconfig)
+	if existing, err := os.ReadFile(path); err == nil && bytes.Equal(existing, desired) {
+		return path, nil
+	}
+	if err := os.WriteFile(path, desired, 0o600); err != nil {
 		return "", err
 	}
 	return path, nil
@@ -561,7 +562,11 @@ func certHasDNS(certDNS []string, desiredDNS string) bool {
 
 // webhookCertValidUnderCA returns true if the PEM cert at certFile verifies
 // against the PEM CA at caFile. Returns false on any read, parse, or verify error.
-func webhookCertValidUnderCA(certFile, caFile string) bool {
+func webhookCertValidUnderCA(certFile, keyFile, caFile string) bool {
+	keyPair, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil || len(keyPair.Certificate) == 0 {
+		return false
+	}
 	caPEM, err := os.ReadFile(caFile)
 	if err != nil {
 		return false
@@ -580,6 +585,10 @@ func webhookCertValidUnderCA(certFile, caFile string) bool {
 	}
 	cert, err := x509.ParseCertificate(block.Bytes)
 	if err != nil {
+		return false
+	}
+	now := time.Now()
+	if now.Before(cert.NotBefore) || now.After(cert.NotAfter) {
 		return false
 	}
 	_, err = cert.Verify(x509.VerifyOptions{Roots: pool, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}})
