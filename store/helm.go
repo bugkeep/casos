@@ -1214,6 +1214,7 @@ func InstallHelmChart(cfg *rest.Config, releaseName, namespace, chartName, repoU
 	install.Namespace = namespace
 	install.CreateNamespace = true
 	install.Wait = true
+	install.WaitForJobs = true
 	install.Timeout = helmInstallTimeout
 	install.PostRenderer = localImagePullPolicyPostRenderer{}
 
@@ -1294,6 +1295,7 @@ func InstallHelmChartStream(owner string, ctx context.Context, cfg *rest.Config,
 		install.Namespace = namespace
 		install.CreateNamespace = true
 		install.Wait = true
+		install.WaitForJobs = true
 		install.Timeout = helmInstallTimeout
 		install.PostRenderer = localImagePullPolicyPostRenderer{}
 		if _, err = install.RunWithContext(installCtx, helmChart, vals); err != nil {
@@ -1341,6 +1343,7 @@ func UpgradeHelmRelease(cfg *rest.Config, releaseName, namespace, chartName, rep
 	upgrade := action.NewUpgrade(actionConfig)
 	upgrade.Namespace = namespace
 	upgrade.Wait = true
+	upgrade.WaitForJobs = true
 	upgrade.Timeout = helmOperationTimeout
 	upgrade.PostRenderer = localImagePullPolicyPostRenderer{}
 
@@ -1356,6 +1359,7 @@ func RollbackHelmRelease(cfg *rest.Config, releaseName, namespace string, revisi
 	rollback := action.NewRollback(actionConfig)
 	rollback.Version = revision
 	rollback.Wait = true
+	rollback.WaitForJobs = true
 	rollback.Timeout = helmOperationTimeout
 	return rollback.Run(releaseName)
 }
