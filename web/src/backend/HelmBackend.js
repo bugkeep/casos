@@ -44,6 +44,18 @@ export function getHelmReleases(namespace = "all") {
   }).then(r => r.json());
 }
 
+export function getHelmOperationTask(id) {
+  return fetch(`${Setting.ServerUrl}/api/get-helm-operation-task?id=${encodeURIComponent(id)}`, {
+    credentials: "include", headers: lang(),
+  }).then(r => r.json());
+}
+
+export function getHelmOperationTasks(limit = 50) {
+  return fetch(`${Setting.ServerUrl}/api/get-helm-operation-tasks?limit=${encodeURIComponent(limit)}`, {
+    credentials: "include", headers: lang(),
+  }).then(r => r.json());
+}
+
 export function installHelmChart(payload) {
   return fetch(`${Setting.ServerUrl}/api/install-helm-chart`, {
     method: "POST", credentials: "include", headers: jsonHeaders(), body: JSON.stringify(payload),
