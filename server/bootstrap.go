@@ -55,6 +55,12 @@ func Bootstrap(ctx context.Context, cfg *rest.Config, srvCfg Config) error {
 	if err := ensureIngressController(ctx, client, apiExtensionsClient, srvCfg); err != nil {
 		return err
 	}
+	// Traefik CRDs are created by the ingress bootstrap above. Refresh the
+	// discovered cluster admission rules so those resources are covered during
+	// the same startup, rather than only after the next restart.
+	if err := ensureCasbinWebhook(ctx, client, srvCfg); err != nil {
+		return err
+	}
 	return nil
 }
 
