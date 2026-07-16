@@ -239,13 +239,35 @@ func (d *NodeDeployer) ensureNodeCIDR(ctx context.Context, nodeName string) (str
 		if nodes.Items[i].Name != nodeName {
 			continue
 		}
-		cidr := nodeCIDRFromSpec(&nodes.Items[i])
+		cidr, err := canonicalNodeCIDR(&nodes.Items[i])
+		if err != nil {
+			return "", err
+		}
+		if cidr != "" {
+			_, network, _ := net.ParseCIDR(cidr)
+			for j := range nodes.Items {
+				if j == i {
+					continue
+				}
+				other, otherErr := canonicalNodeCIDR(&nodes.Items[j])
+				if otherErr != nil {
+					return "", otherErr
+				}
+				if _, otherNetwork, _ := net.ParseCIDR(other); otherNetwork != nil && cidrNetworksOverlap(network, otherNetwork) {
+					cidr = ""
+					break
+				}
+			}
+		}
 		changed := ensureWorkerBootstrapTaint(&nodes.Items[i])
 		if cidr == "" {
 			cidr, err = allocateNodeCIDR(nodes.Items)
 			if err != nil {
 				return "", err
 			}
+			changed = true
+		}
+		if nodes.Items[i].Spec.PodCIDR != cidr || len(nodes.Items[i].Spec.PodCIDRs) != 1 || nodes.Items[i].Spec.PodCIDRs[0] != cidr {
 			nodes.Items[i].Spec.PodCIDR = cidr
 			nodes.Items[i].Spec.PodCIDRs = []string{cidr}
 			changed = true
@@ -273,10 +295,23 @@ func (d *NodeDeployer) ensureNodeCIDR(ctx context.Context, nodeName string) (str
 			Taints:   []corev1.Taint{{Key: workerBootstrapTaintKey, Value: "true", Effect: corev1.TaintEffectNoSchedule}},
 		},
 	}
-	if _, err = client.CoreV1().Nodes().Create(ctx, node, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
+	if _, err = client.CoreV1().Nodes().Create(ctx, node, metav1.CreateOptions{}); err == nil {
+		return cidr, nil
+	} else if !apierrors.IsAlreadyExists(err) {
 		return "", fmt.Errorf("create worker node with PodCIDR: %w", err)
 	}
-	return cidr, nil
+	existing, err := client.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+	if err != nil {
+		return "", fmt.Errorf("read concurrently created worker node %s: %w", nodeName, err)
+	}
+	existingCIDR, err := canonicalNodeCIDR(existing)
+	if err != nil {
+		return "", err
+	}
+	if existingCIDR == "" {
+		return "", fmt.Errorf("worker node %s already exists without a PodCIDR; retry allocation", nodeName)
+	}
+	return existingCIDR, nil
 }
 
 func ensureWorkerBootstrapTaint(node *corev1.Node) bool {
@@ -370,21 +405,83 @@ func nodeCIDRFromSpec(node *corev1.Node) string {
 	return node.Spec.PodCIDR
 }
 
+func canonicalNodeCIDR(node *corev1.Node) (string, error) {
+	if node == nil {
+		return "", nil
+	}
+	legacy := strings.TrimSpace(node.Spec.PodCIDR)
+	modern := ""
+	if len(node.Spec.PodCIDRs) > 0 {
+		modern = strings.TrimSpace(node.Spec.PodCIDRs[0])
+	}
+	if legacy != "" && modern != "" && legacy != modern {
+		return "", fmt.Errorf("node %s has conflicting PodCIDR fields %q and %q", node.Name, legacy, modern)
+	}
+	value := modern
+	if value == "" {
+		value = legacy
+	}
+	if value == "" {
+		return "", nil
+	}
+	network, err := validNodeCIDR(value)
+	if err != nil {
+		return "", fmt.Errorf("node %s has invalid PodCIDR %q: %w", node.Name, value, err)
+	}
+	return network.String(), nil
+}
+
+func validNodeCIDR(cidr string) (*net.IPNet, error) {
+	_, network, err := net.ParseCIDR(strings.TrimSpace(cidr))
+	if err != nil {
+		return nil, err
+	}
+	ones, bits := network.Mask.Size()
+	if bits != 32 || ones != 24 {
+		return nil, fmt.Errorf("expected an IPv4 /24 network")
+	}
+	_, cluster, err := net.ParseCIDR(nodeDeployClusterCIDR)
+	if err != nil {
+		return nil, err
+	}
+	if !cluster.Contains(network.IP) {
+		return nil, fmt.Errorf("network is outside %s", nodeDeployClusterCIDR)
+	}
+	return network, nil
+}
+
+func cidrNetworksOverlap(left, right *net.IPNet) bool {
+	if left == nil || right == nil {
+		return false
+	}
+	return left.Contains(right.IP) || right.Contains(left.IP)
+}
+
 func allocateNodeCIDR(nodes []corev1.Node) (string, error) {
-	used := make(map[string]struct{}, len(nodes))
+	used := make([]*net.IPNet, 0, len(nodes))
 	for i := range nodes {
-		if cidr := nodeCIDRFromSpec(&nodes[i]); cidr != "" {
-			_, network, err := net.ParseCIDR(cidr)
-			if err != nil {
-				return "", fmt.Errorf("parse PodCIDR %q for node %s: %w", cidr, nodes[i].Name, err)
-			}
-			used[network.String()] = struct{}{}
+		cidr, err := canonicalNodeCIDR(&nodes[i])
+		if err != nil {
+			return "", err
 		}
+		if cidr == "" {
+			continue
+		}
+		_, network, _ := net.ParseCIDR(cidr)
+		used = append(used, network)
 	}
 
 	for subnet := 0; subnet < 256; subnet++ {
 		candidate := fmt.Sprintf("10.244.%d.0/24", subnet)
-		if _, exists := used[candidate]; !exists {
+		_, network, _ := net.ParseCIDR(candidate)
+		available := true
+		for _, allocated := range used {
+			if cidrNetworksOverlap(network, allocated) {
+				available = false
+				break
+			}
+		}
+		if available {
 			return candidate, nil
 		}
 	}
