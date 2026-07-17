@@ -305,12 +305,12 @@ func workerOperationalState(ctx context.Context, client kubernetes.Interface, no
 	} else if err != nil {
 		return "", false, err
 	}
-	if err := waitForStorageProbe(ctx, client, nodeName, storageProbeImage); err != nil {
-		return err.Error(), false, nil
-	}
 	hostname := nodeName
 	if node.Labels["kubernetes.io/hostname"] != "" {
 		hostname = node.Labels["kubernetes.io/hostname"]
+	}
+	if err := waitForStorageProbe(ctx, client, nodeName, hostname, storageProbeImage); err != nil {
+		return err.Error(), false, nil
 	}
 	if err := waitForSchedulerProbe(ctx, client, nodeName, hostname, storageProbeImage); err != nil {
 		return err.Error(), false, nil
@@ -355,7 +355,7 @@ func workerProbeImage(image string) string {
 	return image
 }
 
-func waitForStorageProbe(ctx context.Context, client kubernetes.Interface, nodeName, image string) error {
+func waitForStorageProbe(ctx context.Context, client kubernetes.Interface, nodeName, hostname, image string) error {
 	image = workerProbeImage(image)
 	const namespace = "kube-system"
 	name := storageProbeName(nodeName)
@@ -379,16 +379,7 @@ func waitForStorageProbe(ctx context.Context, client kubernetes.Interface, nodeN
 	}
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: map[string]string{"casos.io/probe": "worker-storage"}},
-		Spec: corev1.PodSpec{
-			NodeName:      nodeName,
-			RestartPolicy: corev1.RestartPolicyNever,
-			Containers: []corev1.Container{{
-				Name: "storage-probe", Image: image, ImagePullPolicy: corev1.PullIfNotPresent,
-				Command:      []string{"sh", "-c", "echo casos > /data/probe && test \"$(cat /data/probe)\" = casos"},
-				VolumeMounts: []corev1.VolumeMount{{Name: "data", MountPath: "/data"}},
-			}},
-			Volumes: []corev1.Volume{{Name: "data", VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: name}}}},
-		},
+		Spec:       storageProbeSpec(name, hostname, image),
 	}
 	if _, err := client.CoreV1().Pods(namespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
 		cleanup()
@@ -420,6 +411,19 @@ func waitForStorageProbe(ctx context.Context, client kubernetes.Interface, nodeN
 				return fmt.Errorf("storage probe Pod failed")
 			}
 		}
+	}
+}
+
+func storageProbeSpec(probeName, hostname, image string) corev1.PodSpec {
+	return corev1.PodSpec{
+		RestartPolicy: corev1.RestartPolicyNever,
+		NodeSelector:  map[string]string{"kubernetes.io/hostname": hostname},
+		Containers: []corev1.Container{{
+			Name: "storage-probe", Image: image, ImagePullPolicy: corev1.PullIfNotPresent,
+			Command:      []string{"sh", "-c", "echo casos > /data/probe && test \"$(cat /data/probe)\" = casos"},
+			VolumeMounts: []corev1.VolumeMount{{Name: "data", MountPath: "/data"}},
+		}},
+		Volumes: []corev1.Volume{{Name: "data", VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: probeName}}}},
 	}
 }
 
