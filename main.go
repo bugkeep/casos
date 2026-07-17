@@ -17,6 +17,7 @@ import (
 	"github.com/casosorg/casos/proxy"
 	"github.com/casosorg/casos/routers"
 	"github.com/casosorg/casos/server"
+	"github.com/casosorg/casos/store"
 )
 
 func main() {
@@ -27,9 +28,6 @@ func main() {
 	object.InitFlag()
 	object.InitAdapter()
 	object.CreateTables()
-	if err := object.FailActiveHelmOperationTasks("Helm operation was interrupted by service restart"); err != nil {
-		logs.Warning("Helm operation task cleanup: %v", err)
-	}
 	object.InitSite()
 	if err := object.SeedDefaultPolicies(); err != nil {
 		logs.Warning("casbin seed: %v", err)
@@ -77,6 +75,9 @@ func main() {
 			}
 			if err := server.StartControllerManager(ctx, srvCfg); err != nil {
 				logs.Warning("start controller-manager: %v", err)
+			}
+			if err := store.ResumeActiveHelmOperations(ctx, adminCfg); err != nil {
+				logs.Warning("Helm operation recovery: %v", err)
 			}
 		case <-ctx.Done():
 		}
