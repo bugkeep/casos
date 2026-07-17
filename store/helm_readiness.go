@@ -45,6 +45,9 @@ func waitForHelmReleaseResources(parent context.Context, cfg *rest.Config, relea
 			return nil
 		} else {
 			lastErr = err
+			if startupErr := helmPodStartupFailure(ctx, client, namespace, releaseName); startupErr != nil {
+				return startupErr
+			}
 		}
 		select {
 		case <-ctx.Done():
@@ -55,6 +58,79 @@ func waitForHelmReleaseResources(parent context.Context, cfg *rest.Config, relea
 		case <-ticker.C:
 		}
 	}
+}
+
+func helmPodStartupFailure(ctx context.Context, client kubernetes.Interface, namespace, releaseName string) error {
+	selector := labels.Set{"app.kubernetes.io/instance": releaseName}.AsSelector().String()
+	pods, err := client.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
+	if err != nil {
+		return fmt.Errorf("list Helm release Pods for startup diagnostics: %w", err)
+	}
+	for _, pod := range pods.Items {
+		statuses := append(append([]corev1.ContainerStatus{}, pod.Status.InitContainerStatuses...), pod.Status.ContainerStatuses...)
+		for _, status := range statuses {
+			if status.State.Waiting != nil && isHelmImageStartupFailure(status.State.Waiting.Reason) {
+				return fmt.Errorf(
+					"Helm release %s/%s Pod %s/%s container %s cannot start image %q: %s: %s",
+					namespace,
+					releaseName,
+					pod.Namespace,
+					pod.Name,
+					status.Name,
+					podImage(pod, status.Name),
+					status.State.Waiting.Reason,
+					strings.TrimSpace(status.State.Waiting.Message),
+				)
+			}
+			if status.State.Terminated != nil && isHelmArchitectureFailure(status.State.Terminated) {
+				return fmt.Errorf(
+					"Helm release %s/%s Pod %s/%s container %s cannot start image %q: %s: %s",
+					namespace,
+					releaseName,
+					pod.Namespace,
+					pod.Name,
+					status.Name,
+					podImage(pod, status.Name),
+					emptyHelmStatusReason(status.State.Terminated.Reason, "architecture mismatch"),
+					strings.TrimSpace(status.State.Terminated.Message),
+				)
+			}
+		}
+	}
+	return nil
+}
+
+func isHelmImageStartupFailure(reason string) bool {
+	switch reason {
+	case "ErrImagePull", "ImagePullBackOff", "InvalidImageName", "CreateContainerConfigError", "CreateContainerError":
+		return true
+	default:
+		return false
+	}
+}
+
+func isHelmArchitectureFailure(status *corev1.ContainerStateTerminated) bool {
+	if status == nil {
+		return false
+	}
+	message := strings.ToLower(status.Message + " " + status.Reason)
+	return strings.Contains(message, "exec format error") || status.Reason == "ContainerCannotRun"
+}
+
+func podImage(pod corev1.Pod, containerName string) string {
+	for _, container := range append(append([]corev1.Container{}, pod.Spec.InitContainers...), pod.Spec.Containers...) {
+		if container.Name == containerName {
+			return container.Image
+		}
+	}
+	return "<unknown>"
+}
+
+func emptyHelmStatusReason(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
 }
 
 type helmResourceRef struct {
@@ -68,6 +144,7 @@ var helmReadinessResourceKinds = map[string]struct{}{
 	"Deployment":            {},
 	"Ingress":               {},
 	"Job":                   {},
+	"Pod":                   {},
 	"PersistentVolumeClaim": {},
 	"Service":               {},
 	"StatefulSet":           {},
@@ -127,6 +204,34 @@ func validateHelmReleaseResourcesWithRefs(ctx context.Context, client kubernetes
 	problems := make([]string, 0)
 	appendProblem := func(problem string) {
 		problems = append(problems, problem)
+	}
+
+	pods, err := client.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
+	if err != nil {
+		return fmt.Errorf("list Helm release Pods: %w", err)
+	}
+	podKeys := make(map[string]struct{}, len(pods.Items))
+	for _, pod := range pods.Items {
+		podKeys[resourceKey(pod.Namespace, pod.Name)] = struct{}{}
+		if !podReadyForHelm(pod) {
+			appendProblem(fmt.Sprintf("Pod %s/%s is not ready", pod.Namespace, pod.Name))
+		}
+	}
+	for _, ref := range refsForKind(refs, "Pod") {
+		if _, ok := podKeys[resourceKey(ref.namespace, ref.name)]; ok {
+			continue
+		}
+		pod, err := client.CoreV1().Pods(ref.namespace).Get(ctx, ref.name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			appendProblem(fmt.Sprintf("Pod %s/%s is missing", ref.namespace, ref.name))
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("get Helm release Pod %s/%s: %w", ref.namespace, ref.name, err)
+		}
+		if !podReadyForHelm(*pod) {
+			appendProblem(fmt.Sprintf("Pod %s/%s is not ready", ref.namespace, ref.name))
+		}
 	}
 
 	deployments, err := client.AppsV1().Deployments(namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
@@ -236,12 +341,7 @@ func validateHelmReleaseResourcesWithRefs(ctx context.Context, client kubernetes
 	jobKeys := make(map[string]struct{}, len(jobs.Items))
 	for _, job := range jobs.Items {
 		jobKeys[resourceKey(job.Namespace, job.Name)] = struct{}{}
-		for _, condition := range job.Status.Conditions {
-			if condition.Type == batchv1.JobFailed && condition.Status == corev1.ConditionTrue {
-				appendProblem(fmt.Sprintf("Job %s/%s failed: %s", namespace, job.Name, strings.TrimSpace(condition.Message)))
-				break
-			}
-		}
+		checkJobReadiness(&job, appendProblem)
 	}
 	for _, ref := range refsForKind(refs, "Job") {
 		if _, ok := jobKeys[resourceKey(ref.namespace, ref.name)]; ok {
@@ -255,12 +355,7 @@ func validateHelmReleaseResourcesWithRefs(ctx context.Context, client kubernetes
 		if err != nil {
 			return fmt.Errorf("get Helm release Job %s/%s: %w", ref.namespace, ref.name, err)
 		}
-		for _, condition := range job.Status.Conditions {
-			if condition.Type == batchv1.JobFailed && condition.Status == corev1.ConditionTrue {
-				appendProblem(fmt.Sprintf("Job %s/%s failed: %s", ref.namespace, ref.name, strings.TrimSpace(condition.Message)))
-				break
-			}
-		}
+		checkJobReadiness(job, appendProblem)
 	}
 
 	pvcs, err := client.CoreV1().PersistentVolumeClaims(namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
@@ -340,13 +435,8 @@ func validateHelmReleaseResourcesWithRefs(ctx context.Context, client kubernetes
 	ingressKeys := make(map[string]struct{}, len(ingresses.Items))
 	for _, ingress := range ingresses.Items {
 		ingressKeys[resourceKey(ingress.Namespace, ingress.Name)] = struct{}{}
-		if ingress.Spec.IngressClassName == nil || strings.TrimSpace(*ingress.Spec.IngressClassName) == "" {
-			continue
-		}
-		if _, err := client.NetworkingV1().IngressClasses().Get(ctx, *ingress.Spec.IngressClassName, metav1.GetOptions{}); apierrors.IsNotFound(err) {
-			appendProblem(fmt.Sprintf("Ingress %s/%s references missing IngressClass %s", namespace, ingress.Name, *ingress.Spec.IngressClassName))
-		} else if err != nil {
-			return fmt.Errorf("check IngressClass for %s/%s: %w", namespace, ingress.Name, err)
+		if err := checkIngressReadiness(ctx, client, &ingress, appendProblem); err != nil {
+			return err
 		}
 	}
 	for _, ref := range refsForKind(refs, "Ingress") {
@@ -361,13 +451,8 @@ func validateHelmReleaseResourcesWithRefs(ctx context.Context, client kubernetes
 		if err != nil {
 			return fmt.Errorf("get Helm release Ingress %s/%s: %w", ref.namespace, ref.name, err)
 		}
-		if ingress.Spec.IngressClassName == nil || strings.TrimSpace(*ingress.Spec.IngressClassName) == "" {
-			continue
-		}
-		if _, err := client.NetworkingV1().IngressClasses().Get(ctx, *ingress.Spec.IngressClassName, metav1.GetOptions{}); apierrors.IsNotFound(err) {
-			appendProblem(fmt.Sprintf("Ingress %s/%s references missing IngressClass %s", ref.namespace, ref.name, *ingress.Spec.IngressClassName))
-		} else if err != nil {
-			return fmt.Errorf("check IngressClass for %s/%s: %w", ref.namespace, ref.name, err)
+		if err := checkIngressReadiness(ctx, client, ingress, appendProblem); err != nil {
+			return err
 		}
 	}
 
@@ -421,12 +506,34 @@ func checkDaemonSetReadiness(daemonSet *appsv1.DaemonSet, appendProblem func(str
 	}
 }
 
-func checkJobFailure(job *batchv1.Job, appendProblem func(string)) {
+func podReadyForHelm(pod corev1.Pod) bool {
+	if pod.Status.Phase == corev1.PodSucceeded {
+		return true
+	}
+	if pod.Status.Phase != corev1.PodRunning {
+		return false
+	}
+	for _, condition := range pod.Status.Conditions {
+		if condition.Type == corev1.PodReady {
+			return condition.Status == corev1.ConditionTrue
+		}
+	}
+	return false
+}
+
+func checkJobReadiness(job *batchv1.Job, appendProblem func(string)) {
 	for _, condition := range job.Status.Conditions {
 		if condition.Type == batchv1.JobFailed && condition.Status == corev1.ConditionTrue {
 			appendProblem(fmt.Sprintf("Job %s/%s failed: %s", job.Namespace, job.Name, strings.TrimSpace(condition.Message)))
 			return
 		}
+	}
+	desired := int32(1)
+	if job.Spec.Completions != nil {
+		desired = *job.Spec.Completions
+	}
+	if job.Status.Succeeded < desired {
+		appendProblem(fmt.Sprintf("Job %s/%s completed %d/%d", job.Namespace, job.Name, job.Status.Succeeded, desired))
 	}
 }
 
@@ -451,13 +558,60 @@ func checkServiceReadiness(ctx context.Context, client kubernetes.Interface, ser
 }
 
 func checkIngressReadiness(ctx context.Context, client kubernetes.Interface, ingress *networkingv1.Ingress, appendProblem func(string)) error {
-	if ingress.Spec.IngressClassName == nil || strings.TrimSpace(*ingress.Spec.IngressClassName) == "" {
+	if ingress.Spec.IngressClassName != nil && strings.TrimSpace(*ingress.Spec.IngressClassName) != "" {
+		if _, err := client.NetworkingV1().IngressClasses().Get(ctx, *ingress.Spec.IngressClassName, metav1.GetOptions{}); apierrors.IsNotFound(err) {
+			appendProblem(fmt.Sprintf("Ingress %s/%s references missing IngressClass %s", ingress.Namespace, ingress.Name, *ingress.Spec.IngressClassName))
+		} else if err != nil {
+			return fmt.Errorf("check IngressClass for %s/%s: %w", ingress.Namespace, ingress.Name, err)
+		}
+	}
+
+	services := make(map[string]struct{})
+	checkBackend := func(serviceName string) error {
+		if serviceName == "" {
+			return nil
+		}
+		if _, ok := services[serviceName]; ok {
+			return nil
+		}
+		services[serviceName] = struct{}{}
+		service, err := client.CoreV1().Services(ingress.Namespace).Get(ctx, serviceName, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			appendProblem(fmt.Sprintf("Ingress %s/%s backend Service %s/%s is missing", ingress.Namespace, ingress.Name, ingress.Namespace, serviceName))
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("get Ingress backend Service %s/%s: %w", ingress.Namespace, serviceName, err)
+		}
+		if service.Spec.Type == corev1.ServiceTypeExternalName {
+			return nil
+		}
+		ready, err := serviceHasReadyEndpointSlice(ctx, client, *service)
+		if err != nil {
+			return fmt.Errorf("check Ingress backend Service %s/%s endpoints: %w", ingress.Namespace, serviceName, err)
+		}
+		if !ready {
+			appendProblem(fmt.Sprintf("Ingress %s/%s backend Service %s/%s has no ready EndpointSlice", ingress.Namespace, ingress.Name, ingress.Namespace, serviceName))
+		}
 		return nil
 	}
-	if _, err := client.NetworkingV1().IngressClasses().Get(ctx, *ingress.Spec.IngressClassName, metav1.GetOptions{}); apierrors.IsNotFound(err) {
-		appendProblem(fmt.Sprintf("Ingress %s/%s references missing IngressClass %s", ingress.Namespace, ingress.Name, *ingress.Spec.IngressClassName))
-	} else if err != nil {
-		return fmt.Errorf("check IngressClass for %s/%s: %w", ingress.Namespace, ingress.Name, err)
+	if ingress.Spec.DefaultBackend != nil && ingress.Spec.DefaultBackend.Service != nil {
+		if err := checkBackend(ingress.Spec.DefaultBackend.Service.Name); err != nil {
+			return err
+		}
+	}
+	for _, rule := range ingress.Spec.Rules {
+		if rule.HTTP == nil {
+			continue
+		}
+		for _, path := range rule.HTTP.Paths {
+			if path.Backend.Service == nil {
+				continue
+			}
+			if err := checkBackend(path.Backend.Service.Name); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
