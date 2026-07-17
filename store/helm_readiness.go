@@ -21,7 +21,7 @@ import (
 	"k8s.io/client-go/rest"
 )
 
-const helmPostInstallReadinessTimeout = 2 * time.Minute
+const helmPostInstallReadinessTimeout = helmInstallTimeout
 
 func waitForHelmReleaseResources(parent context.Context, cfg *rest.Config, releaseName, namespace string) error {
 	if parent == nil {
