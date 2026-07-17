@@ -27,6 +27,9 @@ func main() {
 	object.InitFlag()
 	object.InitAdapter()
 	object.CreateTables()
+	if err := object.FailActiveHelmOperationTasks("Helm operation was interrupted by service restart"); err != nil {
+		logs.Warning("Helm operation task cleanup: %v", err)
+	}
 	object.InitSite()
 	if err := object.SeedDefaultPolicies(); err != nil {
 		logs.Warning("casbin seed: %v", err)

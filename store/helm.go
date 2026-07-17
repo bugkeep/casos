@@ -40,6 +40,7 @@ import (
 	"gopkg.in/yaml.v3"
 	sigsyaml "sigs.k8s.io/yaml"
 
+	"github.com/casosorg/casos/object"
 	proxypkg "github.com/casosorg/casos/proxy"
 )
 
@@ -1214,6 +1215,7 @@ func InstallHelmChart(cfg *rest.Config, releaseName, namespace, chartName, repoU
 	install.CreateNamespace = true
 	install.Wait = true
 	install.Timeout = helmInstallTimeout
+	install.PostRenderer = localImagePullPolicyPostRenderer{}
 
 	_, err = install.Run(ch, vals)
 	if err != nil {
@@ -1224,20 +1226,41 @@ func InstallHelmChart(cfg *rest.Config, releaseName, namespace, chartName, repoU
 
 // InstallHelmChartStream runs helm install asynchronously and pushes log lines to the returned channel.
 // It waits for chart resources to become ready before sending "DONE", so the stream can stay open until
-// helmInstallTimeout or until ctx is canceled.
-// The channel is closed when the operation finishes; a final line of "ERROR: <msg>", "ABORTED", or "DONE" signals the outcome.
-// Cancel ctx to abort a waiting install (e.g. stuck waiting for PVCs).
-func InstallHelmChartStream(ctx context.Context, cfg *rest.Config, releaseName, namespace, chartName, repoURL, version, valuesYAML string) <-chan string {
+// helmInstallTimeout. The channel is closed when the operation finishes; a final line of
+// "ERROR: <msg>" or "DONE" signals the outcome. Closing the browser stream stops progress delivery,
+// but does not cancel the submitted Helm operation.
+func InstallHelmChartStream(owner string, ctx context.Context, cfg *rest.Config, releaseName, namespace, chartName, repoURL, version, valuesYAML string) (*object.HelmOperationTask, <-chan string, error) {
+	task, err := object.CreateHelmOperationTask(owner, object.HelmOperationInstall, releaseName, namespace, chartName, version)
+	if err != nil {
+		return nil, nil, err
+	}
 	logCh := make(chan string, 64)
 	go func() {
 		defer close(logCh)
+		streamCtx := ctx
+		if streamCtx == nil {
+			streamCtx = context.Background()
+		}
+		installCtx := helmInstallContext(streamCtx)
 		send := func(line string) bool {
+			level := object.HelmOperationLogLevelInfo
+			if strings.HasPrefix(line, "ERROR:") {
+				level = object.HelmOperationLogLevelError
+			}
+			if err := object.AddHelmOperationLog(task.Id, level, line); err != nil {
+				logrus.Warnf("failed to persist Helm operation log for task %d: %v", task.Id, err)
+			}
 			select {
 			case logCh <- line:
 				return true
-			case <-ctx.Done():
+			case <-streamCtx.Done():
 				return false
 			}
+		}
+		if err := object.StartHelmOperationTask(task.Id, object.HelmOperationPhaseLoading); err != nil {
+			send("ERROR: " + err.Error())
+			_ = object.FinishHelmOperationTask(task.Id, false, err.Error())
+			return
 		}
 		logFn := func(format string, args ...interface{}) {
 			send(fmt.Sprintf(format, args...))
@@ -1245,41 +1268,59 @@ func InstallHelmChartStream(ctx context.Context, cfg *rest.Config, releaseName, 
 		actionConfig, err := newHelmConfigWithLog(cfg, namespace, logFn)
 		if err != nil {
 			send("ERROR: " + err.Error())
+			_ = object.FinishHelmOperationTask(task.Id, false, err.Error())
 			return
 		}
 		helmChart, err := loadChart(chartName, repoURL, version)
 		if err != nil {
 			send("ERROR: " + err.Error())
+			_ = object.FinishHelmOperationTask(task.Id, false, err.Error())
 			return
 		}
 		vals, err := parseValues(valuesYAML)
 		if err != nil {
 			send("ERROR: " + err.Error())
+			_ = object.FinishHelmOperationTask(task.Id, false, err.Error())
 			return
 		}
 		attachHelmCapabilities(actionConfig, cfg, namespace, logFn)
+		if err := object.UpdateHelmOperationTaskPhase(task.Id, object.HelmOperationPhaseInstalling); err != nil {
+			send("ERROR: " + err.Error())
+			_ = object.FinishHelmOperationTask(task.Id, false, err.Error())
+			return
+		}
 		install := action.NewInstall(actionConfig)
 		install.ReleaseName = releaseName
 		install.Namespace = namespace
 		install.CreateNamespace = true
 		install.Wait = true
 		install.Timeout = helmInstallTimeout
-		if _, err = install.RunWithContext(ctx, helmChart, vals); err != nil {
-			if ctx.Err() != nil {
-				send("ABORTED")
-			} else {
-				for _, line := range helmReleaseDiagnostics(ctx, cfg, releaseName, namespace) {
-					if !send(line) {
-						return
-					}
-				}
-				send("ERROR: " + err.Error())
+		install.PostRenderer = localImagePullPolicyPostRenderer{}
+		if _, err = install.RunWithContext(installCtx, helmChart, vals); err != nil {
+			for _, line := range helmReleaseDiagnostics(installCtx, cfg, releaseName, namespace) {
+				send(line)
 			}
+			send("ERROR: " + err.Error())
+			_ = object.FinishHelmOperationTask(task.Id, false, err.Error())
+			return
+		}
+		if err := object.FinishHelmOperationTask(task.Id, true, ""); err != nil {
+			send("ERROR: " + err.Error())
 			return
 		}
 		send("DONE")
 	}()
-	return logCh
+	return task, logCh, nil
+}
+
+// helmInstallContext deliberately detaches the Helm operation from the
+// browser/SSE request. The stream is only a progress channel; closing it must
+// not cancel an installation that has already been submitted.
+func helmInstallContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
+	}
+	return context.WithoutCancel(ctx)
 }
 
 func UpgradeHelmRelease(cfg *rest.Config, releaseName, namespace, chartName, repoURL, version, valuesYAML string) error {
@@ -1301,6 +1342,7 @@ func UpgradeHelmRelease(cfg *rest.Config, releaseName, namespace, chartName, rep
 	upgrade.Namespace = namespace
 	upgrade.Wait = true
 	upgrade.Timeout = helmOperationTimeout
+	upgrade.PostRenderer = localImagePullPolicyPostRenderer{}
 
 	_, err = upgrade.Run(releaseName, ch, vals)
 	return err
