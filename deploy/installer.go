@@ -5,13 +5,38 @@ import (
 	"fmt"
 )
 
+const flannelCNIPluginVersion = "v1.8.0-flannel1"
+
+func flannelCNIPluginInstallCommand(arch string) string {
+	return fmt.Sprintf(`
+if [ ! -x /opt/cni/bin/flannel ]; then
+  download -o /tmp/flannel-cni-plugin https://github.com/flannel-io/cni-plugin/releases/download/%s/flannel-%s
+  install -o root -g root -m 0755 /tmp/flannel-cni-plugin /opt/cni/bin/flannel
+fi`, flannelCNIPluginVersion, arch)
+}
+
 func (d *NodeDeployer) installNodeBinaries(ctx context.Context, runner *NodeDeploySSHRunner, arch, k8sVersion string) error {
 	version := k8sVersion
 	cniVersion := defaultNodeDeployCNIVersion
 
 	d.logStep(nodeDeployPhaseInstalling, "Installing node dependencies and containerd")
-	if _, err := runner.RunRootContext(ctx, "dpkg -s ca-certificates curl iptables socat conntrack ebtables ethtool containerd >/dev/null 2>&1 || (apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl iptables socat conntrack ebtables ethtool containerd)"); err != nil {
+	if _, err := runner.RunRootContext(ctx, "dpkg -s ca-certificates curl iptables socat conntrack ebtables ethtool kmod containerd >/dev/null 2>&1 || (apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl iptables socat conntrack ebtables ethtool kmod containerd)"); err != nil {
 		return fmt.Errorf("install packages: %w", err)
+	}
+	if _, err := runner.RunRootContext(ctx, `set -e
+install -d /etc/modules-load.d /etc/sysctl.d
+printf '%s\n' overlay br_netfilter vxlan > /etc/modules-load.d/casos-kubernetes.conf
+modprobe overlay
+modprobe br_netfilter
+modprobe vxlan
+cat > /etc/sysctl.d/99-casos-kubernetes.conf <<'EOF'
+net.bridge.bridge-nf-call-iptables = 1
+net.bridge.bridge-nf-call-ip6tables = 1
+net.ipv4.ip_forward = 1
+EOF
+sysctl --system >/dev/null
+test -e /proc/sys/net/bridge/bridge-nf-call-iptables`); err != nil {
+		return fmt.Errorf("configure Kubernetes kernel networking: %w", err)
 	}
 
 	d.logStep(nodeDeployPhaseConfiguring, "Configuring containerd")
@@ -57,6 +82,7 @@ if [ ! -x /opt/cni/bin/bridge ] || [ ! -x /opt/cni/bin/loopback ] || [ ! -x /opt
   download -o /tmp/cni-plugins.tgz https://github.com/containernetworking/plugins/releases/download/%s/cni-plugins-linux-%s-%s.tgz
   tar -xzf /tmp/cni-plugins.tgz -C /opt/cni/bin
 fi`, version, version, arch, version, arch, cniVersion, arch, cniVersion)
+	installCmd += flannelCNIPluginInstallCommand(arch)
 	if _, err := runner.RunRootContext(ctx, installCmd); err != nil {
 		return fmt.Errorf("install node binaries: %w", err)
 	}
