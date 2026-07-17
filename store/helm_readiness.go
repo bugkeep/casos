@@ -91,7 +91,7 @@ func helmPodStartupFailure(ctx context.Context, client kubernetes.Interface, nam
 					pod.Name,
 					status.Name,
 					podImage(pod, status.Name),
-					emptyHelmStatusReason(status.State.Terminated.Reason, "architecture mismatch"),
+					emptyHelmStatusReason(status.State.Terminated.Reason, "container cannot run"),
 					strings.TrimSpace(status.State.Terminated.Message),
 				)
 			}
