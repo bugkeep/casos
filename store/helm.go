@@ -1209,6 +1209,9 @@ func InstallHelmChart(cfg *rest.Config, releaseName, namespace, chartName, repoU
 	}
 
 	attachHelmCapabilities(actionConfig, cfg, namespace, helmWarningLog)
+	if err := validateHelmChartCompatibility(actionConfig, releaseName, namespace, ch, vals); err != nil {
+		return err
+	}
 	install := action.NewInstall(actionConfig)
 	install.ReleaseName = releaseName
 	install.Namespace = namespace
@@ -1287,6 +1290,11 @@ func InstallHelmChartStream(owner string, ctx context.Context, cfg *rest.Config,
 			return
 		}
 		attachHelmCapabilities(actionConfig, cfg, namespace, logFn)
+		if err := validateHelmChartCompatibility(actionConfig, releaseName, namespace, helmChart, vals); err != nil {
+			send("ERROR: " + err.Error())
+			_ = object.FinishHelmOperationTask(task.Id, false, err.Error())
+			return
+		}
 		if err := object.UpdateHelmOperationTaskPhase(task.Id, object.HelmOperationPhaseInstalling); err != nil {
 			send("ERROR: " + err.Error())
 			_ = object.FinishHelmOperationTask(task.Id, false, err.Error())
