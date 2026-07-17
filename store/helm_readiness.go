@@ -102,7 +102,7 @@ func helmPodStartupFailure(ctx context.Context, client kubernetes.Interface, nam
 
 func isHelmImageStartupFailure(reason string) bool {
 	switch reason {
-	case "ErrImagePull", "ImagePullBackOff", "InvalidImageName", "CreateContainerConfigError", "CreateContainerError":
+	case "InvalidImageName", "CreateContainerConfigError", "CreateContainerError":
 		return true
 	default:
 		return false
