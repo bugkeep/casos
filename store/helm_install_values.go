@@ -1,9 +1,12 @@
 package store
 
 import (
+	"fmt"
 	"strings"
 
 	"gopkg.in/yaml.v3"
+	"helm.sh/helm/v3/pkg/chart"
+	"helm.sh/helm/v3/pkg/chartutil"
 )
 
 const (
@@ -19,10 +22,9 @@ func GetHelmChartInstallValues(chartName, repoURL, version string) (string, erro
 		return "", err
 	}
 
-	values := cloneHelmValues(ch.Values)
-	if isBitnamiCommunityChartRepo(repoURL) {
-		applyBitnamiLegacyImageFallback(values)
-		applyBitnamiAppStoreChartDefaults(chartName, values)
+	values, err := buildHelmChartInstallValues(ch, chartName, repoURL)
+	if err != nil {
+		return "", err
 	}
 
 	data, err := yaml.Marshal(values)
@@ -30,6 +32,20 @@ func GetHelmChartInstallValues(chartName, repoURL, version string) (string, erro
 		return "", err
 	}
 	return string(data), nil
+}
+
+func buildHelmChartInstallValues(ch *chart.Chart, chartName, repoURL string) (map[string]interface{}, error) {
+	values := cloneHelmValues(ch.Values)
+	if isBitnamiCommunityChartRepo(repoURL) {
+		coalesced, err := chartutil.CoalesceValues(ch, values)
+		if err != nil {
+			return nil, fmt.Errorf("coalesce chart %s install values: %w", chartName, err)
+		}
+		values = map[string]interface{}(coalesced)
+		applyBitnamiLegacyImageFallback(values)
+		applyBitnamiAppStoreChartDefaults(chartName, values)
+	}
+	return values, nil
 }
 
 func applyBitnamiAppStoreChartDefaults(chartName string, values map[string]interface{}) {
