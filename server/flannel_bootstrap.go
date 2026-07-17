@@ -240,6 +240,7 @@ func createOrUpdateDaemonSet(ctx context.Context, client kubernetes.Interface, d
 	if err != nil {
 		return fmt.Errorf("get daemonset %s/%s: %w", desired.Namespace, desired.Name, err)
 	}
+	preserveDaemonSetSelector(current, desired)
 	desired.Labels = mergeStringMap(current.Labels, desired.Labels)
 	desired.Annotations = mergeStringMap(current.Annotations, desired.Annotations)
 	currentDefaulted := current.DeepCopy()
@@ -254,4 +255,44 @@ func createOrUpdateDaemonSet(ctx context.Context, client kubernetes.Interface, d
 		return fmt.Errorf("update daemonset %s/%s: %w", desired.Namespace, desired.Name, err)
 	}
 	return nil
+}
+
+// DaemonSet selectors are immutable. Preserve the selector from an existing
+// Flannel DaemonSet so a bootstrap label change cannot break upgrades.
+func preserveDaemonSetSelector(current, desired *appsv1.DaemonSet) {
+	if current.Spec.Selector == nil {
+		return
+	}
+	desired.Spec.Selector = current.Spec.Selector.DeepCopy()
+	if desired.Spec.Template.Labels == nil {
+		desired.Spec.Template.Labels = make(map[string]string)
+	}
+	for key, value := range current.Spec.Selector.MatchLabels {
+		desired.Spec.Template.Labels[key] = value
+	}
+	for _, requirement := range current.Spec.Selector.MatchExpressions {
+		currentValue, currentHasValue := current.Spec.Template.Labels[requirement.Key]
+		switch requirement.Operator {
+		case metav1.LabelSelectorOpIn:
+			if currentHasValue && containsString(requirement.Values, currentValue) {
+				desired.Spec.Template.Labels[requirement.Key] = currentValue
+			} else if len(requirement.Values) > 0 {
+				desired.Spec.Template.Labels[requirement.Key] = requirement.Values[0]
+			}
+		case metav1.LabelSelectorOpExists:
+			if currentHasValue {
+				desired.Spec.Template.Labels[requirement.Key] = currentValue
+			} else {
+				desired.Spec.Template.Labels[requirement.Key] = "casos"
+			}
+		case metav1.LabelSelectorOpNotIn:
+			if currentHasValue && !containsString(requirement.Values, currentValue) {
+				desired.Spec.Template.Labels[requirement.Key] = currentValue
+			} else {
+				delete(desired.Spec.Template.Labels, requirement.Key)
+			}
+		case metav1.LabelSelectorOpDoesNotExist:
+			delete(desired.Spec.Template.Labels, requirement.Key)
+		}
+	}
 }
