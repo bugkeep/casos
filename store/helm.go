@@ -46,6 +46,7 @@ import (
 const (
 	helmOperationTimeout      = 5 * time.Minute
 	helmInstallTimeout        = 10 * time.Minute
+	helmCompatibilityTimeout  = 2 * time.Minute
 	helmDiagnosticsTimeout    = 15 * time.Second
 	helmDiagnosticsMaxEvents  = 20
 	helmDiagnosticsMessageLen = 240
@@ -317,6 +318,9 @@ func FetchRepoIndex(repoURL string) ([]HelmChartSummary, error) {
 			continue
 		}
 		v := versions[0]
+		if !isInstallableHelmChartMetadata(v.Metadata) {
+			continue
+		}
 		charts = append(charts, HelmChartSummary{
 			Name:        name,
 			Version:     v.Version,
@@ -478,6 +482,9 @@ func fetchOCIChartSummary(repoURL string) ([]HelmChartSummary, error) {
 	if meta == nil {
 		return nil, fmt.Errorf("chart metadata not found for %s", redactURLForError(repoURL))
 	}
+	if !isInstallableHelmChartMetadata(meta) {
+		return []HelmChartSummary{}, nil
+	}
 	return []HelmChartSummary{
 		{
 			Name:        meta.Name,
@@ -488,6 +495,10 @@ func fetchOCIChartSummary(repoURL string) ([]HelmChartSummary, error) {
 			Keywords:    meta.Keywords,
 		},
 	}, nil
+}
+
+func isInstallableHelmChartMetadata(metadata *chart.Metadata) bool {
+	return metadata != nil && !strings.EqualFold(strings.TrimSpace(metadata.Type), "library")
 }
 
 // ---------- Chart loader ----------
@@ -1208,15 +1219,22 @@ func InstallHelmChart(cfg *rest.Config, releaseName, namespace, chartName, repoU
 	}
 
 	attachHelmCapabilities(actionConfig, cfg, namespace, helmWarningLog)
+	if err := validateHelmChartCompatibility(context.Background(), actionConfig, releaseName, namespace, ch, vals); err != nil {
+		return err
+	}
 	install := action.NewInstall(actionConfig)
 	install.ReleaseName = releaseName
 	install.Namespace = namespace
 	install.CreateNamespace = true
 	install.Wait = true
+	install.WaitForJobs = true
 	install.Timeout = helmInstallTimeout
 
 	_, err = install.Run(ch, vals)
 	if err != nil {
+		return withHelmReleaseDiagnostics(context.Background(), cfg, releaseName, namespace, err)
+	}
+	if err := waitForHelmReleaseResources(context.Background(), cfg, releaseName, namespace); err != nil {
 		return withHelmReleaseDiagnostics(context.Background(), cfg, releaseName, namespace, err)
 	}
 	return nil
@@ -1284,6 +1302,11 @@ func InstallHelmChartStream(ctx context.Context, lifecycle HelmInstallLifecycle,
 			return
 		}
 		attachHelmCapabilities(actionConfig, cfg, namespace, logFn)
+		if err := validateHelmChartCompatibility(installCtx, actionConfig, releaseName, namespace, helmChart, vals); err != nil {
+			send("ERROR: " + err.Error())
+			_ = lifecycle.Finish(err)
+			return
+		}
 		if err := lifecycle.MarkInstalling(); err != nil {
 			send("ERROR: " + err.Error())
 			_ = lifecycle.Finish(err)
@@ -1294,8 +1317,17 @@ func InstallHelmChartStream(ctx context.Context, lifecycle HelmInstallLifecycle,
 		install.Namespace = namespace
 		install.CreateNamespace = true
 		install.Wait = true
+		install.WaitForJobs = true
 		install.Timeout = helmInstallTimeout
 		if _, err = install.RunWithContext(installCtx, helmChart, vals); err != nil {
+			for _, line := range helmReleaseDiagnostics(installCtx, cfg, releaseName, namespace) {
+				send(line)
+			}
+			send("ERROR: " + err.Error())
+			_ = lifecycle.Finish(err)
+			return
+		}
+		if err := waitForHelmReleaseResources(installCtx, cfg, releaseName, namespace); err != nil {
 			for _, line := range helmReleaseDiagnostics(installCtx, cfg, releaseName, namespace) {
 				send(line)
 			}
@@ -1337,10 +1369,17 @@ func UpgradeHelmRelease(cfg *rest.Config, releaseName, namespace, chartName, rep
 	upgrade := action.NewUpgrade(actionConfig)
 	upgrade.Namespace = namespace
 	upgrade.Wait = true
+	upgrade.WaitForJobs = true
 	upgrade.Timeout = helmOperationTimeout
 
 	_, err = upgrade.Run(releaseName, ch, vals)
-	return err
+	if err != nil {
+		return withHelmReleaseDiagnostics(context.Background(), cfg, releaseName, namespace, err)
+	}
+	if err := waitForHelmReleaseResources(context.Background(), cfg, releaseName, namespace); err != nil {
+		return withHelmReleaseDiagnostics(context.Background(), cfg, releaseName, namespace, err)
+	}
+	return nil
 }
 
 func RollbackHelmRelease(cfg *rest.Config, releaseName, namespace string, revision int) error {
@@ -1351,8 +1390,15 @@ func RollbackHelmRelease(cfg *rest.Config, releaseName, namespace string, revisi
 	rollback := action.NewRollback(actionConfig)
 	rollback.Version = revision
 	rollback.Wait = true
+	rollback.WaitForJobs = true
 	rollback.Timeout = helmOperationTimeout
-	return rollback.Run(releaseName)
+	if err := rollback.Run(releaseName); err != nil {
+		return withHelmReleaseDiagnostics(context.Background(), cfg, releaseName, namespace, err)
+	}
+	if err := waitForHelmReleaseResources(context.Background(), cfg, releaseName, namespace); err != nil {
+		return withHelmReleaseDiagnostics(context.Background(), cfg, releaseName, namespace, err)
+	}
+	return nil
 }
 
 func UninstallHelmRelease(cfg *rest.Config, releaseName, namespace string) error {
