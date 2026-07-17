@@ -44,6 +44,12 @@ var helmCompatibilityKinds = map[string]struct{}{
 }
 
 func validateHelmChartCompatibility(actionConfig *action.Configuration, releaseName, namespace string, chartToInstall *chart.Chart, values map[string]interface{}) error {
+	if chartToInstall == nil || chartToInstall.Metadata == nil {
+		return fmt.Errorf("chart metadata is missing")
+	}
+	if !isInstallableHelmChartMetadata(chartToInstall.Metadata) {
+		return fmt.Errorf("chart %s is a library chart and cannot be installed as an application", chartToInstall.Name())
+	}
 	if len(chartToInstall.CRDObjects()) > 0 {
 		return fmt.Errorf("chart %s contains unsupported CustomResourceDefinition resources", chartToInstall.Name())
 	}

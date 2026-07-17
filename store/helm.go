@@ -321,6 +321,9 @@ func FetchRepoIndex(repoURL string) ([]HelmChartSummary, error) {
 			continue
 		}
 		v := versions[0]
+		if !isInstallableHelmChartMetadata(v.Metadata) {
+			continue
+		}
 		charts = append(charts, HelmChartSummary{
 			Name:        name,
 			Version:     v.Version,
@@ -534,6 +537,9 @@ func fetchOCIChartSummary(repoURL string) ([]HelmChartSummary, error) {
 	if meta == nil {
 		return nil, fmt.Errorf("chart metadata not found for %s", redactURLForError(repoURL))
 	}
+	if !isInstallableHelmChartMetadata(meta) {
+		return []HelmChartSummary{}, nil
+	}
 	return []HelmChartSummary{
 		{
 			Name:        meta.Name,
@@ -544,6 +550,10 @@ func fetchOCIChartSummary(repoURL string) ([]HelmChartSummary, error) {
 			Keywords:    meta.Keywords,
 		},
 	}, nil
+}
+
+func isInstallableHelmChartMetadata(metadata *chart.Metadata) bool {
+	return metadata != nil && !strings.EqualFold(strings.TrimSpace(metadata.Type), "library")
 }
 
 // ---------- Chart loader ----------
