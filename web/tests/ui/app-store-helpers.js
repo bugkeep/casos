@@ -124,6 +124,12 @@ async function waitForInstallDone(dialog) {
   throw new Error(`Timed out waiting for Helm install to complete:\n${dialogText}`);
 }
 
+async function replaceInstallValuesIfProvided(textarea, valuesYAML) {
+  if (valuesYAML !== undefined) {
+    await textarea.fill(valuesYAML);
+  }
+}
+
 async function openChartInstallModal(page, {repoName, chartName}) {
   await page.goto("/app-store");
   await expect(page).toHaveURL(/\/app-store$/);
@@ -149,7 +155,7 @@ async function installAppFromAppStore(page, {repoName, chartName, releaseName, n
   await expect(textarea).toBeVisible({timeout: 30_000});
 
   await dialog.getByLabel("Release name").fill(releaseName);
-  await textarea.fill(valuesYAML);
+  await replaceInstallValuesIfProvided(textarea, valuesYAML);
 
   await dialog.getByRole("button", {name: "Install"}).click();
   installedReleases.push({name: releaseName, namespace});
@@ -217,5 +223,6 @@ module.exports = {
   makeReleaseName,
   makeRepoName,
   getServiceAccessUrl,
+  replaceInstallValuesIfProvided,
   waitForAppContent,
 };
