@@ -3,10 +3,12 @@ package store
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"path"
 	"sort"
 	"strconv"
 	"strings"
@@ -21,6 +23,7 @@ import (
 	"helm.sh/helm/v3/pkg/registry"
 	"helm.sh/helm/v3/pkg/release"
 	"helm.sh/helm/v3/pkg/repo"
+	"helm.sh/helm/v3/pkg/storage/driver"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 
@@ -318,6 +321,9 @@ func FetchRepoIndex(repoURL string) ([]HelmChartSummary, error) {
 			continue
 		}
 		v := versions[0]
+		if !isInstallableHelmChartMetadata(v.Metadata) {
+			continue
+		}
 		charts = append(charts, HelmChartSummary{
 			Name:        name,
 			Version:     v.Version,
@@ -479,6 +485,9 @@ func fetchOCIChartSummary(repoURL string) ([]HelmChartSummary, error) {
 	if meta == nil {
 		return nil, fmt.Errorf("chart metadata not found for %s", redactURLForError(repoURL))
 	}
+	if !isInstallableHelmChartMetadata(meta) {
+		return []HelmChartSummary{}, nil
+	}
 	return []HelmChartSummary{
 		{
 			Name:        meta.Name,
@@ -489,6 +498,10 @@ func fetchOCIChartSummary(repoURL string) ([]HelmChartSummary, error) {
 			Keywords:    meta.Keywords,
 		},
 	}, nil
+}
+
+func isInstallableHelmChartMetadata(metadata *chart.Metadata) bool {
+	return metadata != nil && !strings.EqualFold(strings.TrimSpace(metadata.Type), "library")
 }
 
 // ---------- Chart loader ----------
@@ -1209,6 +1222,9 @@ func InstallHelmChart(cfg *rest.Config, releaseName, namespace, chartName, repoU
 	}
 
 	attachHelmCapabilities(actionConfig, cfg, namespace, helmWarningLog)
+	if err := validateHelmChartCompatibility(actionConfig, releaseName, namespace, ch, vals); err != nil {
+		return err
+	}
 	install := action.NewInstall(actionConfig)
 	install.ReleaseName = releaseName
 	install.Namespace = namespace
@@ -1219,6 +1235,9 @@ func InstallHelmChart(cfg *rest.Config, releaseName, namespace, chartName, repoU
 
 	_, err = install.Run(ch, vals)
 	if err != nil {
+		return withHelmReleaseDiagnostics(context.Background(), cfg, releaseName, namespace, err)
+	}
+	if err := waitForHelmReleaseResources(context.Background(), cfg, releaseName, namespace); err != nil {
 		return withHelmReleaseDiagnostics(context.Background(), cfg, releaseName, namespace, err)
 	}
 	return nil
@@ -1284,6 +1303,11 @@ func InstallHelmChartStream(owner string, ctx context.Context, cfg *rest.Config,
 			return
 		}
 		attachHelmCapabilities(actionConfig, cfg, namespace, logFn)
+		if err := validateHelmChartCompatibility(actionConfig, releaseName, namespace, helmChart, vals); err != nil {
+			send("ERROR: " + err.Error())
+			_ = object.FinishHelmOperationTask(task.Id, false, err.Error())
+			return
+		}
 		if err := object.UpdateHelmOperationTaskPhase(task.Id, object.HelmOperationPhaseInstalling); err != nil {
 			send("ERROR: " + err.Error())
 			_ = object.FinishHelmOperationTask(task.Id, false, err.Error())
@@ -1297,6 +1321,14 @@ func InstallHelmChartStream(owner string, ctx context.Context, cfg *rest.Config,
 		install.Timeout = helmInstallTimeout
 		install.PostRenderer = localImagePullPolicyPostRenderer{}
 		if _, err = install.RunWithContext(installCtx, helmChart, vals); err != nil {
+			for _, line := range helmReleaseDiagnostics(installCtx, cfg, releaseName, namespace) {
+				send(line)
+			}
+			send("ERROR: " + err.Error())
+			_ = object.FinishHelmOperationTask(task.Id, false, err.Error())
+			return
+		}
+		if err := waitForHelmReleaseResources(installCtx, cfg, releaseName, namespace); err != nil {
 			for _, line := range helmReleaseDiagnostics(installCtx, cfg, releaseName, namespace) {
 				send(line)
 			}
@@ -1323,6 +1355,173 @@ func helmInstallContext(ctx context.Context) context.Context {
 	return context.WithoutCancel(ctx)
 }
 
+func shouldRecoverInterruptedHelmInstall(status release.Status) bool {
+	return status == release.StatusDeployed
+}
+
+func shouldResumeInterruptedHelmInstall(task *object.HelmOperationTask) bool {
+	if task == nil || task.Operation != object.HelmOperationInstall {
+		return false
+	}
+	return task.Phase == object.HelmOperationPhaseLoading || task.Phase == object.HelmOperationPhaseInstalling
+}
+
+func helmReleaseMatchesTask(task *object.HelmOperationTask, rel *release.Release) bool {
+	if task == nil || rel == nil || rel.Chart == nil || rel.Chart.Metadata == nil {
+		return false
+	}
+	requestedChart := path.Base(strings.TrimSpace(task.ChartName))
+	if requestedChart == "" || rel.Chart.Metadata.Name != requestedChart {
+		return false
+	}
+	return strings.TrimSpace(task.Version) == "" || rel.Chart.Metadata.Version == strings.TrimSpace(task.Version)
+}
+
+// ResumeActiveHelmOperations reconciles tasks left active when CasOS stopped.
+// It only observes the existing Helm release; it never re-runs an install with
+// unknown values, which avoids duplicate resources and secret exposure.
+func ResumeActiveHelmOperations(ctx context.Context, cfg *rest.Config) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	tasks, err := object.GetActiveHelmOperationTasks()
+	if err != nil {
+		return err
+	}
+	resumeTasks := make([]*object.HelmOperationTask, 0, len(tasks))
+	for _, task := range tasks {
+		if !shouldResumeInterruptedHelmInstall(task) {
+			if task != nil && task.Operation == object.HelmOperationInstall {
+				finishInterruptedHelmInstall(task, errors.New("Helm operation was interrupted before installation started"))
+			}
+			continue
+		}
+		resumeTasks = append(resumeTasks, task)
+	}
+	if len(resumeTasks) == 0 {
+		return nil
+	}
+	work := make(chan *object.HelmOperationTask)
+	workers := 4
+	if len(resumeTasks) < workers {
+		workers = len(resumeTasks)
+	}
+	for i := 0; i < workers; i++ {
+		go func() {
+			for task := range work {
+				reconcileInterruptedHelmInstall(ctx, cfg, task)
+			}
+		}()
+	}
+	go func() {
+		defer close(work)
+		for index, task := range resumeTasks {
+			select {
+			case work <- task:
+			case <-ctx.Done():
+				for _, pending := range resumeTasks[index:] {
+					finishInterruptedHelmInstall(pending, errors.New("Helm operation recovery was interrupted by shutdown"))
+				}
+				return
+			}
+		}
+	}()
+	return nil
+}
+
+func reconcileInterruptedHelmInstall(ctx context.Context, cfg *rest.Config, task *object.HelmOperationTask) {
+	recoveryCfg := rest.CopyConfig(cfg)
+	if recoveryCfg.Timeout == 0 {
+		recoveryCfg.Timeout = 15 * time.Second
+	}
+	actionConfig, err := newHelmConfig(recoveryCfg, task.Namespace)
+	if err != nil {
+		finishInterruptedHelmInstall(task, err)
+		return
+	}
+	statusAction := action.NewStatus(actionConfig)
+	rel, err := getInterruptedHelmRelease(ctx, statusAction, task.ReleaseName)
+	if err != nil {
+		if errors.Is(err, driver.ErrReleaseNotFound) {
+			finishInterruptedHelmInstall(task, fmt.Errorf("release was not created before CasOS stopped"))
+			return
+		}
+		finishInterruptedHelmInstall(task, fmt.Errorf("inspect Helm release: %w", err))
+		return
+	}
+	if rel == nil || rel.Info == nil || !shouldRecoverInterruptedHelmInstall(rel.Info.Status) {
+		reason := "release is not recoverable"
+		if rel != nil && rel.Info != nil {
+			reason = fmt.Sprintf("release status is %s", rel.Info.Status)
+		}
+		finishInterruptedHelmInstall(task, errors.New(reason))
+		return
+	}
+	if !helmReleaseMatchesTask(task, rel) {
+		finishInterruptedHelmInstall(task, fmt.Errorf("Helm release does not match chart %q version %q", task.ChartName, task.Version))
+		return
+	}
+	if err := waitForHelmReleaseResources(ctx, cfg, task.ReleaseName, task.Namespace); err != nil {
+		lines := helmReleaseDiagnostics(ctx, cfg, task.ReleaseName, task.Namespace)
+		if len(lines) > 0 {
+			err = fmt.Errorf("%w\n%s", err, strings.Join(lines, "\n"))
+		}
+		finishInterruptedHelmInstall(task, err)
+		return
+	}
+	finalRelease, err := getInterruptedHelmRelease(ctx, statusAction, task.ReleaseName)
+	if err != nil || finalRelease == nil || finalRelease.Info == nil || finalRelease.Info.Status != release.StatusDeployed {
+		if err == nil {
+			err = fmt.Errorf("Helm release did not reach deployed status")
+		}
+		finishInterruptedHelmInstall(task, err)
+		return
+	}
+	if !helmReleaseMatchesTask(task, finalRelease) {
+		finishInterruptedHelmInstall(task, fmt.Errorf("final Helm release does not match chart %q version %q", task.ChartName, task.Version))
+		return
+	}
+	if err := object.FinishHelmOperationTask(task.Id, true, ""); err != nil {
+		logrus.Warnf("finish recovered Helm operation task %d: %v", task.Id, err)
+		return
+	}
+	_ = object.AddHelmOperationLog(task.Id, object.HelmOperationLogLevelInfo, "recovered existing Helm release after CasOS restart")
+}
+
+func getInterruptedHelmRelease(ctx context.Context, statusAction *action.Status, releaseName string) (*release.Release, error) {
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		rel, err := statusAction.Run(releaseName)
+		if err == nil {
+			return rel, nil
+		}
+		lastErr = err
+		if !errors.Is(err, driver.ErrReleaseNotFound) || attempt == 2 {
+			break
+		}
+		timer := time.NewTimer(2 * time.Second)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return nil, lastErr
+}
+
+func finishInterruptedHelmInstall(task *object.HelmOperationTask, err error) {
+	message := err.Error()
+	if finishErr := object.FinishHelmOperationTask(task.Id, false, message); finishErr != nil {
+		logrus.Warnf("finish interrupted Helm operation task %d: %v", task.Id, finishErr)
+	}
+}
+
 func UpgradeHelmRelease(cfg *rest.Config, releaseName, namespace, chartName, repoURL, version, valuesYAML string) error {
 	actionConfig, err := newHelmConfig(cfg, namespace)
 	if err != nil {
@@ -1345,7 +1544,13 @@ func UpgradeHelmRelease(cfg *rest.Config, releaseName, namespace, chartName, rep
 	upgrade.PostRenderer = localImagePullPolicyPostRenderer{}
 
 	_, err = upgrade.Run(releaseName, ch, vals)
-	return err
+	if err != nil {
+		return withHelmReleaseDiagnostics(context.Background(), cfg, releaseName, namespace, err)
+	}
+	if err := waitForHelmReleaseResources(context.Background(), cfg, releaseName, namespace); err != nil {
+		return withHelmReleaseDiagnostics(context.Background(), cfg, releaseName, namespace, err)
+	}
+	return nil
 }
 
 func RollbackHelmRelease(cfg *rest.Config, releaseName, namespace string, revision int) error {
@@ -1357,7 +1562,13 @@ func RollbackHelmRelease(cfg *rest.Config, releaseName, namespace string, revisi
 	rollback.Version = revision
 	rollback.Wait = true
 	rollback.Timeout = helmOperationTimeout
-	return rollback.Run(releaseName)
+	if err := rollback.Run(releaseName); err != nil {
+		return withHelmReleaseDiagnostics(context.Background(), cfg, releaseName, namespace, err)
+	}
+	if err := waitForHelmReleaseResources(context.Background(), cfg, releaseName, namespace); err != nil {
+		return withHelmReleaseDiagnostics(context.Background(), cfg, releaseName, namespace, err)
+	}
+	return nil
 }
 
 func UninstallHelmRelease(cfg *rest.Config, releaseName, namespace string) error {

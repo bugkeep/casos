@@ -131,6 +131,14 @@ func GetHelmOperationTasks(owner string, limit int) ([]*HelmOperationTask, error
 	return tasks, err
 }
 
+func GetActiveHelmOperationTasks() ([]*HelmOperationTask, error) {
+	tasks := []*HelmOperationTask{}
+	err := ormer.Engine.
+		Where("status IN (?, ?)", HelmOperationStatusPending, HelmOperationStatusRunning).
+		Asc("id").Find(&tasks)
+	return tasks, err
+}
+
 func StartHelmOperationTask(id int64, phase string) error {
 	if !isValidHelmOperationPhase(phase) || phase == HelmOperationPhaseQueued || phase == HelmOperationPhaseFailed {
 		return fmt.Errorf("invalid Helm operation start phase: %s", phase)
