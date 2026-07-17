@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"path"
@@ -41,6 +42,7 @@ import (
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 
 	"gopkg.in/yaml.v3"
+	"oras.land/oras-go/v2/registry/remote/errcode"
 	sigsyaml "sigs.k8s.io/yaml"
 
 	"github.com/casosorg/casos/object"
@@ -49,7 +51,7 @@ import (
 
 const (
 	helmOperationTimeout      = 5 * time.Minute
-	helmInstallTimeout        = 10 * time.Minute
+	helmInstallTimeout        = 20 * time.Minute
 	helmDiagnosticsTimeout    = 15 * time.Second
 	helmDiagnosticsMaxEvents  = 20
 	helmDiagnosticsMessageLen = 240
@@ -395,6 +397,48 @@ func newOCIRegistryClient() (*registry.Client, error) {
 	return registry.NewClient(registry.ClientOptHTTPClient(proxypkg.ProxyHttpClient))
 }
 
+func retryOCIRegistryOperation(operation func() error) error {
+	return retryOCIRegistryOperationWithDelays(operation, []time.Duration{
+		500 * time.Millisecond,
+		1500 * time.Millisecond,
+	})
+}
+
+func retryOCIRegistryOperationWithDelays(operation func() error, delays []time.Duration) error {
+	for attempt := 0; ; attempt++ {
+		err := operation()
+		if err == nil {
+			return nil
+		}
+		if attempt >= len(delays) || !isRetryableOCIRegistryError(err) {
+			return err
+		}
+		time.Sleep(delays[attempt])
+	}
+}
+
+func isRetryableOCIRegistryError(err error) bool {
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	var networkError net.Error
+	if errors.As(err, &networkError) && (networkError.Timeout() || networkError.Temporary()) {
+		return true
+	}
+	var operationError *net.OpError
+	if errors.As(err, &operationError) {
+		return true
+	}
+	var responseError *errcode.ErrorResponse
+	if errors.As(err, &responseError) {
+		return responseError.StatusCode == http.StatusRequestTimeout ||
+			responseError.StatusCode == http.StatusTooManyRequests ||
+			(responseError.StatusCode >= http.StatusInternalServerError &&
+				responseError.StatusCode < 600)
+	}
+	return false
+}
+
 // pullOCIChart pulls the chart hosted at repoURL, resolving to the newest published
 // semver tag when version is empty.
 func pullOCIChart(repoURL, version string) (*registry.PullResult, error) {
@@ -407,7 +451,12 @@ func pullOCIChart(repoURL, version string) (*registry.PullResult, error) {
 
 	if resolvedVersion == "" {
 		if !strings.Contains(ref, "@") {
-			tags, err := rc.Tags(ref)
+			var tags []string
+			err = retryOCIRegistryOperation(func() error {
+				var tagsErr error
+				tags, tagsErr = rc.Tags(ref)
+				return tagsErr
+			})
 			if err != nil {
 				return nil, fmt.Errorf(
 					"list oci tags for %q: %w",
@@ -433,7 +482,12 @@ func pullOCIChart(repoURL, version string) (*registry.PullResult, error) {
 		pullRef = fmt.Sprintf("%s:%s", ref, resolvedVersion)
 	}
 
-	pull, err := rc.Pull(pullRef, registry.PullOptWithChart(true))
+	var pull *registry.PullResult
+	err = retryOCIRegistryOperation(func() error {
+		var pullErr error
+		pull, pullErr = rc.Pull(pullRef, registry.PullOptWithChart(true))
+		return pullErr
+	})
 	if err != nil {
 		return nil, fmt.Errorf(
 			"pull oci chart %q: %w",
@@ -501,7 +555,9 @@ func fetchOCIChartSummary(repoURL string) ([]HelmChartSummary, error) {
 }
 
 func isInstallableHelmChartMetadata(metadata *chart.Metadata) bool {
-	return metadata != nil && !strings.EqualFold(strings.TrimSpace(metadata.Type), "library")
+	return metadata != nil &&
+		!metadata.Deprecated &&
+		!strings.EqualFold(strings.TrimSpace(metadata.Type), "library")
 }
 
 // ---------- Chart loader ----------
