@@ -22,6 +22,7 @@ func GetHelmChartInstallValues(chartName, repoURL, version string) (string, erro
 	values := cloneHelmValues(ch.Values)
 	if isBitnamiCommunityChartRepo(repoURL) {
 		applyBitnamiLegacyImageFallback(values)
+		applyBitnamiAppStoreChartDefaults(chartName, values)
 	}
 
 	data, err := yaml.Marshal(values)
@@ -29,6 +30,12 @@ func GetHelmChartInstallValues(chartName, repoURL, version string) (string, erro
 		return "", err
 	}
 	return string(data), nil
+}
+
+func applyBitnamiAppStoreChartDefaults(chartName string, values map[string]interface{}) {
+	if strings.EqualFold(strings.TrimSpace(chartName), "tomcat") {
+		values["tomcatInstallDefaultWebapps"] = true
+	}
 }
 
 func isBitnamiCommunityChartRepo(repoURL string) bool {
