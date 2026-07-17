@@ -393,7 +393,7 @@ func validateHelmReleaseResourcesWithRefs(ctx context.Context, client kubernetes
 	serviceKeys := make(map[string]struct{}, len(services.Items))
 	for _, service := range services.Items {
 		serviceKeys[resourceKey(service.Namespace, service.Name)] = struct{}{}
-		if service.Spec.Type == corev1.ServiceTypeExternalName || service.Spec.ClusterIP == corev1.ClusterIPNone || len(service.Spec.Selector) == 0 {
+		if !serviceRequiresReadyEndpoint(service) {
 			continue
 		}
 		ready, err := serviceHasReadyEndpointSlice(ctx, client, service)
@@ -416,7 +416,7 @@ func validateHelmReleaseResourcesWithRefs(ctx context.Context, client kubernetes
 		if err != nil {
 			return fmt.Errorf("get Helm release Service %s/%s: %w", ref.namespace, ref.name, err)
 		}
-		if service.Spec.Type == corev1.ServiceTypeExternalName || service.Spec.ClusterIP == corev1.ClusterIPNone || len(service.Spec.Selector) == 0 {
+		if !serviceRequiresReadyEndpoint(*service) {
 			continue
 		}
 		ready, err := serviceHasReadyEndpointSlice(ctx, client, *service)
@@ -544,7 +544,7 @@ func checkPVCReadiness(pvc *corev1.PersistentVolumeClaim, appendProblem func(str
 }
 
 func checkServiceReadiness(ctx context.Context, client kubernetes.Interface, service *corev1.Service, appendProblem func(string)) error {
-	if service.Spec.Type == corev1.ServiceTypeExternalName || service.Spec.ClusterIP == corev1.ClusterIPNone || len(service.Spec.Selector) == 0 {
+	if !serviceRequiresReadyEndpoint(*service) {
 		return nil
 	}
 	ready, err := serviceHasReadyEndpointSlice(ctx, client, *service)
@@ -555,6 +555,11 @@ func checkServiceReadiness(ctx context.Context, client kubernetes.Interface, ser
 		appendProblem(fmt.Sprintf("Service %s/%s has no ready EndpointSlice", service.Namespace, service.Name))
 	}
 	return nil
+}
+
+func serviceRequiresReadyEndpoint(service corev1.Service) bool {
+	return (service.Spec.Type == corev1.ServiceTypeNodePort || service.Spec.Type == corev1.ServiceTypeLoadBalancer) &&
+		len(service.Spec.Selector) > 0
 }
 
 func checkIngressReadiness(ctx context.Context, client kubernetes.Interface, ingress *networkingv1.Ingress, appendProblem func(string)) error {
