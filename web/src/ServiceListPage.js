@@ -238,17 +238,25 @@ class ServiceListPage extends React.Component {
         title: "Access URL",
         key: "accessUrl",
         render: (_, record) => {
-          if (record.type !== "NodePort" || !nodeIP) {
+          if (record.type !== "NodePort" && record.type !== "LoadBalancer") {
             return null;
           }
-          return (record.ports ?? []).filter(p => p.nodePort).map((p, i) => {
-            const url = `http://${nodeIP}:${p.nodePort}`;
-            return (
-              <a key={i} href={url} target="_blank" rel="noopener noreferrer" style={{display: "block"}}>
+          const loadBalancerIPs = record.loadBalancerIPs ?? [];
+          const ports = record.type === "LoadBalancer"
+            ? (record.ports ?? []).filter(p => p.port)
+            : (record.ports ?? []).filter(p => p.nodePort);
+          const addresses = record.type === "LoadBalancer" ? loadBalancerIPs : (nodeIP ? [nodeIP] : []);
+          const links = [];
+          addresses.forEach(address => ports.forEach((p, i) => {
+            const port = record.type === "LoadBalancer" ? p.port : p.nodePort;
+            const url = `http://${address}:${port}`;
+            links.push(
+              <a key={`${address}-${i}`} href={url} target="_blank" rel="noopener noreferrer" style={{display: "block"}}>
                 {url}
               </a>
             );
-          });
+          }));
+          return links;
         },
       },
       {title: "Created", dataIndex: "createdAt", key: "createdAt", width: 180},

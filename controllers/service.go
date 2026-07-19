@@ -26,6 +26,7 @@ type serviceSummary struct {
 	ClusterIP       string            `json:"clusterIP"`
 	Selector        map[string]string `json:"selector"`
 	Ports           []portSummary     `json:"ports"`
+	LoadBalancerIPs []string          `json:"loadBalancerIPs,omitempty"`
 	CreatedAt       string            `json:"createdAt"`
 	ResourceVersion string            `json:"resourceVersion"`
 }
@@ -41,6 +42,12 @@ func toSvcSummary(svc corev1.Service) serviceSummary {
 			NodePort:   p.NodePort,
 		})
 	}
+	loadBalancerIPs := make([]string, 0, len(svc.Status.LoadBalancer.Ingress))
+	for _, ingress := range svc.Status.LoadBalancer.Ingress {
+		if ingress.IP != "" {
+			loadBalancerIPs = append(loadBalancerIPs, ingress.IP)
+		}
+	}
 	return serviceSummary{
 		Namespace:       svc.Namespace,
 		Name:            svc.Name,
@@ -48,6 +55,7 @@ func toSvcSummary(svc corev1.Service) serviceSummary {
 		ClusterIP:       svc.Spec.ClusterIP,
 		Selector:        svc.Spec.Selector,
 		Ports:           ports,
+		LoadBalancerIPs: loadBalancerIPs,
 		CreatedAt:       svc.CreationTimestamp.UTC().Format("2006-01-02 15:04:05"),
 		ResourceVersion: svc.ResourceVersion,
 	}
