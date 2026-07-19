@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/sirupsen/logrus"
@@ -47,6 +48,131 @@ func Bootstrap(ctx context.Context, cfg *rest.Config, srvCfg Config) error {
 		errs = append(errs, ensureDefaultStorageProvisioner(ctx, client, srvCfg))
 	}
 	return errors.Join(errs...)
+}
+
+func admissionFailurePolicy() admissionregv1.FailurePolicyType {
+	return admissionregv1.Fail
+}
+
+func admissionNamespaceSelector() *metav1.LabelSelector {
+	return &metav1.LabelSelector{
+		MatchExpressions: []metav1.LabelSelectorRequirement{{
+			Key:      "kubernetes.io/metadata.name",
+			Operator: metav1.LabelSelectorOpNotIn,
+			Values:   []string{"kube-system", "kube-flannel", "local-path-storage"},
+		}},
+	}
+}
+
+func admissionRules(resourceLists []*metav1.APIResourceList) []admissionregv1.RuleWithOperations {
+	namespacedScope := admissionregv1.NamespacedScope
+	operations := []admissionregv1.OperationType{admissionregv1.OperationAll}
+	rules := []admissionregv1.RuleWithOperations{
+		{
+			Operations: operations,
+			Rule: admissionregv1.Rule{
+				APIGroups:   []string{"*"},
+				APIVersions: []string{"*"},
+				Resources:   []string{"*"},
+				Scope:       &namespacedScope,
+			},
+		},
+	}
+
+	clusterResources := map[string]map[string]map[string]struct{}{}
+	for _, resourceList := range resourceLists {
+		group, version := splitAdmissionGroupVersion(resourceList.GroupVersion)
+		if group == "admissionregistration.k8s.io" {
+			continue
+		}
+		groupResources := clusterResources[group]
+		if groupResources == nil {
+			groupResources = map[string]map[string]struct{}{}
+			clusterResources[group] = groupResources
+		}
+		resources := groupResources[version]
+		if resources == nil {
+			resources = map[string]struct{}{}
+			groupResources[version] = resources
+		}
+		for _, resource := range resourceList.APIResources {
+			if resource.Namespaced || strings.Contains(resource.Name, "/") {
+				continue
+			}
+			resources[resource.Name] = struct{}{}
+		}
+	}
+
+	groups := make([]string, 0, len(clusterResources))
+	for group := range clusterResources {
+		groups = append(groups, group)
+	}
+	sort.Strings(groups)
+	clusterScope := admissionregv1.ClusterScope
+	for _, group := range groups {
+		versions := make([]string, 0, len(clusterResources[group]))
+		for version := range clusterResources[group] {
+			versions = append(versions, version)
+		}
+		sort.Strings(versions)
+		for _, version := range versions {
+			resourceNames := make([]string, 0, len(clusterResources[group][version]))
+			for resourceName := range clusterResources[group][version] {
+				resourceNames = append(resourceNames, resourceName)
+			}
+			sort.Strings(resourceNames)
+			if len(resourceNames) == 0 {
+				continue
+			}
+			rules = append(rules, admissionregv1.RuleWithOperations{
+				Operations: operations,
+				Rule: admissionregv1.Rule{
+					APIGroups:   []string{group},
+					APIVersions: []string{version},
+					Resources:   resourceNames,
+					Scope:       &clusterScope,
+				},
+			})
+		}
+	}
+	return rules
+}
+
+func splitAdmissionGroupVersion(groupVersion string) (string, string) {
+	parts := strings.SplitN(groupVersion, "/", 2)
+	if len(parts) == 1 {
+		return "", parts[0]
+	}
+	return parts[0], parts[1]
+}
+
+func admissionWebhooks(url string, caData []byte, rules []admissionregv1.RuleWithOperations) []admissionregv1.ValidatingWebhook {
+	sideEffects := admissionregv1.SideEffectClassNone
+	workloadFailurePolicy := admissionFailurePolicy()
+	clusterFailurePolicy := admissionregv1.Fail
+	clientConfig := admissionregv1.WebhookClientConfig{URL: &url, CABundle: caData}
+	return []admissionregv1.ValidatingWebhook{
+		{
+			Name:                    "admission.casbin.io",
+			ClientConfig:            clientConfig,
+			Rules:                   []admissionregv1.RuleWithOperations{rules[0]},
+			NamespaceSelector:       admissionNamespaceSelector(),
+			SideEffects:             &sideEffects,
+			FailurePolicy:           &workloadFailurePolicy,
+			AdmissionReviewVersions: []string{"v1"},
+		},
+		{
+			// The discovered cluster rules exclude admissionregistration.k8s.io,
+			// so this webhook can update its own configuration without weakening
+			// failure handling for other cluster-scoped resources.
+			Name:                    "cluster.admission.casbin.io",
+			ClientConfig:            clientConfig,
+			Rules:                   rules[1:],
+			SideEffects:             &sideEffects,
+			FailurePolicy:           &clusterFailurePolicy,
+			AdmissionReviewVersions: []string{"v1"},
+		},
+	}
 }
 
 // normalizeNodeCIDRs keeps the legacy PodCIDR field and the NodeIPAM source
@@ -116,37 +242,17 @@ func ensureCasbinWebhook(ctx context.Context, client kubernetes.Interface, cfg C
 	}
 
 	url := fmt.Sprintf("https://127.0.0.1:%d/admission/validate", cfg.WebhookPort)
-	sideEffects := admissionregv1.SideEffectClassNone
-	failurePolicy := admissionregv1.Ignore
-	all := admissionregv1.AllScopes
+	resourceLists, discoveryErr := client.Discovery().ServerPreferredResources()
+	if discoveryErr != nil {
+		logrus.Warnf("partial API discovery for admission rules: %v", discoveryErr)
+	}
+	rules := admissionRules(resourceLists)
+	if len(rules) < 2 {
+		return fmt.Errorf("discover cluster-scoped API resources for admission rules")
+	}
 	whConfig := &admissionregv1.ValidatingWebhookConfiguration{
 		ObjectMeta: metav1.ObjectMeta{Name: "casbin-admission"},
-		Webhooks: []admissionregv1.ValidatingWebhook{
-			{
-				Name: "admission.casbin.io",
-				ClientConfig: admissionregv1.WebhookClientConfig{
-					URL:      &url,
-					CABundle: caData,
-				},
-				Rules: []admissionregv1.RuleWithOperations{
-					{
-						Operations: []admissionregv1.OperationType{
-							admissionregv1.OperationAll,
-						},
-						Rule: admissionregv1.Rule{
-							APIGroups:   []string{"*"},
-							APIVersions: []string{"*"},
-							Resources:   []string{"*"},
-							Scope:       &all,
-						},
-					},
-				},
-				NamespaceSelector:       &metav1.LabelSelector{},
-				SideEffects:             &sideEffects,
-				FailurePolicy:           &failurePolicy,
-				AdmissionReviewVersions: []string{"v1"},
-			},
-		},
+		Webhooks:   admissionWebhooks(url, caData, rules),
 	}
 
 	ar := client.AdmissionregistrationV1().ValidatingWebhookConfigurations()
