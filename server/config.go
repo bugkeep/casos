@@ -25,6 +25,7 @@ type Config struct {
 	LocalPathHelperImage      string // helper pod image used by local-path-provisioner
 	FlannelImage              string // Flannel daemon image used by the built-in network bootstrap
 	FlannelCNIPluginImage     string // Flannel CNI plugin image installed on worker hosts
+	StorageProbeImage         string // Image used by worker storage readiness probes
 	StorageProvisionerEnabled bool   // install the built-in local-path provisioner for local clusters
 }
 
@@ -74,11 +75,12 @@ func ConfigFromAppConf() (Config, error) {
 	}
 
 	storageProvisionerEnabled := configBool("storageProvisionerEnabled", true)
-	coreDNSImage := configStringDefault("coreDNSImage", "docker.1ms.run/coredns/coredns:1.12.4")
-	localPathProvisionerImage := configStringDefault("localPathProvisionerImage", "docker.1ms.run/rancher/local-path-provisioner:v0.0.32")
-	localPathHelperImage := configStringDefault("localPathHelperImage", "docker.1ms.run/library/busybox:1.37.0")
+	coreDNSImage := configStringDefault("coreDNSImage", "registry.k8s.io/coredns/coredns:v1.12.4")
+	localPathProvisionerImage := configStringDefault("localPathProvisionerImage", "docker.io/rancher/local-path-provisioner:v0.0.32")
+	localPathHelperImage := configStringDefault("localPathHelperImage", "docker.io/library/busybox:1.37.0")
 	flannelImage := configStringDefault("flannelImage", "ghcr.io/flannel-io/flannel:v0.27.4")
 	flannelCNIPluginImage := configStringDefault("flannelCNIPluginImage", "ghcr.io/flannel-io/flannel-cni-plugin:v1.8.0-flannel1")
+	storageProbeImage := configStringDefault("storageProbeImage", "docker.io/library/busybox:1.37.0")
 
 	return Config{
 		DataDir:                   dataDir,
@@ -94,6 +96,7 @@ func ConfigFromAppConf() (Config, error) {
 		LocalPathHelperImage:      localPathHelperImage,
 		FlannelImage:              flannelImage,
 		FlannelCNIPluginImage:     flannelCNIPluginImage,
+		StorageProbeImage:         storageProbeImage,
 		StorageProvisionerEnabled: storageProvisionerEnabled,
 	}, nil
 }

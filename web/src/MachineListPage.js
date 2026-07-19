@@ -12,6 +12,7 @@ const statusColor = {
   Offline: "red",
   Deploying: "processing",
   Deployed: "blue",
+  Operational: "green",
   Failed: "red",
   Unknown: "default",
 };

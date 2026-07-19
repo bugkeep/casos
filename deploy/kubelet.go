@@ -19,6 +19,7 @@ kind: KubeletConfiguration
 cgroupDriver: systemd
 failSwapOn: false
 containerRuntimeEndpoint: unix:///run/containerd/containerd.sock
+resolvConf: /etc/casos-resolv.conf
 clusterDNS:
   - %s
 clusterDomain: cluster.local
