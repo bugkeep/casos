@@ -16,6 +16,11 @@ import (
 	"k8s.io/client-go/rest"
 )
 
+const (
+	casbinAdmissionWebhookName = "admission.casbin.io"
+	casbinAdmissionConfigName  = "casbin-admission"
+)
+
 // Bootstrap creates CasOS-managed cluster add-ons. It is idempotent and safe
 // to call on every startup; individual add-ons can be disabled in config.
 func Bootstrap(ctx context.Context, cfg *rest.Config, srvCfg Config) error {
@@ -46,6 +51,33 @@ func Bootstrap(ctx context.Context, cfg *rest.Config, srvCfg Config) error {
 	return errors.Join(errs...)
 }
 
+// casbinAdmissionWebhook returns the cluster-wide webhook used by the
+// co-located CasOS control plane. FailurePolicy is intentionally Ignore: the
+// endpoint is served by the same process as the control plane, so failing
+// closed would make a local outage prevent recovery. Callers must keep the URL
+// reachable from the API server or policy enforcement is silently bypassed.
+func casbinAdmissionWebhook(url string, caData []byte) admissionregv1.ValidatingWebhook {
+	sideEffects := admissionregv1.SideEffectClassNoneOnDryRun
+	failurePolicy := admissionregv1.Ignore
+	allScopes := admissionregv1.AllScopes
+	timeoutSeconds := int32(3)
+	return admissionregv1.ValidatingWebhook{
+		Name:         casbinAdmissionWebhookName,
+		ClientConfig: admissionregv1.WebhookClientConfig{URL: &url, CABundle: caData},
+		Rules: []admissionregv1.RuleWithOperations{{
+			Operations: []admissionregv1.OperationType{admissionregv1.OperationAll},
+			Rule: admissionregv1.Rule{
+				APIGroups: []string{"*"}, APIVersions: []string{"*"}, Resources: []string{"*"}, Scope: &allScopes,
+			},
+		}},
+		NamespaceSelector:       &metav1.LabelSelector{},
+		SideEffects:             &sideEffects,
+		FailurePolicy:           &failurePolicy,
+		TimeoutSeconds:          &timeoutSeconds,
+		AdmissionReviewVersions: []string{"v1"},
+	}
+}
+
 // ensureCasbinWebhook registers the ValidatingWebhookConfiguration that routes
 // admission requests to the casos Casbin enforcement server.
 func ensureCasbinWebhook(ctx context.Context, client kubernetes.Interface, cfg Config) error {
@@ -55,38 +87,10 @@ func ensureCasbinWebhook(ctx context.Context, client kubernetes.Interface, cfg C
 		return fmt.Errorf("read CA for webhook: %w", err)
 	}
 
-	url := fmt.Sprintf("https://127.0.0.1:%d/admission/validate", cfg.WebhookPort)
-	sideEffects := admissionregv1.SideEffectClassNone
-	failurePolicy := admissionregv1.Ignore
-	all := admissionregv1.AllScopes
+	url := fmt.Sprintf("https://127.0.0.1:%d%s", cfg.WebhookPort, admissionValidatePath)
 	whConfig := &admissionregv1.ValidatingWebhookConfiguration{
-		ObjectMeta: metav1.ObjectMeta{Name: "casbin-admission"},
-		Webhooks: []admissionregv1.ValidatingWebhook{
-			{
-				Name: "admission.casbin.io",
-				ClientConfig: admissionregv1.WebhookClientConfig{
-					URL:      &url,
-					CABundle: caData,
-				},
-				Rules: []admissionregv1.RuleWithOperations{
-					{
-						Operations: []admissionregv1.OperationType{
-							admissionregv1.OperationAll,
-						},
-						Rule: admissionregv1.Rule{
-							APIGroups:   []string{"*"},
-							APIVersions: []string{"*"},
-							Resources:   []string{"*"},
-							Scope:       &all,
-						},
-					},
-				},
-				NamespaceSelector:       &metav1.LabelSelector{},
-				SideEffects:             &sideEffects,
-				FailurePolicy:           &failurePolicy,
-				AdmissionReviewVersions: []string{"v1"},
-			},
-		},
+		ObjectMeta: metav1.ObjectMeta{Name: casbinAdmissionConfigName},
+		Webhooks:   []admissionregv1.ValidatingWebhook{casbinAdmissionWebhook(url, caData)},
 	}
 
 	ar := client.AdmissionregistrationV1().ValidatingWebhookConfigurations()
@@ -96,12 +100,12 @@ func ensureCasbinWebhook(ctx context.Context, client kubernetes.Interface, cfg C
 		logrus.Warnf("delete legacy casbin-gatekeeper webhook: %v", err)
 	}
 
-	existing, err := ar.Get(ctx, "casbin-admission", metav1.GetOptions{})
+	existing, err := ar.Get(ctx, casbinAdmissionConfigName, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		if _, err := ar.Create(ctx, whConfig, metav1.CreateOptions{}); err != nil {
 			return fmt.Errorf("create casbin-admission webhook: %w", err)
 		}
-		logrus.Info("created ValidatingWebhookConfiguration casbin-admission")
+		logrus.Infof("created ValidatingWebhookConfiguration %s", casbinAdmissionConfigName)
 		return nil
 	}
 	if err != nil {
@@ -111,7 +115,7 @@ func ensureCasbinWebhook(ctx context.Context, client kubernetes.Interface, cfg C
 	if _, err := ar.Update(ctx, whConfig, metav1.UpdateOptions{}); err != nil {
 		return fmt.Errorf("update casbin-admission webhook: %w", err)
 	}
-	logrus.Info("updated ValidatingWebhookConfiguration casbin-admission")
+	logrus.Infof("updated ValidatingWebhookConfiguration %s", casbinAdmissionConfigName)
 	return nil
 }
 

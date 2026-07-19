@@ -341,23 +341,25 @@ func ensureServiceAccountKey(dir string) error {
 	return writePEM(pubFile, "PUBLIC KEY", pubDER)
 }
 
-// ensureComponentKubeconfig writes <name>.kubeconfig inside certDir, embedding
-// admin client certs as base64 to avoid Windows path escaping issues.
+// ensureComponentKubeconfig writes <name>.kubeconfig inside certDir with the
+// component's standard Kubernetes identity. It always refreshes the kubeconfig
+// so installations created by older releases stop reusing the admin identity.
 func ensureComponentKubeconfig(certDir, apiserverURL, name string) (string, error) {
 	path := filepath.Join(certDir, name+".kubeconfig")
-	if fileExists(path) {
-		return path, nil
+	commonNames := map[string]string{
+		"controller-manager": "system:kube-controller-manager",
+		"scheduler":          "system:kube-scheduler",
+	}
+	commonName, ok := commonNames[name]
+	if !ok {
+		return "", fmt.Errorf("unsupported component identity %q", name)
 	}
 
 	caData, err := os.ReadFile(filepath.Join(certDir, "ca.crt"))
 	if err != nil {
 		return "", err
 	}
-	certData, err := os.ReadFile(filepath.Join(certDir, "admin.crt"))
-	if err != nil {
-		return "", err
-	}
-	keyData, err := os.ReadFile(filepath.Join(certDir, "admin.key"))
+	certData, keyData, err := newComponentClientCredentials(certDir, name, commonName)
 	if err != nil {
 		return "", err
 	}
@@ -389,10 +391,94 @@ users:
 		base64.StdEncoding.EncodeToString(keyData),
 	)
 
-	if err := os.WriteFile(path, []byte(kubeconfig), 0o600); err != nil {
+	if err := writeFileAtomically(path, []byte(kubeconfig), 0o600); err != nil {
 		return "", err
 	}
 	return path, nil
+}
+
+func newComponentClientCredentials(certDir, name, commonName string) ([]byte, []byte, error) {
+	caCertPEM, err := os.ReadFile(filepath.Join(certDir, "ca.crt"))
+	if err != nil {
+		return nil, nil, fmt.Errorf("read component CA certificate: %w", err)
+	}
+	caBlock, _ := pem.Decode(caCertPEM)
+	if caBlock == nil {
+		return nil, nil, fmt.Errorf("decode component CA certificate")
+	}
+	caCert, err := x509.ParseCertificate(caBlock.Bytes)
+	if err != nil {
+		return nil, nil, fmt.Errorf("parse component CA certificate: %w", err)
+	}
+
+	caKeyPEM, err := os.ReadFile(filepath.Join(certDir, "ca.key"))
+	if err != nil {
+		return nil, nil, fmt.Errorf("read component CA key: %w", err)
+	}
+	caKeyBlock, _ := pem.Decode(caKeyPEM)
+	if caKeyBlock == nil {
+		return nil, nil, fmt.Errorf("decode component CA key")
+	}
+	caKey, err := x509.ParsePKCS1PrivateKey(caKeyBlock.Bytes)
+	if err != nil {
+		return nil, nil, fmt.Errorf("parse component CA key: %w", err)
+	}
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, nil, fmt.Errorf("generate component %s client key: %w", name, err)
+	}
+	serialLimit := new(big.Int).Lsh(big.NewInt(1), 128)
+	serial, err := rand.Int(rand.Reader, serialLimit)
+	if err != nil {
+		return nil, nil, fmt.Errorf("generate component %s certificate serial: %w", name, err)
+	}
+	template := &x509.Certificate{
+		SerialNumber: serial,
+		Subject:      pkix.Name{CommonName: commonName},
+		NotBefore:    time.Now().Add(-time.Minute),
+		NotAfter:     time.Now().Add(10 * 365 * 24 * time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+	}
+	certDER, err := x509.CreateCertificate(rand.Reader, template, caCert, &key.PublicKey, caKey)
+	if err != nil {
+		return nil, nil, fmt.Errorf("create component %s client certificate: %w", name, err)
+	}
+	keyDER, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		return nil, nil, fmt.Errorf("marshal component %s client key: %w", name, err)
+	}
+	certData := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
+	keyData := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
+	if certData == nil || keyData == nil {
+		return nil, nil, fmt.Errorf("encode component %s client credentials", name)
+	}
+	return certData, keyData, nil
+}
+
+func writeFileAtomically(path string, data []byte, mode os.FileMode) (err error) {
+	temp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tempPath := temp.Name()
+	defer func() {
+		_ = temp.Close()
+		_ = os.Remove(tempPath)
+	}()
+	if err := temp.Chmod(mode); err != nil {
+		return err
+	}
+	if _, err := temp.Write(data); err != nil {
+		return err
+	}
+	if err := temp.Sync(); err != nil {
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tempPath, path)
 }
 
 // AdminRestConfig returns a rest.Config that authenticates to the apiserver
