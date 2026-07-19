@@ -4,7 +4,7 @@ go 1.26.0
 
 replace (
 	// kine -> our own fork
-	github.com/k3s-io/kine => github.com/casosorg/kine v0.16.2-a
+	github.com/k3s-io/kine => github.com/casosorg/kine v0.16.2-r2
 
 	// beego pins v2.0.3+incompatible (pre-modules tag) but kine needs SetFileControlInt
 	// from v1.14.x; force the newer v1 release via replace
@@ -79,6 +79,7 @@ require (
 )
 
 require (
+	github.com/Masterminds/semver/v3 v3.5.0
 	github.com/casbin/casbin/v2 v2.135.0
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
 	github.com/spf13/pflag v1.0.10
@@ -88,6 +89,7 @@ require (
 	helm.sh/helm/v3 v3.21.2
 	k8s.io/api v1.36.1-k3s1
 	k8s.io/component-base v1.36.1-k3s1
+	sigs.k8s.io/yaml v1.6.0
 )
 
 require (
@@ -101,7 +103,6 @@ require (
 	github.com/JeffAshton/win_pdh v0.0.0-20161109143554-76bb4ee9f0ab // indirect
 	github.com/MakeNowJust/heredoc v1.0.0 // indirect
 	github.com/Masterminds/goutils v1.1.1 // indirect
-	github.com/Masterminds/semver/v3 v3.5.0 // indirect
 	github.com/Masterminds/sprig/v3 v3.3.0 // indirect
 	github.com/Masterminds/squirrel v1.5.4 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
@@ -344,6 +345,5 @@ require (
 	sigs.k8s.io/kustomize/kyaml v0.21.1 // indirect
 	sigs.k8s.io/randfill v1.0.0 // indirect
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.2 // indirect
-	sigs.k8s.io/yaml v1.6.0 // indirect
 	xorm.io/builder v0.3.9 // indirect
 )

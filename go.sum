@@ -2794,8 +2794,8 @@ github.com/casbin/govaluate v1.3.0 h1:VA0eSY0M2lA86dYd5kPPuNZMUD9QkWnOCnavGrw9my
 github.com/casbin/govaluate v1.3.0/go.mod h1:G/UnbIjZk/0uMNaLwZZmFQrR72tYRZWQkO70si/iR7A=
 github.com/casdoor/casdoor-go-sdk v0.52.0 h1:UKcZfczO3U5H7md6bTtI6zIJzeorBrbg/WE8Q4qsczE=
 github.com/casdoor/casdoor-go-sdk v0.52.0/go.mod h1:cMnkCQJgMYpgAlgEx8reSt1AVaDIQLcJ1zk5pzBaz+4=
-github.com/casosorg/kine v0.16.2-a h1:w4oLC+yi6LdP+FKTM2ekgbn5FA9BdbXv8lbXo7gDRsU=
-github.com/casosorg/kine v0.16.2-a/go.mod h1:gAV0w6F+bR8cKABHszgvqR2zg9g39coOcGCBMt3T748=
+github.com/casosorg/kine v0.16.2-r2 h1:NFD0bN2Ozz3T+BqPP2u0JJUqiIkFK0jquqPjDh15gUg=
+github.com/casosorg/kine v0.16.2-r2/go.mod h1:gAV0w6F+bR8cKABHszgvqR2zg9g39coOcGCBMt3T748=
 github.com/cenkalti/backoff v2.2.1+incompatible/go.mod h1:90ReRw6GdpyfrHakVjL/QHaoyV4aDUVVkXQJJJ3NXXM=
 github.com/cenkalti/backoff/v5 v5.0.3 h1:ZN+IMa753KfX5hd8vVaMixjnqRZ3y8CuJKRKj1xcsSM=
 github.com/cenkalti/backoff/v5 v5.0.3/go.mod h1:rkhZdG3JZukswDf7f0cwqPNk4K0sa+F97BxZthm/crw=
