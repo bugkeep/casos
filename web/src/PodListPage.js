@@ -11,6 +11,29 @@ import PodLogsDrawer from "./PodLogsDrawer";
 import PodTerminalDrawer from "./PodTerminalDrawer";
 import PodFilesDrawer from "./PodFilesDrawer";
 
+// List page for each workload kind that can control a pod. Deleting the pod
+// only makes the controller recreate it, so the owner cell links here instead.
+const ownerPages = {
+  Deployment: "/deployments",
+  StatefulSet: "/statefulsets",
+  DaemonSet: "/daemonsets",
+  Job: "/jobs",
+  CronJob: "/cronjobs",
+};
+
+// The Deployment page opens its edit modal from these params; the others just
+// land on the list, where each row already has a Delete button.
+function ownerLink(pod) {
+  const page = ownerPages[pod.ownerKind];
+  if (!page) {
+    return null;
+  }
+  if (pod.ownerKind !== "Deployment") {
+    return page;
+  }
+  return `${page}?namespace=${encodeURIComponent(pod.namespace)}&name=${encodeURIComponent(pod.ownerName)}`;
+}
+
 const phaseColor = {
   Running: "green",
   Pending: "gold",
@@ -229,23 +252,21 @@ class PodListPage extends React.Component {
       {title: "Namespace", dataIndex: "namespace", key: "namespace", width: 140},
       {title: "Name", dataIndex: "name", key: "name"},
       {
-        title: "Deployment",
+        title: "Controlled By",
         key: "owner",
-        width: 200,
+        width: 220,
         render: (_, record) => {
           if (!record.ownerName) {
             return <span style={{color: "#999"}}>—</span>;
           }
-          if (record.ownerKind !== "Deployment") {
-            return <Tag>{`${record.ownerKind}: ${record.ownerName}`}</Tag>;
+          const link = ownerLink(record);
+          const label = record.ownerKind === "Deployment"
+            ? record.ownerName
+            : `${record.ownerKind}: ${record.ownerName}`;
+          if (!link) {
+            return <Tag>{label}</Tag>;
           }
-          return (
-            <a onClick={() => this.props.history.push(
-              `/deployments?namespace=${encodeURIComponent(record.namespace)}&name=${encodeURIComponent(record.ownerName)}`
-            )}>
-              {record.ownerName}
-            </a>
-          );
+          return <a onClick={() => this.props.history.push(link)}>{label}</a>;
         },
       },
       {title: "Image", dataIndex: "image", key: "image"},
@@ -311,7 +332,18 @@ class PodListPage extends React.Component {
             </Button>
             {record.ownerName ? (
               <Tooltip
-                title={`Managed by ${record.ownerKind} "${record.ownerName}" — deleting this pod only makes it restart under a new name. Delete or scale the ${record.ownerKind} instead.`}
+                title={
+                  <span>
+                    Managed by {record.ownerKind} &quot;{record.ownerName}&quot; — deleting this pod only makes it come
+                    back under a new name.
+                    {ownerLink(record)
+                      ? <> To remove it for good, delete the {record.ownerKind} on the <a
+                        style={{color: "#69b1ff"}}
+                        onClick={() => this.props.history.push(ownerLink(record))}
+                      >{ownerPages[record.ownerKind].slice(1)} page</a>.</>
+                      : ` To remove it for good, delete the ${record.ownerKind}.`}
+                  </span>
+                }
               >
                 <span style={{cursor: "not-allowed"}}>
                   <Button size="small" danger disabled icon={<DeleteOutlined />} style={{pointerEvents: "none"}}>
