@@ -25,6 +25,7 @@ type Config struct {
 	LocalPathHelperImage      string // helper pod image used by local-path-provisioner
 	FlannelImage              string // Flannel daemon image used by the built-in network bootstrap
 	FlannelCNIPluginImage     string // Flannel CNI plugin image installed on worker hosts
+	StorageProbeImage         string // Image used by worker storage readiness probes
 	StorageProvisionerEnabled bool   // install the built-in local-path provisioner for local clusters
 }
 
@@ -79,6 +80,7 @@ func ConfigFromAppConf() (Config, error) {
 	localPathHelperImage := configStringDefault("localPathHelperImage", "docker.1ms.run/library/busybox:1.37.0")
 	flannelImage := configStringDefault("flannelImage", defaultFlannelImage)
 	flannelCNIPluginImage := configStringDefault("flannelCNIPluginImage", defaultFlannelCNIPluginImage)
+	storageProbeImage := configStringDefault("storageProbeImage", "docker.1ms.run/library/busybox:1.37.0")
 
 	return Config{
 		DataDir:                   dataDir,
@@ -94,6 +96,7 @@ func ConfigFromAppConf() (Config, error) {
 		LocalPathHelperImage:      localPathHelperImage,
 		FlannelImage:              flannelImage,
 		FlannelCNIPluginImage:     flannelCNIPluginImage,
+		StorageProbeImage:         storageProbeImage,
 		StorageProvisionerEnabled: storageProvisionerEnabled,
 	}, nil
 }

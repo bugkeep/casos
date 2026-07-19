@@ -90,14 +90,23 @@ func RunNodeDeployPreflight(ctx context.Context, runner *NodeDeploySSHRunner, ap
 		// The bootstrap kubeconfig embeds the apiserver CA, but this early
 		// reachability probe runs before those files exist on the target node.
 		encodedURL := base64.StdEncoding.EncodeToString([]byte(trimmedURL))
-		cmd := fmt.Sprintf("apiserver_url=$(printf %%s %s | base64 -d) && curl -kfsS --connect-timeout 5 \"$apiserver_url/readyz\" >/dev/null", shellSingleQuote(encodedURL))
-		if _, err = runner.RunContext(ctx, cmd); err != nil {
+		cmd := fmt.Sprintf("apiserver_url=$(printf %%s %s | base64 -d) && curl -ksS --connect-timeout 5 --output /dev/null --write-out %%{http_code} \"$apiserver_url/readyz\"", shellSingleQuote(encodedURL))
+		status, err := runner.RunContext(ctx, cmd)
+		if err != nil {
 			return nil, fmt.Errorf("apiserver is not reachable from target: %w", err)
+		}
+		if !isNodeDeployApiserverProbeStatus(status) {
+			return nil, fmt.Errorf("apiserver readiness probe returned HTTP status %q", strings.TrimSpace(status))
 		}
 		result.ApiserverOK = true
 	}
 
 	return result, nil
+}
+
+func isNodeDeployApiserverProbeStatus(status string) bool {
+	status = strings.TrimSpace(status)
+	return (len(status) == 3 && status[0] == '2') || status == "401" || status == "403"
 }
 
 func ResolveNodeDeployApiserverURL(ctx context.Context, runner *NodeDeploySSHRunner, fallbackURL string) string {

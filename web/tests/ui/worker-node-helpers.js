@@ -5,6 +5,7 @@ const {e2eSshPassword, expectOkJson} = require("./e2e-helpers");
 const API_ADD_MACHINE = "/api/add-machine";
 const API_DELETE_MACHINE = "/api/delete-machine";
 const API_DEPLOY_MACHINE_NODE = "/api/deploy-machine-node";
+const API_GET_MACHINE_NODE_LOGS = "/api/get-machine-node-logs";
 const API_GET_MACHINE_NODE_TASKS = "/api/get-machine-node-tasks";
 const API_REPAIR_MACHINE_NODE = "/api/repair-machine-node";
 // MachineListPage currently submits new machines with owner "admin".
@@ -143,6 +144,13 @@ async function getMachineNodeTasks(page, machineName) {
   return expectOkJson(tasks);
 }
 
+async function getMachineNodeLogs(page, taskId) {
+  const logs = await page.context().request.get(
+    `${API_GET_MACHINE_NODE_LOGS}?taskId=${encodeURIComponent(taskId)}`
+  );
+  return expectOkJson(logs);
+}
+
 function workerNodeDialog(page, machineName) {
   return page.getByRole("dialog", {name: `Worker Node - ${machineName}`});
 }
@@ -261,12 +269,14 @@ module.exports = {
   API_ADD_MACHINE,
   API_DELETE_MACHINE,
   API_DEPLOY_MACHINE_NODE,
+  API_GET_MACHINE_NODE_LOGS,
   API_GET_MACHINE_NODE_TASKS,
   API_REPAIR_MACHINE_NODE,
   E2E_MACHINE_OWNER,
   createdMachinesFixture,
   createMachineFromUi,
   findMachineRow,
+  getMachineNodeLogs,
   getMachineNodeTasks,
   makeMachineName,
   openWorkerNodePanel,
