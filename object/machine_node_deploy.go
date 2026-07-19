@@ -51,6 +51,7 @@ var (
 
 type MachineNodeDeployTask struct {
 	Id           int64     `xorm:"pk autoincr" json:"id"`
+	ActiveKey    *string   `xorm:"char(64) unique" json:"-"`
 	Owner        string    `xorm:"varchar(100) notnull index" json:"owner"`
 	MachineName  string    `xorm:"varchar(100) notnull index" json:"machineName"`
 	NodeName     string    `xorm:"varchar(100) notnull" json:"nodeName"`
@@ -103,6 +104,7 @@ func CreateMachineNodeDeployTask(owner, machineName, nodeName, apiserverURL stri
 		}
 	}
 
+	activeKey := machineNodeDeployActiveKey(owner, machineName)
 	result, err := withMachineNodeDeployTransaction(func(session *xorm.Session) (interface{}, error) {
 		machine := &Machine{}
 		foundMachine, err := session.
@@ -131,6 +133,7 @@ func CreateMachineNodeDeployTask(owner, machineName, nodeName, apiserverURL stri
 
 		now := time.Now().UTC()
 		task := &MachineNodeDeployTask{
+			ActiveKey:    &activeKey,
 			Owner:        owner,
 			MachineName:  machineName,
 			NodeName:     nodeName,
@@ -153,6 +156,11 @@ func CreateMachineNodeDeployTask(owner, machineName, nodeName, apiserverURL stri
 		return nil, fmt.Errorf("create node deployment task returned invalid result")
 	}
 	return task, nil
+}
+
+func machineNodeDeployActiveKey(owner, machineName string) string {
+	digest := sha256.Sum256([]byte(owner + "\x00" + machineName))
+	return fmt.Sprintf("%x", digest[:])
 }
 
 func GetMachineNodeDeployTask(id int64) (*MachineNodeDeployTask, error) {
@@ -214,8 +222,9 @@ func FailActiveMachineNodeDeployTasks(reason string) error {
 	now := time.Now().UTC()
 	_, err := ormer.Engine.
 		Where("status IN (?, ?)", MachineNodeDeployStatusPending, MachineNodeDeployStatusRunning).
-		Cols("status", "phase", "error_msg", "finished_at", "updated_at").
+		Cols("active_key", "status", "phase", "error_msg", "finished_at", "updated_at").
 		Update(&MachineNodeDeployTask{
+			ActiveKey:  nil,
 			Status:     MachineNodeDeployStatusFailed,
 			Phase:      MachineNodeDeployPhaseFailed,
 			ErrorMsg:   reason,
@@ -284,8 +293,9 @@ func FinishMachineNodeDeployTask(id int64, success bool, phase, errorMsg string)
 	now := time.Now().UTC()
 	affected, err := ormer.Engine.ID(id).
 		Where("status IN (?, ?)", MachineNodeDeployStatusPending, MachineNodeDeployStatusRunning).
-		Cols("status", "phase", "error_msg", "finished_at", "updated_at").
+		Cols("active_key", "status", "phase", "error_msg", "finished_at", "updated_at").
 		Update(&MachineNodeDeployTask{
+			ActiveKey:  nil,
 			Status:     status,
 			Phase:      phase,
 			ErrorMsg:   errorMsg,
@@ -543,7 +553,7 @@ func UpdateMachineNodeDeployStatus(owner, name, status string) error {
 
 func isValidMachineStatus(status string) bool {
 	switch status {
-	case MachineStatusDeploying, MachineStatusDeployed, MachineStatusFailed:
+	case MachineStatusDeploying, MachineStatusDeployed, MachineStatusOperational, MachineStatusFailed:
 		return true
 	default:
 		return false

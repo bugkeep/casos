@@ -19,10 +19,11 @@ kind: KubeletConfiguration
 cgroupDriver: systemd
 failSwapOn: false
 containerRuntimeEndpoint: unix:///run/containerd/containerd.sock
+resolvConf: %s
 clusterDNS:
   - %s
 clusterDomain: cluster.local
-`, nodeDeployClusterDNS)
+`, nodeDeployResolverPath, nodeDeployClusterDNS)
 }
 
 func kubeletService(nodeName string) string {

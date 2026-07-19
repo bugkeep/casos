@@ -13,10 +13,12 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	storagev1 "k8s.io/api/storage/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	appsinternal "k8s.io/kubernetes/pkg/apis/apps/v1"
 )
 
 const (
@@ -49,6 +51,12 @@ func ensureDefaultStorageProvisioner(ctx context.Context, client kubernetes.Inte
 		return err
 	}
 	if err := ensureLocalPathServiceAccount(ctx, client); err != nil {
+		return err
+	}
+	if err := ensureLocalPathRole(ctx, client); err != nil {
+		return err
+	}
+	if err := ensureLocalPathRoleBinding(ctx, client); err != nil {
 		return err
 	}
 	if err := ensureLocalPathClusterRole(ctx, client); err != nil {
@@ -89,6 +97,43 @@ func ensureLocalPathServiceAccount(ctx context.Context, client kubernetes.Interf
 	return createOrUpdateServiceAccount(ctx, client, sa)
 }
 
+func ensureLocalPathRole(ctx context.Context, client kubernetes.Interface) error {
+	role := &rbacv1.Role{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "local-path-provisioner-role",
+			Namespace: localPathNamespace,
+			Labels:    localPathLabels(),
+		},
+		Rules: []rbacv1.PolicyRule{{
+			APIGroups: []string{""},
+			Resources: []string{"pods"},
+			Verbs:     []string{"get", "list", "watch", "create", "patch", "update", "delete"},
+		}},
+	}
+	return createOrUpdateRole(ctx, client, role)
+}
+
+func ensureLocalPathRoleBinding(ctx context.Context, client kubernetes.Interface) error {
+	binding := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "local-path-provisioner-bind",
+			Namespace: localPathNamespace,
+			Labels:    localPathLabels(),
+		},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: "rbac.authorization.k8s.io",
+			Kind:     "Role",
+			Name:     "local-path-provisioner-role",
+		},
+		Subjects: []rbacv1.Subject{{
+			Kind:      "ServiceAccount",
+			Name:      "local-path-provisioner-service-account",
+			Namespace: localPathNamespace,
+		}},
+	}
+	return createOrUpdateRoleBinding(ctx, client, binding)
+}
+
 func ensureLocalPathClusterRole(ctx context.Context, client kubernetes.Interface) error {
 	role := &rbacv1.ClusterRole{
 		ObjectMeta: metav1.ObjectMeta{
@@ -109,7 +154,7 @@ func ensureLocalPathClusterRole(ctx context.Context, client kubernetes.Interface
 			{
 				APIGroups: []string{""},
 				Resources: []string{"persistentvolumes"},
-				Verbs:     []string{"get", "list", "watch", "create", "patch", "delete"},
+				Verbs:     []string{"get", "list", "watch", "create", "patch", "update", "delete"},
 			},
 			{
 				APIGroups: []string{""},
@@ -174,6 +219,9 @@ spec:
   automountServiceAccountToken: false
   tolerations:
     - key: node.kubernetes.io/disk-pressure
+      operator: Exists
+      effect: NoSchedule
+    - key: casos.io/bootstrap
       operator: Exists
       effect: NoSchedule
   containers:
@@ -259,6 +307,7 @@ func ensureLocalPathDeployment(ctx context.Context, client kubernetes.Interface,
 					Tolerations: []corev1.Toleration{
 						{Key: "node-role.kubernetes.io/control-plane", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule},
 						{Key: "node-role.kubernetes.io/master", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule},
+						{Key: "casos.io/bootstrap", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule},
 					},
 					Containers: []corev1.Container{
 						{
@@ -408,6 +457,13 @@ func createOrUpdateServiceAccount(ctx context.Context, client kubernetes.Interfa
 	sa.Secrets = current.Secrets
 	sa.ImagePullSecrets = current.ImagePullSecrets
 	sa.AutomountServiceAccountToken = current.AutomountServiceAccountToken
+	if apiequality.Semantic.DeepEqual(current.Labels, sa.Labels) &&
+		apiequality.Semantic.DeepEqual(current.Annotations, sa.Annotations) &&
+		apiequality.Semantic.DeepEqual(current.Secrets, sa.Secrets) &&
+		apiequality.Semantic.DeepEqual(current.ImagePullSecrets, sa.ImagePullSecrets) &&
+		apiequality.Semantic.DeepEqual(current.AutomountServiceAccountToken, sa.AutomountServiceAccountToken) {
+		return nil
+	}
 	sa.ResourceVersion = current.ResourceVersion
 	if _, err := client.CoreV1().ServiceAccounts(sa.Namespace).Update(ctx, sa, metav1.UpdateOptions{}); err != nil {
 		return fmt.Errorf("update serviceaccount %s/%s: %w", sa.Namespace, sa.Name, err)
@@ -429,6 +485,12 @@ func createOrUpdateClusterRole(ctx context.Context, client kubernetes.Interface,
 	}
 	role.Labels = mergeStringMap(current.Labels, role.Labels)
 	role.Annotations = mergeStringMap(current.Annotations, role.Annotations)
+	if apiequality.Semantic.DeepEqual(current.Labels, role.Labels) &&
+		apiequality.Semantic.DeepEqual(current.Annotations, role.Annotations) &&
+		apiequality.Semantic.DeepEqual(current.Rules, role.Rules) &&
+		apiequality.Semantic.DeepEqual(current.AggregationRule, role.AggregationRule) {
+		return nil
+	}
 	role.ResourceVersion = current.ResourceVersion
 	if _, err := client.RbacV1().ClusterRoles().Update(ctx, role, metav1.UpdateOptions{}); err != nil {
 		return fmt.Errorf("update clusterrole %s: %w", role.Name, err)
@@ -450,6 +512,12 @@ func createOrUpdateClusterRoleBinding(ctx context.Context, client kubernetes.Int
 	}
 	binding.Labels = mergeStringMap(current.Labels, binding.Labels)
 	binding.Annotations = mergeStringMap(current.Annotations, binding.Annotations)
+	if apiequality.Semantic.DeepEqual(current.Labels, binding.Labels) &&
+		apiequality.Semantic.DeepEqual(current.Annotations, binding.Annotations) &&
+		apiequality.Semantic.DeepEqual(current.RoleRef, binding.RoleRef) &&
+		apiequality.Semantic.DeepEqual(current.Subjects, binding.Subjects) {
+		return nil
+	}
 	binding.ResourceVersion = current.ResourceVersion
 	if _, err := client.RbacV1().ClusterRoleBindings().Update(ctx, binding, metav1.UpdateOptions{}); err != nil {
 		return fmt.Errorf("update clusterrolebinding %s: %w", binding.Name, err)
@@ -471,6 +539,13 @@ func createOrUpdateConfigMap(ctx context.Context, client kubernetes.Interface, c
 	}
 	cm.Labels = mergeStringMap(current.Labels, cm.Labels)
 	cm.Annotations = mergeStringMap(current.Annotations, cm.Annotations)
+	if apiequality.Semantic.DeepEqual(current.Labels, cm.Labels) &&
+		apiequality.Semantic.DeepEqual(current.Annotations, cm.Annotations) &&
+		apiequality.Semantic.DeepEqual(current.Data, cm.Data) &&
+		apiequality.Semantic.DeepEqual(current.BinaryData, cm.BinaryData) &&
+		apiequality.Semantic.DeepEqual(current.Immutable, cm.Immutable) {
+		return nil
+	}
 	cm.ResourceVersion = current.ResourceVersion
 	if _, err := client.CoreV1().ConfigMaps(cm.Namespace).Update(ctx, cm, metav1.UpdateOptions{}); err != nil {
 		return fmt.Errorf("update configmap %s/%s: %w", cm.Namespace, cm.Name, err)
@@ -478,23 +553,86 @@ func createOrUpdateConfigMap(ctx context.Context, client kubernetes.Interface, c
 	return nil
 }
 
-func createOrUpdateDeployment(ctx context.Context, client kubernetes.Interface, deployment *appsv1.Deployment) error {
-	current, err := client.AppsV1().Deployments(deployment.Namespace).Get(ctx, deployment.Name, metav1.GetOptions{})
+func createOrUpdateRole(ctx context.Context, client kubernetes.Interface, role *rbacv1.Role) error {
+	roles := client.RbacV1().Roles(role.Namespace)
+	current, err := roles.Get(ctx, role.Name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
-		_, err = client.AppsV1().Deployments(deployment.Namespace).Create(ctx, deployment, metav1.CreateOptions{})
-		if err != nil {
-			return fmt.Errorf("create deployment %s/%s: %w", deployment.Namespace, deployment.Name, err)
+		if _, err = roles.Create(ctx, role, metav1.CreateOptions{}); err != nil {
+			return fmt.Errorf("create role %s/%s: %w", role.Namespace, role.Name, err)
 		}
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("get deployment %s/%s: %w", deployment.Namespace, deployment.Name, err)
+		return fmt.Errorf("get role %s/%s: %w", role.Namespace, role.Name, err)
 	}
-	deployment.Labels = mergeStringMap(current.Labels, deployment.Labels)
-	deployment.Annotations = mergeStringMap(current.Annotations, deployment.Annotations)
-	deployment.ResourceVersion = current.ResourceVersion
-	if _, err := client.AppsV1().Deployments(deployment.Namespace).Update(ctx, deployment, metav1.UpdateOptions{}); err != nil {
-		return fmt.Errorf("update deployment %s/%s: %w", deployment.Namespace, deployment.Name, err)
+	role.Labels = mergeStringMap(current.Labels, role.Labels)
+	role.Annotations = mergeStringMap(current.Annotations, role.Annotations)
+	if apiequality.Semantic.DeepEqual(current.Labels, role.Labels) &&
+		apiequality.Semantic.DeepEqual(current.Annotations, role.Annotations) &&
+		apiequality.Semantic.DeepEqual(current.Rules, role.Rules) {
+		return nil
+	}
+	role.ResourceVersion = current.ResourceVersion
+	if _, err := roles.Update(ctx, role, metav1.UpdateOptions{}); err != nil {
+		return fmt.Errorf("update role %s/%s: %w", role.Namespace, role.Name, err)
+	}
+	return nil
+}
+
+func createOrUpdateRoleBinding(ctx context.Context, client kubernetes.Interface, binding *rbacv1.RoleBinding) error {
+	bindings := client.RbacV1().RoleBindings(binding.Namespace)
+	current, err := bindings.Get(ctx, binding.Name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		if _, err = bindings.Create(ctx, binding, metav1.CreateOptions{}); err != nil {
+			return fmt.Errorf("create rolebinding %s/%s: %w", binding.Namespace, binding.Name, err)
+		}
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("get rolebinding %s/%s: %w", binding.Namespace, binding.Name, err)
+	}
+	if !apiequality.Semantic.DeepEqual(current.RoleRef, binding.RoleRef) {
+		return fmt.Errorf("rolebinding %s/%s has immutable roleRef %v", binding.Namespace, binding.Name, current.RoleRef)
+	}
+	binding.Labels = mergeStringMap(current.Labels, binding.Labels)
+	binding.Annotations = mergeStringMap(current.Annotations, binding.Annotations)
+	if apiequality.Semantic.DeepEqual(current.Labels, binding.Labels) &&
+		apiequality.Semantic.DeepEqual(current.Annotations, binding.Annotations) &&
+		apiequality.Semantic.DeepEqual(current.Subjects, binding.Subjects) {
+		return nil
+	}
+	binding.ResourceVersion = current.ResourceVersion
+	if _, err := bindings.Update(ctx, binding, metav1.UpdateOptions{}); err != nil {
+		return fmt.Errorf("update rolebinding %s/%s: %w", binding.Namespace, binding.Name, err)
+	}
+	return nil
+}
+
+func createOrUpdateDeployment(ctx context.Context, client kubernetes.Interface, deployment *appsv1.Deployment) error {
+	desired := deployment.DeepCopy()
+	appsinternal.SetObjectDefaults_Deployment(desired)
+	current, err := client.AppsV1().Deployments(desired.Namespace).Get(ctx, desired.Name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		_, err = client.AppsV1().Deployments(desired.Namespace).Create(ctx, desired, metav1.CreateOptions{})
+		if err != nil {
+			return fmt.Errorf("create deployment %s/%s: %w", desired.Namespace, desired.Name, err)
+		}
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("get deployment %s/%s: %w", desired.Namespace, desired.Name, err)
+	}
+	desired.Labels = mergeStringMap(current.Labels, desired.Labels)
+	desired.Annotations = mergeStringMap(current.Annotations, desired.Annotations)
+	currentSpec := defaultedDeploymentSpec(current.Spec)
+	if apiequality.Semantic.DeepEqual(current.Labels, desired.Labels) &&
+		apiequality.Semantic.DeepEqual(current.Annotations, desired.Annotations) &&
+		apiequality.Semantic.DeepEqual(currentSpec, desired.Spec) {
+		return nil
+	}
+	desired.ResourceVersion = current.ResourceVersion
+	if _, err := client.AppsV1().Deployments(desired.Namespace).Update(ctx, desired, metav1.UpdateOptions{}); err != nil {
+		return fmt.Errorf("update deployment %s/%s: %w", desired.Namespace, desired.Name, err)
 	}
 	return nil
 }
@@ -523,6 +661,10 @@ func reconcileLocalPathDeployment(ctx context.Context, client kubernetes.Interfa
 		updated := current.DeepCopy()
 		updated.Labels = mergeStringMap(updated.Labels, deployment.Labels)
 		updated.Annotations = mergeStringMap(updated.Annotations, deployment.Annotations)
+		if apiequality.Semantic.DeepEqual(current.Labels, updated.Labels) &&
+			apiequality.Semantic.DeepEqual(current.Annotations, updated.Annotations) {
+			return nil
+		}
 		if _, err := client.AppsV1().Deployments(updated.Namespace).Update(ctx, updated, metav1.UpdateOptions{}); err != nil {
 			return fmt.Errorf("patch deployment %s/%s metadata: %w", deployment.Namespace, deployment.Name, err)
 		}
@@ -550,6 +692,7 @@ func reconcileLocalPathDeployment(ctx context.Context, client kubernetes.Interfa
 }
 
 func hashLocalPathDeploymentSpec(spec appsv1.DeploymentSpec) (string, error) {
+	spec = defaultedDeploymentSpec(spec)
 	managed := struct {
 		Replicas *int32
 		Selector *metav1.LabelSelector
@@ -574,6 +717,12 @@ func hashLocalPathDeploymentSpec(spec appsv1.DeploymentSpec) (string, error) {
 	managed.Template.Spec.Containers = spec.Template.Spec.Containers
 	managed.Template.Spec.Volumes = spec.Template.Spec.Volumes
 	return hashJSON(managed)
+}
+
+func defaultedDeploymentSpec(spec appsv1.DeploymentSpec) appsv1.DeploymentSpec {
+	defaulted := &appsv1.Deployment{Spec: *spec.DeepCopy()}
+	appsinternal.SetObjectDefaults_Deployment(defaulted)
+	return defaulted.Spec
 }
 
 func createOrPatchStorageClassDefaultAnnotations(ctx context.Context, client kubernetes.Interface, class *storagev1.StorageClass) error {
@@ -602,6 +751,9 @@ func createOrPatchStorageClassDefaultAnnotations(ctx context.Context, client kub
 	} else {
 		delete(copied.Annotations, "storageclass.kubernetes.io/is-default-class")
 		delete(copied.Annotations, "storageclass.beta.kubernetes.io/is-default-class")
+	}
+	if apiequality.Semantic.DeepEqual(current.Annotations, copied.Annotations) {
+		return nil
 	}
 	if _, err := client.StorageV1().StorageClasses().Update(ctx, copied, metav1.UpdateOptions{}); err != nil {
 		return fmt.Errorf("update storageclass %s: %w", class.Name, err)

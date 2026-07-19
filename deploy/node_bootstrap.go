@@ -2,16 +2,24 @@ package deploy
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/beego/beego/logs"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/util/retry"
 )
 
 type nodeBootstrapState struct {
@@ -25,7 +33,15 @@ type NodeDeployer struct {
 	log        NodeDeployLogger
 }
 
-const flannelDaemonSetName = "kube-flannel-ds"
+const (
+	workerProbeAttemptTimeout = 2 * time.Minute
+	// Kubernetes VolumeBinding waits up to 600 seconds by default. Give the
+	// storage probe time to finish instead of deleting its first consumer early.
+	workerStorageProbeAttemptTimeout = 12 * time.Minute
+	workerFlannelReadyTimeout        = 5 * time.Minute
+	flannelDaemonSetName             = "kube-flannel-ds"
+	workerBootstrapTaintKey          = "casos.io/bootstrap"
+)
 
 func NewNodeDeployer(config Config, restConfig *rest.Config, log NodeDeployLogger) *NodeDeployer {
 	if log == nil {
@@ -106,13 +122,19 @@ func (d *NodeDeployer) Deploy(ctx context.Context, opts NodeDeployOptions) (*Nod
 	if err != nil {
 		return nil, fmt.Errorf("waiting for node registration: %w", err)
 	}
+	if err = d.ensureWorkerBootstrapTaint(ctx, opts.NodeName); err != nil {
+		return nil, fmt.Errorf("protect worker during bootstrap: %w", err)
+	}
 
 	if err = d.startKubeProxy(ctx, runner); err != nil {
 		return nil, err
 	}
 
 	d.logStep(nodeDeployPhaseWaiting, "Waiting for Flannel to become Ready on the worker")
-	if err = d.waitForFlannelReady(ctx, opts.NodeName); err != nil {
+	flannelCtx, cancelFlannel := context.WithTimeout(ctx, workerFlannelReadyTimeout)
+	err = d.waitForFlannelReady(flannelCtx, opts.NodeName)
+	cancelFlannel()
+	if err != nil {
 		return nil, fmt.Errorf("waiting for Flannel readiness: %w", err)
 	}
 
@@ -135,6 +157,87 @@ func (d *NodeDeployer) Deploy(ctx context.Context, opts NodeDeployOptions) (*Nod
 
 	d.logStep(nodeDeployPhaseReady, "Node registered and Ready")
 	return &NodeDeployResult{ManagedPrivateKey: keyPair.PrivateKey}, nil
+}
+
+func ensureWorkerBootstrapTaint(node *corev1.Node) bool {
+	if node == nil {
+		return false
+	}
+	desired := corev1.Taint{Key: workerBootstrapTaintKey, Value: "true", Effect: corev1.TaintEffectNoSchedule}
+	changed := false
+	found := false
+	taints := make([]corev1.Taint, 0, len(node.Spec.Taints)+1)
+	for _, taint := range node.Spec.Taints {
+		if taint.Key != workerBootstrapTaintKey {
+			taints = append(taints, taint)
+			continue
+		}
+		if !found {
+			found = true
+			taints = append(taints, desired)
+			if taint != desired {
+				changed = true
+			}
+		} else {
+			changed = true
+		}
+	}
+	if !found {
+		taints = append(taints, desired)
+		changed = true
+	}
+	if changed {
+		node.Spec.Taints = taints
+	}
+	return changed
+}
+
+func removeWorkerBootstrapTaint(node *corev1.Node) bool {
+	if node == nil {
+		return false
+	}
+	taints := make([]corev1.Taint, 0, len(node.Spec.Taints))
+	changed := false
+	for _, taint := range node.Spec.Taints {
+		if taint.Key == workerBootstrapTaintKey {
+			changed = true
+			continue
+		}
+		taints = append(taints, taint)
+	}
+	if changed {
+		node.Spec.Taints = taints
+	}
+	return changed
+}
+
+func (d *NodeDeployer) ensureWorkerBootstrapTaint(ctx context.Context, nodeName string) error {
+	return d.updateWorkerBootstrapTaint(ctx, nodeName, ensureWorkerBootstrapTaint)
+}
+
+func (d *NodeDeployer) removeWorkerBootstrapTaint(ctx context.Context, nodeName string) error {
+	return d.updateWorkerBootstrapTaint(ctx, nodeName, removeWorkerBootstrapTaint)
+}
+
+func (d *NodeDeployer) updateWorkerBootstrapTaint(ctx context.Context, nodeName string, mutate func(*corev1.Node) bool) error {
+	if d.restConfig == nil {
+		return fmt.Errorf("apiserver rest config is required")
+	}
+	client, err := kubernetes.NewForConfig(d.restConfig)
+	if err != nil {
+		return err
+	}
+	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		node, err := client.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		if !mutate(node) {
+			return nil
+		}
+		_, err = client.CoreV1().Nodes().Update(ctx, node, metav1.UpdateOptions{})
+		return err
+	})
 }
 
 func (d *NodeDeployer) waitForFlannelReady(ctx context.Context, nodeName string) error {
@@ -377,6 +480,927 @@ func (d *NodeDeployer) waitForNodeReady(ctx context.Context, nodeName string) er
 		}
 	}
 }
+
+// WaitForOperational verifies the platform prerequisites that make a worker
+// safe for application scheduling. Node Ready alone does not prove that CNI,
+// DNS, or the default storage path is usable.
+func workerOperationalDeadlineError(lastReason string, cause error) error {
+	if lastReason == "" {
+		return cause
+	}
+	return fmt.Errorf("worker operational readiness: %s: %w", lastReason, cause)
+}
+
+func (d *NodeDeployer) WaitForOperational(ctx context.Context, nodeName, validationRun string) error {
+	if d.restConfig == nil {
+		return fmt.Errorf("apiserver rest config is required")
+	}
+	client, err := kubernetes.NewForConfig(d.restConfig)
+	if err != nil {
+		return err
+	}
+	deadlineTimer, deadline := deploymentWaitDeadline(ctx)
+	ticker := time.NewTicker(3 * time.Second)
+	defer deadlineTimer.Stop()
+	defer ticker.Stop()
+	var lastReason string
+	for {
+		select {
+		case <-ctx.Done():
+			return workerOperationalDeadlineError(lastReason, ctx.Err())
+		case <-deadline:
+			if lastReason == "" {
+				lastReason = "platform prerequisites are not ready"
+			}
+			return workerOperationalDeadlineError(lastReason, context.DeadlineExceeded)
+		case <-ticker.C:
+			reason, ready, err := workerOperationalState(ctx, client, nodeName, validationRun, d.config.StorageProbeImage)
+			if err != nil {
+				return err
+			}
+			if ready {
+				d.logStep(nodeDeployPhaseReady, "Worker operational validation passed")
+				if err := d.removeWorkerBootstrapTaint(ctx, nodeName); err != nil {
+					return fmt.Errorf("remove worker bootstrap taint: %w", err)
+				}
+				return nil
+			}
+			if reason != lastReason {
+				lastReason = reason
+				d.logStep(nodeDeployPhaseWaiting, "Worker operational validation: "+reason)
+			}
+		}
+	}
+}
+
+func workerOperationalState(ctx context.Context, client kubernetes.Interface, nodeName, validationRun, storageProbeImage string) (string, bool, error) {
+	node, err := client.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return "node is not registered", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	if !isNodeReady(node) {
+		return "node is not Ready", false, nil
+	}
+	if node.Spec.PodCIDR == "" {
+		return "node has no PodCIDR", false, nil
+	}
+
+	flannelPods, err := client.CoreV1().Pods("kube-flannel").List(ctx, metav1.ListOptions{
+		LabelSelector: "k8s-app=flannel",
+		FieldSelector: "spec.nodeName=" + nodeName,
+	})
+	if err != nil {
+		return "", false, err
+	}
+	if !anyReadyPod(flannelPods.Items) {
+		return "Flannel is not Ready on the worker", false, nil
+	}
+
+	dns, err := client.AppsV1().Deployments("kube-system").Get(ctx, "coredns", metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return "CoreDNS Deployment is missing", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	if dns.Status.AvailableReplicas < 1 {
+		return coreDNSReadinessReason(ctx, client, dns), false, nil
+	}
+
+	if _, err := client.StorageV1().StorageClasses().Get(ctx, "local-path", metav1.GetOptions{}); apierrors.IsNotFound(err) {
+		return "default local-path StorageClass is missing", false, nil
+	} else if err != nil {
+		return "", false, err
+	}
+	hostname := nodeName
+	if node.Labels["kubernetes.io/hostname"] != "" {
+		hostname = node.Labels["kubernetes.io/hostname"]
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, workerStorageProbeAttemptTimeout)
+	err = waitForStorageProbe(probeCtx, client, nodeName, hostname, validationRun, storageProbeImage)
+	cancel()
+	if err != nil {
+		return "storage probe: " + err.Error(), false, nil
+	}
+	probeCtx, cancel = context.WithTimeout(ctx, workerProbeAttemptTimeout)
+	err = waitForSchedulerProbe(probeCtx, client, nodeName, hostname, validationRun, storageProbeImage)
+	cancel()
+	if err != nil {
+		return "scheduler probe: " + err.Error(), false, nil
+	}
+	probeCtx, cancel = context.WithTimeout(ctx, workerProbeAttemptTimeout)
+	err = waitForServiceProbe(probeCtx, client, nodeName, validationRun, storageProbeImage)
+	cancel()
+	if err != nil {
+		return "service probe: " + err.Error(), false, nil
+	}
+	return "", true, nil
+}
+
+func anyReadyPod(pods []corev1.Pod) bool {
+	for i := range pods {
+		if pods[i].DeletionTimestamp == nil && isPodReady(pods[i]) {
+			return true
+		}
+	}
+	return false
+}
+
+func coreDNSReadinessReason(ctx context.Context, client kubernetes.Interface, deployment *appsv1.Deployment) string {
+	pods, err := client.CoreV1().Pods("kube-system").List(ctx, metav1.ListOptions{
+		LabelSelector: "app.kubernetes.io/name=coredns,app.kubernetes.io/managed-by=casos",
+	})
+	if err != nil {
+		return "CoreDNS is not Available (unable to inspect Pods: " + err.Error() + ")"
+	}
+	for _, pod := range pods.Items {
+		for _, status := range append(pod.Status.InitContainerStatuses, pod.Status.ContainerStatuses...) {
+			if status.State.Waiting != nil {
+				reason := status.State.Waiting.Reason
+				if reason == "" {
+					reason = "waiting"
+				}
+				if status.State.Waiting.Message != "" {
+					return coreDNSPodFailureReason(fmt.Sprintf("CoreDNS Pod %s container %s is %s: %s", pod.Name, status.Name, reason, status.State.Waiting.Message), client, pod)
+				}
+				return coreDNSPodFailureReason(fmt.Sprintf("CoreDNS Pod %s container %s is %s", pod.Name, status.Name, reason), client, pod)
+			}
+			if status.State.Terminated != nil && status.State.Terminated.ExitCode != 0 {
+				terminated := status.State.Terminated
+				return coreDNSPodFailureReason(fmt.Sprintf("CoreDNS Pod %s container %s terminated with %s (exit code %d): %s", pod.Name, status.Name, terminated.Reason, terminated.ExitCode, terminated.Message), client, pod)
+			}
+		}
+		if pod.Status.Phase != corev1.PodRunning {
+			return fmt.Sprintf("CoreDNS Pod %s is %s: %s", pod.Name, pod.Status.Phase, pod.Status.Message)
+		}
+	}
+	return fmt.Sprintf(
+		"CoreDNS is not Available (desired=%d ready=%d available=%d updated=%d)",
+		deployment.Status.Replicas,
+		deployment.Status.ReadyReplicas,
+		deployment.Status.AvailableReplicas,
+		deployment.Status.UpdatedReplicas,
+	)
+}
+
+func coreDNSPodFailureReason(reason string, client kubernetes.Interface, pod corev1.Pod) string {
+	if !strings.Contains(reason, "CrashLoopBackOff") && !strings.Contains(reason, "terminated") {
+		return reason
+	}
+	tailLines := int64(40)
+	logCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	stream, err := client.CoreV1().Pods("kube-system").GetLogs(pod.Name, &corev1.PodLogOptions{
+		Container: "coredns",
+		Previous:  true,
+		TailLines: &tailLines,
+	}).Stream(logCtx)
+	if err != nil {
+		return fmt.Sprintf("%s (unable to read CoreDNS logs: %v)", reason, err)
+	}
+	defer stream.Close()
+	data, err := io.ReadAll(stream)
+	if err != nil {
+		return fmt.Sprintf("%s (unable to read CoreDNS logs: %v)", reason, err)
+	}
+	logs := strings.TrimSpace(string(data))
+	if logs == "" {
+		return reason
+	}
+	logs = strings.ReplaceAll(logs, "\r\n", " | ")
+	logs = strings.ReplaceAll(logs, "\n", " | ")
+	if len(logs) > 2000 {
+		logs = logs[len(logs)-2000:]
+	}
+	return fmt.Sprintf("%s: logs: %s", reason, logs)
+}
+
+func isPodReady(pod corev1.Pod) bool {
+	if pod.Status.Phase != corev1.PodRunning {
+		return false
+	}
+	for _, condition := range pod.Status.Conditions {
+		if condition.Type == corev1.PodReady {
+			return condition.Status == corev1.ConditionTrue
+		}
+	}
+	return false
+}
+
+func waitForProbePodDeleted(ctx context.Context, client kubernetes.Interface, namespace, name string) error {
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		_, err := client.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func waitForProbePVCDeleted(ctx context.Context, client kubernetes.Interface, namespace, name string) error {
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		_, err := client.CoreV1().PersistentVolumeClaims(namespace).Get(ctx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func storageProbeName(nodeName, validationRun string) string {
+	digest := sha256.Sum256([]byte(nodeName + "\x00" + validationRun))
+	return "casos-storage-" + hex.EncodeToString(digest[:])[:16]
+}
+
+func podFailureReason(pod corev1.Pod) string {
+	parts := []string{"phase=" + string(pod.Status.Phase)}
+	if pod.Status.Reason != "" {
+		parts = append(parts, "reason="+pod.Status.Reason)
+	}
+	if pod.Status.Message != "" {
+		parts = append(parts, "message="+pod.Status.Message)
+	}
+	for _, status := range append(pod.Status.InitContainerStatuses, pod.Status.ContainerStatuses...) {
+		if status.State.Terminated != nil {
+			terminated := status.State.Terminated
+			parts = append(parts, fmt.Sprintf("container=%s terminated=%s exit=%d message=%s", status.Name, terminated.Reason, terminated.ExitCode, terminated.Message))
+			continue
+		}
+		if status.State.Waiting != nil {
+			parts = append(parts, fmt.Sprintf("container=%s waiting=%s message=%s", status.Name, status.State.Waiting.Reason, status.State.Waiting.Message))
+		}
+	}
+	return strings.Join(parts, "; ")
+}
+
+func storageProbeState(client kubernetes.Interface, namespace, name string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	parts := make([]string, 0, 8)
+	objectUIDs := make(map[string]struct{}, 2)
+
+	pvc, err := client.CoreV1().PersistentVolumeClaims(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err == nil {
+		pvcState := fmt.Sprintf("PVC phase=%s uid=%s", pvc.Status.Phase, pvc.UID)
+		selectedNode := pvc.Annotations["volume.kubernetes.io/selected-node"]
+		if selectedNode == "" {
+			selectedNode = "missing"
+		}
+		pvcState += " selected-node=" + selectedNode
+		if pvc.Spec.VolumeName != "" {
+			pvcState += " volume=" + pvc.Spec.VolumeName
+		}
+		parts = append(parts, pvcState)
+		if pvc.UID != "" {
+			objectUIDs[string(pvc.UID)] = struct{}{}
+		}
+		if pvc.Spec.VolumeName != "" {
+			if pv, pvErr := client.CoreV1().PersistentVolumes().Get(ctx, pvc.Spec.VolumeName, metav1.GetOptions{}); pvErr == nil {
+				pvState := "PV phase=" + string(pv.Status.Phase)
+				if pv.Status.Reason != "" {
+					pvState += " reason=" + pv.Status.Reason
+				}
+				if pv.Status.Message != "" {
+					pvState += " message=" + pv.Status.Message
+				}
+				parts = append(parts, pvState)
+			}
+		}
+	} else if !apierrors.IsNotFound(err) {
+		parts = append(parts, "PVC inspection failed: "+err.Error())
+	}
+
+	pod, err := client.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err == nil {
+		parts = append(parts, "Pod "+podFailureReason(*pod))
+		if pod.UID != "" {
+			objectUIDs[string(pod.UID)] = struct{}{}
+		}
+	} else if !apierrors.IsNotFound(err) {
+		parts = append(parts, "Pod inspection failed: "+err.Error())
+	}
+
+	events, err := client.CoreV1().Events(namespace).List(ctx, metav1.ListOptions{
+		FieldSelector: "involvedObject.name=" + name,
+	})
+	if err == nil && len(events.Items) > 0 {
+		currentEvents := events.Items[:0]
+		for i := range events.Items {
+			event := events.Items[i]
+			if event.InvolvedObject.Name != name {
+				continue
+			}
+			if event.InvolvedObject.UID != "" {
+				if _, ok := objectUIDs[string(event.InvolvedObject.UID)]; !ok {
+					continue
+				}
+			}
+			currentEvents = append(currentEvents, event)
+		}
+		sort.SliceStable(currentEvents, func(i, j int) bool {
+			return storageEventTime(currentEvents[i]).Before(storageEventTime(currentEvents[j]))
+		})
+		start := len(currentEvents) - 6
+		if start < 0 {
+			start = 0
+		}
+		eventParts := make([]string, 0, len(currentEvents)-start)
+		for i := start; i < len(currentEvents); i++ {
+			event := currentEvents[i]
+			message := strings.TrimSpace(event.Message)
+			if message != "" {
+				eventParts = append(eventParts, fmt.Sprintf(
+					"%s %s/%s: %s",
+					event.Type,
+					event.InvolvedObject.Kind,
+					event.Reason,
+					message,
+				))
+			}
+		}
+		if len(eventParts) > 0 {
+			parts = append(parts, "events="+strings.Join(eventParts, " | "))
+		}
+	}
+
+	deployment, err := client.AppsV1().Deployments("local-path-storage").Get(ctx, "local-path-provisioner", metav1.GetOptions{})
+	if err == nil {
+		parts = append(parts, fmt.Sprintf(
+			"provisioner desired=%d ready=%d available=%d updated=%d",
+			deployment.Status.Replicas,
+			deployment.Status.ReadyReplicas,
+			deployment.Status.AvailableReplicas,
+			deployment.Status.UpdatedReplicas,
+		))
+	} else if apierrors.IsNotFound(err) {
+		parts = append(parts, "provisioner Deployment missing")
+	} else {
+		parts = append(parts, "provisioner Deployment inspection failed: "+err.Error())
+	}
+
+	provisionerPods, err := client.CoreV1().Pods("local-path-storage").List(ctx, metav1.ListOptions{
+		LabelSelector: "app.kubernetes.io/name=local-path-provisioner",
+	})
+	if err != nil {
+		parts = append(parts, "provisioner Pod inspection failed: "+err.Error())
+	} else if len(provisionerPods.Items) == 0 {
+		parts = append(parts, "provisioner Pods=none")
+	} else {
+		for i := range provisionerPods.Items {
+			provisionerPod := provisionerPods.Items[i]
+			parts = append(parts, "provisioner Pod "+provisionerPod.Name+" "+podFailureReason(provisionerPod))
+			if logs := storagePodLogs(ctx, client, "local-path-storage", provisionerPod.Name, "local-path-provisioner"); logs != "" {
+				parts = append(parts, "provisioner logs="+logs)
+			}
+		}
+	}
+
+	storagePods, err := client.CoreV1().Pods("local-path-storage").List(ctx, metav1.ListOptions{})
+	if err == nil {
+		for i := range storagePods.Items {
+			storagePod := storagePods.Items[i]
+			if !strings.HasPrefix(storagePod.Name, "helper-pod-") {
+				continue
+			}
+			parts = append(parts, "helper Pod "+storagePod.Name+" "+podFailureReason(storagePod))
+			if logs := storagePodLogs(ctx, client, "local-path-storage", storagePod.Name, "helper-pod"); logs != "" {
+				parts = append(parts, "helper logs="+logs)
+			}
+		}
+	}
+
+	if len(parts) == 0 {
+		return "no storage probe state available"
+	}
+	return strings.Join(parts, "; ")
+}
+
+func storageEventTime(event corev1.Event) time.Time {
+	if !event.EventTime.Time.IsZero() {
+		return event.EventTime.Time
+	}
+	if event.Series != nil && !event.Series.LastObservedTime.Time.IsZero() {
+		return event.Series.LastObservedTime.Time
+	}
+	if !event.LastTimestamp.Time.IsZero() {
+		return event.LastTimestamp.Time
+	}
+	if !event.FirstTimestamp.Time.IsZero() {
+		return event.FirstTimestamp.Time
+	}
+	return event.CreationTimestamp.Time
+}
+
+func storagePodLogs(ctx context.Context, client kubernetes.Interface, namespace, podName, containerName string) string {
+	tailLines := int64(50)
+	stream, err := client.CoreV1().Pods(namespace).GetLogs(podName, &corev1.PodLogOptions{
+		Container: containerName,
+		TailLines: &tailLines,
+	}).Stream(ctx)
+	if err != nil {
+		return ""
+	}
+	defer stream.Close()
+	data, err := io.ReadAll(stream)
+	if err != nil {
+		return ""
+	}
+	logs := strings.TrimSpace(string(data))
+	logs = strings.ReplaceAll(logs, "\r\n", " | ")
+	logs = strings.ReplaceAll(logs, "\n", " | ")
+	if len(logs) > 3000 {
+		logs = logs[len(logs)-3000:]
+	}
+	return logs
+}
+
+func waitForStorageProbe(ctx context.Context, client kubernetes.Interface, nodeName, hostname, validationRun, image string) error {
+	if image == "" {
+		image = "docker.io/library/busybox:1.37.0"
+	}
+	const namespace = "kube-system"
+	name := storageProbeName(nodeName, validationRun)
+	cleanup := func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := deleteStorageProbeResources(cleanupCtx, client, namespace, name); err != nil {
+			logs.Warning("failed to delete storage probe resources %s/%s: %v", namespace, name, err)
+		}
+	}
+	cleanup()
+	cleanupCtx, cancelCleanup := context.WithTimeout(ctx, 15*time.Second)
+	if err := waitForProbePodDeleted(cleanupCtx, client, namespace, name); err != nil {
+		cancelCleanup()
+		return fmt.Errorf("wait for stale storage probe Pod deletion: %w", err)
+	}
+	if err := waitForProbePVCDeleted(cleanupCtx, client, namespace, name); err != nil {
+		cancelCleanup()
+		return fmt.Errorf("wait for stale storage probe PVC deletion: %w", err)
+	}
+	cancelCleanup()
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: map[string]string{"casos.io/probe": "worker-storage"}},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+			StorageClassName: stringPtr("local-path"),
+			Resources: corev1.VolumeResourceRequirements{Requests: corev1.ResourceList{
+				corev1.ResourceStorage: resource.MustParse("1Mi"),
+			}},
+		},
+	}
+	if _, err := client.CoreV1().PersistentVolumeClaims(namespace).Create(ctx, pvc, metav1.CreateOptions{}); err != nil {
+		return fmt.Errorf("create storage probe PVC: %w", err)
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: map[string]string{"casos.io/probe": "worker-storage"}},
+		Spec: corev1.PodSpec{
+			NodeSelector: map[string]string{"kubernetes.io/hostname": hostname},
+			Tolerations: []corev1.Toleration{{
+				Key:      "casos.io/bootstrap",
+				Operator: corev1.TolerationOpExists,
+				Effect:   corev1.TaintEffectNoSchedule,
+			}},
+			RestartPolicy: corev1.RestartPolicyNever,
+			Containers: []corev1.Container{{
+				Name: "storage-probe", Image: image, ImagePullPolicy: corev1.PullIfNotPresent,
+				Command:      []string{"sh", "-c", "echo casos > /data/probe && test \"$(cat /data/probe)\" = casos"},
+				VolumeMounts: []corev1.VolumeMount{{Name: "data", MountPath: "/data"}},
+			}},
+			Volumes: []corev1.Volume{{Name: "data", VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: name}}}},
+		},
+	}
+	if _, err := client.CoreV1().Pods(namespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
+		cleanup()
+		return fmt.Errorf("create storage probe Pod: %w", err)
+	}
+	defer cleanup()
+	deadlineTimer, deadline := deploymentWaitDeadline(ctx)
+	ticker := time.NewTicker(2 * time.Second)
+	defer deadlineTimer.Stop()
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("%w (%s)", ctx.Err(), storageProbeState(client, namespace, name))
+		case <-deadline:
+			return fmt.Errorf("timed out waiting for storage probe (%s)", storageProbeState(client, namespace, name))
+		case <-ticker.C:
+			current, err := client.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			if err != nil {
+				return fmt.Errorf("get storage probe Pod: %w", err)
+			}
+			switch current.Status.Phase {
+			case corev1.PodSucceeded:
+				return nil
+			case corev1.PodFailed:
+				return fmt.Errorf("storage probe Pod failed: %s", podFailureReason(*current))
+			}
+		}
+	}
+}
+
+func deleteStorageProbeResources(ctx context.Context, client kubernetes.Interface, namespace, name string) error {
+	errors := make([]string, 0, 2)
+	if err := client.CoreV1().Pods(namespace).Delete(ctx, name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+		errors = append(errors, "delete Pod: "+err.Error())
+	}
+	if err := client.CoreV1().PersistentVolumeClaims(namespace).Delete(ctx, name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+		errors = append(errors, "delete PVC: "+err.Error())
+	}
+	if len(errors) > 0 {
+		return fmt.Errorf("%s", strings.Join(errors, "; "))
+	}
+	return nil
+}
+
+func schedulerProbeName(nodeName, validationRun string) string {
+	digest := sha256.Sum256([]byte(nodeName + "\x00" + validationRun))
+	return "casos-scheduler-" + hex.EncodeToString(digest[:])[:16]
+}
+
+func serviceProbeName(nodeName, validationRun string) string {
+	digest := sha256.Sum256([]byte(nodeName + "\x00" + validationRun))
+	return "casos-service-" + hex.EncodeToString(digest[:])[:16]
+}
+
+func workerProbeImage(image string) string {
+	if image == "" {
+		return "docker.io/library/busybox:1.37.0"
+	}
+	return image
+}
+
+type serviceProbePlacement struct {
+	serverNodeName string
+	serverHostname string
+	clientHostname string
+}
+
+func selectServiceProbePlacement(nodes []corev1.Node, targetNodeName string) (serviceProbePlacement, error) {
+	var target *corev1.Node
+	for i := range nodes {
+		if nodes[i].Name == targetNodeName {
+			target = &nodes[i]
+			break
+		}
+	}
+	if target == nil {
+		return serviceProbePlacement{}, fmt.Errorf("target worker %s is not registered", targetNodeName)
+	}
+	placement := serviceProbePlacement{
+		serverNodeName: target.Name,
+		serverHostname: nodeHostname(target),
+		clientHostname: nodeHostname(target),
+	}
+	for i := range nodes {
+		node := &nodes[i]
+		if node.Name == targetNodeName || isControlPlaneNode(node) || !isNodeReady(node) || nodePodCIDR(node) == "" {
+			continue
+		}
+		placement.serverNodeName = node.Name
+		placement.serverHostname = nodeHostname(node)
+		break
+	}
+	return placement, nil
+}
+
+func nodeHostname(node *corev1.Node) string {
+	if node == nil {
+		return ""
+	}
+	if hostname := node.Labels[corev1.LabelHostname]; hostname != "" {
+		return hostname
+	}
+	return node.Name
+}
+
+func isControlPlaneNode(node *corev1.Node) bool {
+	if node == nil {
+		return false
+	}
+	_, controlPlane := node.Labels["node-role.kubernetes.io/control-plane"]
+	_, master := node.Labels["node-role.kubernetes.io/master"]
+	return controlPlane || master
+}
+
+func workerBootstrapProbeTolerations() []corev1.Toleration {
+	return []corev1.Toleration{{
+		Key:      "casos.io/bootstrap",
+		Operator: corev1.TolerationOpExists,
+		Effect:   corev1.TaintEffectNoSchedule,
+	}}
+}
+
+func waitForSchedulerProbe(ctx context.Context, client kubernetes.Interface, nodeName, hostname, validationRun, image string) error {
+	const namespace = "kube-system"
+	name := schedulerProbeName(nodeName, validationRun)
+	cleanup := func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := client.CoreV1().Pods(namespace).Delete(cleanupCtx, name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+			logs.Warning("failed to delete scheduler probe Pod %s/%s: %v", namespace, name, err)
+		}
+	}
+	cleanup()
+	cleanupCtx, cancelCleanup := context.WithTimeout(ctx, 15*time.Second)
+	err := waitForProbePodDeleted(cleanupCtx, client, namespace, name)
+	cancelCleanup()
+	if err != nil {
+		return fmt.Errorf("wait for stale scheduler probe Pod deletion: %w", err)
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: map[string]string{"casos.io/probe": "scheduler-placement"}},
+		Spec: corev1.PodSpec{
+			RestartPolicy: corev1.RestartPolicyNever,
+			NodeSelector:  map[string]string{"kubernetes.io/hostname": hostname},
+			Tolerations: []corev1.Toleration{{
+				Key:      workerBootstrapTaintKey,
+				Operator: corev1.TolerationOpExists,
+				Effect:   corev1.TaintEffectNoSchedule,
+			}},
+			Containers: []corev1.Container{{
+				Name: "scheduler-probe", Image: workerProbeImage(image), ImagePullPolicy: corev1.PullIfNotPresent,
+				Command: []string{"sh", "-c", "echo casos-scheduler"},
+			}},
+		},
+	}
+	if _, err := client.CoreV1().Pods(namespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
+		cleanup()
+		return fmt.Errorf("create scheduler probe Pod: %w", err)
+	}
+	defer cleanup()
+	deadlineTimer, deadline := deploymentWaitDeadline(ctx)
+	ticker := time.NewTicker(2 * time.Second)
+	defer deadlineTimer.Stop()
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline:
+			return fmt.Errorf("timed out waiting for scheduler probe")
+		case <-ticker.C:
+			current, err := client.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			if err != nil {
+				return fmt.Errorf("get scheduler probe Pod: %w", err)
+			}
+			if current.Spec.NodeName != "" && current.Spec.NodeName != nodeName {
+				return fmt.Errorf("scheduler placed probe on %s instead of %s", current.Spec.NodeName, nodeName)
+			}
+			switch current.Status.Phase {
+			case corev1.PodSucceeded:
+				if current.Spec.NodeName != nodeName {
+					return fmt.Errorf("scheduler probe succeeded without binding to %s", nodeName)
+				}
+				return nil
+			case corev1.PodFailed:
+				return fmt.Errorf("scheduler probe Pod failed")
+			}
+		}
+	}
+}
+
+func waitForServiceProbe(ctx context.Context, client kubernetes.Interface, nodeName, validationRun, image string) error {
+	const namespace = "kube-system"
+	name := serviceProbeName(nodeName, validationRun)
+	clientName := name + "-client"
+	cleanupCtx, cancelCleanup := context.WithTimeout(ctx, 15*time.Second)
+	defer cancelCleanup()
+	if err := deleteServiceProbeResources(cleanupCtx, client, namespace, name, clientName); err != nil {
+		return err
+	}
+	if err := waitForServiceProbeResourcesDeleted(cleanupCtx, client, namespace, name, clientName); err != nil {
+		return err
+	}
+	nodes, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("list nodes for service probe: %w", err)
+	}
+	placement, err := selectServiceProbePlacement(nodes.Items, nodeName)
+	if err != nil {
+		return err
+	}
+	labels := map[string]string{"casos.io/probe": "service-routing", "casos.io/probe-name": name}
+	service := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: labels},
+		Spec:       corev1.ServiceSpec{Selector: labels, Ports: []corev1.ServicePort{{Name: "http", Port: 80, TargetPort: intstr.FromInt(8080)}}},
+	}
+	createdService, err := client.CoreV1().Services(namespace).Create(ctx, service, metav1.CreateOptions{})
+	if err != nil {
+		return fmt.Errorf("create service probe Service: %w", err)
+	}
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := deleteServiceProbeResources(cleanupCtx, client, namespace, name, clientName); err != nil {
+			logs.Warning("failed to delete service probe resources %s/%s: %v", namespace, name, err)
+		}
+	}()
+	serverPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: labels},
+		Spec: corev1.PodSpec{
+			NodeSelector:  map[string]string{corev1.LabelHostname: placement.serverHostname},
+			Tolerations:   workerBootstrapProbeTolerations(),
+			RestartPolicy: corev1.RestartPolicyAlways,
+			Containers: []corev1.Container{{
+				Name: "service-server", Image: workerProbeImage(image), ImagePullPolicy: corev1.PullIfNotPresent,
+				Command:        []string{"sh", "-c", "mkdir -p /tmp/www && echo casos-service > /tmp/www/index.html && httpd -f -p 8080 -h /tmp/www"},
+				ReadinessProbe: &corev1.Probe{ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: "/", Port: intstr.FromInt(8080), Scheme: corev1.URISchemeHTTP}}, InitialDelaySeconds: 1, PeriodSeconds: 2, TimeoutSeconds: 2, FailureThreshold: 5},
+			}},
+		},
+	}
+	if _, err := client.CoreV1().Pods(namespace).Create(ctx, serverPod, metav1.CreateOptions{}); err != nil {
+		return fmt.Errorf("create service probe server Pod: %w", err)
+	}
+	serverPod, err = waitForServiceProbePodReady(ctx, client, namespace, name)
+	if err != nil {
+		return err
+	}
+	if serverPod.Spec.NodeName != placement.serverNodeName {
+		return fmt.Errorf("service probe server scheduled on %s instead of %s", serverPod.Spec.NodeName, placement.serverNodeName)
+	}
+	if serverPod.Status.PodIP == "" {
+		return fmt.Errorf("service probe server has no PodIP")
+	}
+	clusterIP, err := waitForServiceProbeClusterIP(ctx, client, namespace, createdService.Name)
+	if err != nil {
+		return err
+	}
+	clientPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: clientName, Namespace: namespace, Labels: map[string]string{"casos.io/probe": "service-routing-client"}},
+		Spec: corev1.PodSpec{
+			NodeSelector:  map[string]string{corev1.LabelHostname: placement.clientHostname},
+			Tolerations:   workerBootstrapProbeTolerations(),
+			RestartPolicy: corev1.RestartPolicyNever,
+			Containers: []corev1.Container{{
+				Name: "service-client", Image: workerProbeImage(image), ImagePullPolicy: corev1.PullIfNotPresent,
+				Command: []string{"sh", "-c", serviceProbeClientCommand(serverPod.Status.PodIP, clusterIP)},
+			}},
+		},
+	}
+	if _, err := client.CoreV1().Pods(namespace).Create(ctx, clientPod, metav1.CreateOptions{}); err != nil {
+		return fmt.Errorf("create service probe client Pod: %w", err)
+	}
+	clientPod, err = waitForServiceProbePodSucceeded(ctx, client, namespace, clientName)
+	if err != nil {
+		return err
+	}
+	if clientPod.Spec.NodeName != nodeName {
+		return fmt.Errorf("service probe client scheduled on %s instead of %s", clientPod.Spec.NodeName, nodeName)
+	}
+	return nil
+}
+
+func serviceProbeClientCommand(serverPodIP, clusterIP string) string {
+	return fmt.Sprintf("nslookup kubernetes.default.svc >/dev/null && i=0; while [ $i -lt 30 ]; do wget -qO- http://%s:8080/ | grep -q casos-service && wget -qO- http://%s:80/ | grep -q casos-service && exit 0; i=$((i+1)); sleep 1; done; exit 1", serverPodIP, clusterIP)
+}
+
+func waitForServiceProbeClusterIP(ctx context.Context, client kubernetes.Interface, namespace, name string) (string, error) {
+	deadlineTimer, deadline := deploymentWaitDeadline(ctx)
+	ticker := time.NewTicker(2 * time.Second)
+	defer deadlineTimer.Stop()
+	defer ticker.Stop()
+	for {
+		current, err := client.CoreV1().Services(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil && !apierrors.IsNotFound(err) {
+			return "", fmt.Errorf("get service probe Service: %w", err)
+		}
+		if err == nil && current.Spec.ClusterIP != "" && current.Spec.ClusterIP != corev1.ClusterIPNone {
+			return current.Spec.ClusterIP, nil
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-deadline:
+			return "", fmt.Errorf("timed out waiting for service probe ClusterIP")
+		case <-ticker.C:
+		}
+	}
+}
+
+func waitForServiceProbePodReady(ctx context.Context, client kubernetes.Interface, namespace, name string) (*corev1.Pod, error) {
+	deadlineTimer, deadline := deploymentWaitDeadline(ctx)
+	ticker := time.NewTicker(2 * time.Second)
+	defer deadlineTimer.Stop()
+	defer ticker.Stop()
+	for {
+		pod, err := client.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			// The kubelet may not have created the Pod status yet.
+		} else if err != nil {
+			return nil, fmt.Errorf("get service probe server Pod: %w", err)
+		} else if pod.Status.Phase == corev1.PodFailed {
+			return nil, fmt.Errorf("service probe server Pod failed")
+		} else if isPodReady(*pod) {
+			return pod, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-deadline:
+			return nil, fmt.Errorf("timed out waiting for service probe server Pod")
+		case <-ticker.C:
+		}
+	}
+}
+
+func waitForServiceProbePodSucceeded(ctx context.Context, client kubernetes.Interface, namespace, name string) (*corev1.Pod, error) {
+	deadlineTimer, deadline := deploymentWaitDeadline(ctx)
+	ticker := time.NewTicker(2 * time.Second)
+	defer deadlineTimer.Stop()
+	defer ticker.Stop()
+	for {
+		pod, err := client.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			// The kubelet may not have created the Pod status yet.
+		} else if err != nil {
+			return nil, fmt.Errorf("get service probe client Pod: %w", err)
+		} else {
+			switch pod.Status.Phase {
+			case corev1.PodSucceeded:
+				return pod, nil
+			case corev1.PodFailed:
+				return nil, fmt.Errorf("service probe client Pod failed")
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-deadline:
+			return nil, fmt.Errorf("timed out waiting for service probe client Pod")
+		case <-ticker.C:
+		}
+	}
+}
+
+func deleteServiceProbeResources(ctx context.Context, client kubernetes.Interface, namespace, serviceName, clientName string) error {
+	if err := client.CoreV1().Pods(namespace).Delete(ctx, clientName, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("delete service probe client Pod: %w", err)
+	}
+	if err := client.CoreV1().Pods(namespace).Delete(ctx, serviceName, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("delete service probe server Pod: %w", err)
+	}
+	if err := client.CoreV1().Services(namespace).Delete(ctx, serviceName, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("delete service probe Service: %w", err)
+	}
+	return nil
+}
+
+func waitForServiceProbeResourcesDeleted(ctx context.Context, client kubernetes.Interface, namespace, serviceName, clientName string) error {
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		_, serverErr := client.CoreV1().Pods(namespace).Get(ctx, serviceName, metav1.GetOptions{})
+		_, clientErr := client.CoreV1().Pods(namespace).Get(ctx, clientName, metav1.GetOptions{})
+		_, serviceErr := client.CoreV1().Services(namespace).Get(ctx, serviceName, metav1.GetOptions{})
+		if serverErr != nil && !apierrors.IsNotFound(serverErr) {
+			return fmt.Errorf("check service probe server deletion: %w", serverErr)
+		}
+		if clientErr != nil && !apierrors.IsNotFound(clientErr) {
+			return fmt.Errorf("check service probe client deletion: %w", clientErr)
+		}
+		if serviceErr != nil && !apierrors.IsNotFound(serviceErr) {
+			return fmt.Errorf("check service probe Service deletion: %w", serviceErr)
+		}
+		if apierrors.IsNotFound(serverErr) && apierrors.IsNotFound(clientErr) && apierrors.IsNotFound(serviceErr) {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timed out waiting for previous service probe resources to be deleted")
+		case <-ticker.C:
+		}
+	}
+}
+
+func stringPtr(value string) *string { return &value }
 
 func isNodeReady(node *corev1.Node) bool {
 	if node == nil {

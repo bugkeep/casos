@@ -13,6 +13,7 @@ const (
 	defaultNodeDeployCNIVersion = "v1.5.1"
 	nodeDeployClusterCIDR       = "10.244.0.0/16"
 	nodeDeployClusterDNS        = "10.43.0.10"
+	nodeDeployResolverPath      = "/etc/casos-resolv.conf"
 	nodeDeployPhasePreflight    = "preflight"
 	nodeDeployPhaseInstalling   = "installing"
 	nodeDeployPhaseConfiguring  = "configuring"
@@ -118,16 +119,18 @@ type Config struct {
 	ApiserverPort      int
 	SandboxImage       string
 	Socks5Proxy        string
+	StorageProbeImage  string
 	GenerateKubeconfig KubeconfigGenerator
 }
 
 func ConfigFromServerConfig(cfg server.Config) Config {
 	return Config{
-		AdvertiseAddress: cfg.AdvertiseAddress,
-		ApiserverBind:    cfg.ApiserverBind,
-		ApiserverPort:    cfg.ApiserverPort,
-		SandboxImage:     cfg.SandboxImage,
-		Socks5Proxy:      cfg.Socks5Proxy,
+		AdvertiseAddress:  cfg.AdvertiseAddress,
+		ApiserverBind:     cfg.ApiserverBind,
+		ApiserverPort:     cfg.ApiserverPort,
+		SandboxImage:      cfg.SandboxImage,
+		Socks5Proxy:       cfg.Socks5Proxy,
+		StorageProbeImage: cfg.StorageProbeImage,
 		GenerateKubeconfig: func(nodeName, apiserverURL string) (*NodeKubeconfig, error) {
 			wk, err := server.GenerateWorkerKubeconfigForServer(cfg, nodeName, apiserverURL)
 			if err != nil {

@@ -308,13 +308,32 @@ func (s *Service) runMachineNodeDeployTask(parentCtx context.Context, taskId int
 		logTask(object.MachineNodeDeployLogLevelInfo, "CasOS managed SSH key installed")
 	}
 
-	logTask(object.MachineNodeDeployLogLevelInfo, "Node deployment completed")
-	if err = object.UpdateMachineNodeDeployStatus(machine.Owner, machine.Name, object.MachineStatusDeployed); err != nil {
-		logTask(object.MachineNodeDeployLogLevelError, "Failed to update machine status after completed node deployment: "+err.Error())
-		_ = object.FinishMachineNodeDeployTask(taskId, true, object.MachineNodeDeployPhaseReady, "machine status update failed: "+err.Error())
+	logTask(object.MachineNodeDeployLogLevelInfo, "Worker installed; validating network, DNS, and storage readiness")
+	if err = deployer.WaitForOperational(ctx, task.NodeName, strconv.FormatInt(taskId, 10)); err != nil {
+		logTask(object.MachineNodeDeployLogLevelError, "Worker operational validation failed: "+err.Error())
+		_ = object.UpdateMachineNodeDeployStatus(machine.Owner, machine.Name, object.MachineStatusFailed)
+		if finishErr := object.FinishMachineNodeDeployTask(taskId, false, object.MachineNodeDeployPhaseFailed, err.Error()); finishErr != nil {
+			logTask(object.MachineNodeDeployLogLevelError, "Failed to finish node deployment task: "+finishErr.Error())
+		}
 		return
 	}
-	_ = object.FinishMachineNodeDeployTask(taskId, true, object.MachineNodeDeployPhaseReady, "")
+
+	logTask(object.MachineNodeDeployLogLevelInfo, "Worker is operational")
+	statusErr := object.UpdateMachineNodeDeployStatus(machine.Owner, machine.Name, object.MachineStatusOperational)
+	if statusErr != nil {
+		logTask(object.MachineNodeDeployLogLevelError, "Failed to update machine status after completed node deployment: "+statusErr.Error())
+	}
+	success, phase, message := machineNodeDeployCompletion(statusErr)
+	if finishErr := object.FinishMachineNodeDeployTask(taskId, success, phase, message); finishErr != nil {
+		logTask(object.MachineNodeDeployLogLevelError, "Failed to finish node deployment task: "+finishErr.Error())
+	}
+}
+
+func machineNodeDeployCompletion(statusErr error) (bool, string, string) {
+	if statusErr != nil {
+		return false, object.MachineNodeDeployPhaseFailed, "machine status update failed: " + statusErr.Error()
+	}
+	return true, object.MachineNodeDeployPhaseReady, ""
 }
 
 func cleanupMachineNodeDeployPanic(taskId int64, owner, machineName, message string) {

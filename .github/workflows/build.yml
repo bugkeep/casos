@@ -165,7 +165,8 @@ jobs:
             iproute2 \
             iptables \
             qemu-system-x86 \
-            qemu-utils
+            qemu-utils \
+            sshpass
 
           sudo modprobe kvm || true
           if [[ ! -e /dev/kvm ]]; then
@@ -258,17 +259,30 @@ jobs:
             -pidfile "$vm_dir/qemu.pid"
 
           ssh_ready=false
+          sshpass_file="$vm_dir/sshpass.txt"
+          printf '%s' "$worker_ssh_password" > "$sshpass_file"
+          chmod 600 "$sshpass_file"
           for i in {1..60}; do
-            echo "Worker VM SSH port check: attempt $i/60..." >&2
-            if (exec 3<>"/dev/tcp/${worker_vm_ip}/22") 2>/dev/null; then
-              exec 3<&- 3>&-
+            echo "Worker VM SSH authentication check: attempt $i/60..." >&2
+            if sshpass -f "$sshpass_file" ssh \
+              -o ConnectTimeout=5 \
+              -o ConnectionAttempts=1 \
+              -o KbdInteractiveAuthentication=no \
+              -o LogLevel=ERROR \
+              -o NumberOfPasswordPrompts=1 \
+              -o PreferredAuthentications=password \
+              -o PubkeyAuthentication=no \
+              -o StrictHostKeyChecking=no \
+              -o UserKnownHostsFile=/dev/null \
+              "root@${worker_vm_ip}" true </dev/null 2>/dev/null; then
               ssh_ready=true
               break
             fi
             sleep 5
           done
+          rm -f "$sshpass_file"
           if [[ "$ssh_ready" != "true" ]]; then
-            echo "Worker VM SSH port did not become reachable after 60 attempts" >&2
+            echo "Worker VM SSH credentials did not become usable after 60 attempts" >&2
             echo "---- VM serial log ----" >&2
             sudo cat "$vm_dir/serial.log" >&2 || true
             exit 1
