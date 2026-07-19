@@ -26,6 +26,7 @@ type Config struct {
 	FlannelImage              string // Flannel daemon image used by the built-in network bootstrap
 	FlannelCNIPluginImage     string // Flannel CNI plugin image installed on worker hosts
 	StorageProbeImage         string // Image used by worker storage readiness probes
+	IngressControllerImage    string // Traefik image used by the built-in Ingress controller
 	StorageProvisionerEnabled bool   // install the built-in local-path provisioner for local clusters
 }
 
@@ -81,6 +82,7 @@ func ConfigFromAppConf() (Config, error) {
 	flannelImage := configStringDefault("flannelImage", "ghcr.io/flannel-io/flannel:v0.27.4")
 	flannelCNIPluginImage := configStringDefault("flannelCNIPluginImage", "ghcr.io/flannel-io/flannel-cni-plugin:v1.8.0-flannel1")
 	storageProbeImage := configStringDefault("storageProbeImage", "docker.io/library/busybox:1.37.0")
+	ingressControllerImage := configStringDefault("ingressControllerImage", "docker.io/traefik:v3.3.4")
 
 	return Config{
 		DataDir:                   dataDir,
@@ -97,6 +99,7 @@ func ConfigFromAppConf() (Config, error) {
 		FlannelImage:              flannelImage,
 		FlannelCNIPluginImage:     flannelCNIPluginImage,
 		StorageProbeImage:         storageProbeImage,
+		IngressControllerImage:    ingressControllerImage,
 		StorageProvisionerEnabled: storageProvisionerEnabled,
 	}, nil
 }

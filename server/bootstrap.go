@@ -12,6 +12,7 @@ import (
 	admissionregv1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -36,6 +37,12 @@ func Bootstrap(ctx context.Context, cfg *rest.Config, srvCfg Config) error {
 	errs = append(errs, ensureNodeProxierBinding(ctx, client))
 	errs = append(errs, ensureFlannel(ctx, client, srvCfg))
 	errs = append(errs, ensureClusterDNS(ctx, client, srvCfg))
+	apiExtensionsClient, err := apiextensionsclient.NewForConfig(cfg)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("bootstrap API extensions client: %w", err))
+	} else {
+		errs = append(errs, ensureIngressController(ctx, client, apiExtensionsClient, srvCfg))
+	}
 	if srvCfg.StorageProvisionerEnabled {
 		errs = append(errs, ensureDefaultStorageProvisioner(ctx, client, srvCfg))
 	}
