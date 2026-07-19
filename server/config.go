@@ -24,7 +24,10 @@ type Config struct {
 	FlannelImage              string // Flannel daemon image used by the built-in network bootstrap
 	FlannelCNIPluginImage     string // Flannel CNI plugin image installed on worker hosts
 	StorageProbeImage         string // Image used by worker storage readiness probes
+	IngressControllerImage    string // Traefik image used by the built-in Ingress controller
 	StorageProvisionerEnabled bool   // install the built-in local-path provisioner for local clusters
+	IngressControllerEnabled  bool   // install the built-in Traefik controller
+	ServiceLBEnabled          bool   // run the built-in bare-metal LoadBalancer controller
 }
 
 // ConfigFromAppConf reads server config from the beego app.conf.
@@ -61,14 +64,17 @@ func ConfigFromAppConf() (Config, error) {
 	}
 
 	storageProvisionerEnabled := conf.GetConfigBoolDefault("storageProvisionerEnabled", true)
+	ingressControllerEnabled := conf.GetConfigBoolDefault("ingressControllerEnabled", false)
+	serviceLBEnabled := conf.GetConfigBoolDefault("serviceLBEnabled", false)
 	coreDNSImage := conf.GetConfigStringDefault("coreDNSImage", "docker.1ms.run/coredns/coredns:1.12.4")
 	localPathProvisionerImage := conf.GetConfigStringDefault("localPathProvisionerImage", "docker.1ms.run/rancher/local-path-provisioner:v0.0.32")
 	localPathHelperImage := conf.GetConfigStringDefault("localPathHelperImage", "docker.1ms.run/library/busybox:1.37.0")
 	flannelImage := conf.GetConfigStringDefault("flannelImage", defaultFlannelImage)
 	flannelCNIPluginImage := conf.GetConfigStringDefault("flannelCNIPluginImage", defaultFlannelCNIPluginImage)
 	storageProbeImage := conf.GetConfigStringDefault("storageProbeImage", "docker.1ms.run/library/busybox:1.37.0")
+	ingressControllerImage := conf.GetConfigStringDefault("ingressControllerImage", defaultIngressControllerImage)
 
-	return Config{
+	config := Config{
 		DataDir:                   dataDir,
 		ApiserverBind:             bind,
 		AdvertiseAddress:          advertise,
@@ -83,8 +89,22 @@ func ConfigFromAppConf() (Config, error) {
 		FlannelImage:              flannelImage,
 		FlannelCNIPluginImage:     flannelCNIPluginImage,
 		StorageProbeImage:         storageProbeImage,
+		IngressControllerImage:    ingressControllerImage,
 		StorageProvisionerEnabled: storageProvisionerEnabled,
-	}, nil
+		IngressControllerEnabled:  ingressControllerEnabled,
+		ServiceLBEnabled:          serviceLBEnabled,
+	}
+	if err := validateApplicationAccessConfig(config); err != nil {
+		return Config{}, err
+	}
+	return config, nil
+}
+
+func validateApplicationAccessConfig(config Config) error {
+	if config.IngressControllerEnabled && !config.ServiceLBEnabled {
+		return fmt.Errorf("ingressControllerEnabled requires serviceLBEnabled because the built-in Ingress Service uses LoadBalancerClass %q", serviceLBClass)
+	}
+	return nil
 }
 
 // injectDBName inserts dbName into a MySQL DSN of the form
