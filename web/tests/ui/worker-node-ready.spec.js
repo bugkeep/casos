@@ -3,6 +3,8 @@ const {e2eSshPassword, signInAsCiUser} = require("./e2e-helpers");
 const {
   createdMachinesFixture,
   createMachineFromUi,
+  getMachineNodeLogs,
+  getMachineNodeTasks,
   makeMachineName,
   startWorkerNodeDeployment,
   workerNodeDialog,
@@ -31,11 +33,63 @@ function nodeRow(page, nodeName) {
   return page.locator(".ant-table-wrapper").filter({hasText: "Nodes"}).locator(`tr[data-row-key="${nodeName}"]`);
 }
 
+function workflowCommandData(value) {
+  return String(value).replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
+}
+
+function emitGithubActionsError(title, message) {
+  if (process.env.GITHUB_ACTIONS !== "true") {
+    return;
+  }
+  const property = String(title)
+    .replace(/%/g, "%25")
+    .replace(/\r/g, "%0D")
+    .replace(/\n/g, "%0A")
+    .replace(/:/g, "%3A")
+    .replace(/,/g, "%2C");
+  console.error(`::error title=${property}::${workflowCommandData(message)}`);
+}
+
+async function deploymentDiagnostics(page, machineName, taskId) {
+  const details = [];
+  try {
+    const taskBody = await getMachineNodeTasks(page, machineName);
+    const task = (taskBody.data || []).find(item => String(item.id) === String(taskId));
+    details.push(`Task: ${JSON.stringify(task || null)}`);
+  } catch (error) {
+    details.push(`Task lookup failed: ${error.message}`);
+  }
+  try {
+    const logBody = await getMachineNodeLogs(page, taskId);
+    const logs = (logBody.data || []).slice(-25).map(log =>
+      `${log.createdAt || ""} ${log.level || ""} ${log.message || ""}`.trim()
+    );
+    details.push(`Recent task logs:\n${logs.join("\n") || "(none)"}`);
+  } catch (error) {
+    details.push(`Task log lookup failed: ${error.message}`);
+  }
+  return details.join("\n");
+}
+
 async function waitForDeployTaskToSucceed(page, machineName, taskId) {
   const taskRow = workerNodeTaskTable(page, machineName).locator(`tr[data-row-key="${taskId}"]`);
-  await expect(taskRow.getByRole("cell", {name: "succeeded", exact: true})).toBeVisible({
-    timeout: E2E_WORKER_DEPLOY_TIMEOUT_MS,
-  });
+  const statusTag = taskRow.locator("td .ant-tag");
+  try {
+    await expect.poll(async() => {
+      const status = (await statusTag.textContent())?.trim().toLowerCase();
+      if (status === "failed") {
+        throw new Error(`Deployment task ${taskId} reached failed state`);
+      }
+      return status || "pending";
+    }, {timeout: E2E_WORKER_DEPLOY_TIMEOUT_MS}).toBe("succeeded");
+  } catch (error) {
+    const alert = workerNodeDialog(page, machineName).getByRole("alert");
+    const detail = await alert.isVisible() ? await alert.innerText() : "no deployment error was shown";
+    const diagnostics = await deploymentDiagnostics(page, machineName, taskId);
+    const message = `${error.message}\nDeployment task ${taskId} failed: ${detail}\n${diagnostics}`;
+    emitGithubActionsError("Worker deployment diagnostics", message);
+    throw new Error(message);
+  }
 }
 
 async function waitForNodeReady(page, nodeName) {
