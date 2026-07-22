@@ -11,6 +11,7 @@ import (
 	logsapi "k8s.io/component-base/logs/api/v1"
 
 	"github.com/casosorg/casos/casdoor"
+	"github.com/casosorg/casos/conf"
 	"github.com/casosorg/casos/controllers"
 	"github.com/casosorg/casos/deploy"
 	"github.com/casosorg/casos/object"
@@ -92,7 +93,7 @@ func main() {
 	beego.BConfig.WebConfig.Session.SessionProviderConfig = "./tmp"
 	beego.BConfig.WebConfig.Session.SessionGCMaxLifetime = 3600 * 24 * 365
 
-	port := beego.AppConfig.DefaultInt("httpport", 9000)
+	port := conf.GetConfigIntDefault("httpport", 9000)
 	logs.Info("casos listening on :%d", port)
 	beego.Run(fmt.Sprintf(":%v", port))
 }

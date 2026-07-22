@@ -3,11 +3,9 @@ package server
 import (
 	"fmt"
 	"net"
-	"strconv"
 	"strings"
 
 	"github.com/casosorg/casos/conf"
-	"github.com/sirupsen/logrus"
 )
 
 // Config holds control-plane settings populated from app.conf.
@@ -30,18 +28,9 @@ type Config struct {
 
 // ConfigFromAppConf reads server config from the beego app.conf.
 func ConfigFromAppConf() (Config, error) {
-	dataDir := conf.GetConfigString("dataDir")
-	if dataDir == "" {
-		dataDir = "/var/lib/casos"
-	}
-	bind := conf.GetConfigString("apiserverBind")
-	if bind == "" {
-		bind = outboundIP()
-	}
-	port := configInt("apiserverPort")
-	if port == 0 {
-		port = 6443
-	}
+	dataDir := conf.GetConfigStringDefault("dataDir", "/var/lib/casos")
+	bind := conf.GetConfigStringDefault("apiserverBind", outboundIP())
+	port := conf.GetConfigIntDefault("apiserverPort", 6443)
 	dsn := conf.GetConfigString("dataSourceName")
 	if dsn == "" {
 		return Config{}, fmt.Errorf("dataSourceName not set in app.conf")
@@ -57,10 +46,7 @@ func ConfigFromAppConf() (Config, error) {
 		advertise = bind
 	}
 
-	webhookPort := configInt("webhookPort")
-	if webhookPort == 0 {
-		webhookPort = 9443
-	}
+	webhookPort := conf.GetConfigIntDefault("webhookPort", 9443)
 
 	socks5Proxy := conf.GetConfigString("socks5Proxy")
 
@@ -73,12 +59,12 @@ func ConfigFromAppConf() (Config, error) {
 		}
 	}
 
-	storageProvisionerEnabled := configBool("storageProvisionerEnabled", true)
-	coreDNSImage := configStringDefault("coreDNSImage", "docker.1ms.run/coredns/coredns:1.12.4")
-	localPathProvisionerImage := configStringDefault("localPathProvisionerImage", "docker.1ms.run/rancher/local-path-provisioner:v0.0.32")
-	localPathHelperImage := configStringDefault("localPathHelperImage", "docker.1ms.run/library/busybox:1.37.0")
-	flannelImage := configStringDefault("flannelImage", defaultFlannelImage)
-	flannelCNIPluginImage := configStringDefault("flannelCNIPluginImage", defaultFlannelCNIPluginImage)
+	storageProvisionerEnabled := conf.GetConfigBoolDefault("storageProvisionerEnabled", true)
+	coreDNSImage := conf.GetConfigStringDefault("coreDNSImage", "docker.1ms.run/coredns/coredns:1.12.4")
+	localPathProvisionerImage := conf.GetConfigStringDefault("localPathProvisionerImage", "docker.1ms.run/rancher/local-path-provisioner:v0.0.32")
+	localPathHelperImage := conf.GetConfigStringDefault("localPathHelperImage", "docker.1ms.run/library/busybox:1.37.0")
+	flannelImage := conf.GetConfigStringDefault("flannelImage", defaultFlannelImage)
+	flannelCNIPluginImage := conf.GetConfigStringDefault("flannelCNIPluginImage", defaultFlannelCNIPluginImage)
 
 	return Config{
 		DataDir:                   dataDir,
@@ -96,45 +82,6 @@ func ConfigFromAppConf() (Config, error) {
 		FlannelCNIPluginImage:     flannelCNIPluginImage,
 		StorageProvisionerEnabled: storageProvisionerEnabled,
 	}, nil
-}
-
-func configInt(key string) int {
-	value := conf.GetConfigString(key)
-	if value == "" {
-		return 0
-	}
-	res, err := strconv.Atoi(value)
-	if err != nil {
-		return 0
-	}
-	return res
-}
-
-func configBool(key string, defaultValue bool) bool {
-	value := strings.TrimSpace(conf.GetConfigString(key))
-	if value == "" {
-		return defaultValue
-	}
-	switch strings.ToLower(value) {
-	case "yes", "y", "on":
-		return true
-	case "no", "n", "off":
-		return false
-	}
-	res, err := strconv.ParseBool(value)
-	if err != nil {
-		logrus.Warnf("invalid boolean config %s=%q, using default %t", key, value, defaultValue)
-		return defaultValue
-	}
-	return res
-}
-
-func configStringDefault(key, defaultValue string) string {
-	value := strings.TrimSpace(conf.GetConfigString(key))
-	if value == "" {
-		return defaultValue
-	}
-	return value
 }
 
 // injectDBName inserts dbName into a MySQL DSN of the form

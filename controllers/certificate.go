@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"sync"
 
-	"github.com/beego/beego"
+	"github.com/casosorg/casos/conf"
 	"github.com/casosorg/casos/object"
 )
 
@@ -76,10 +76,10 @@ func (c *ApiController) RequestLECert() {
 
 	// Apply defaults from app.conf when not supplied by caller.
 	if req.CasosServiceName == "" {
-		req.CasosServiceName = beego.AppConfig.DefaultString("casosServiceName", "casos")
+		req.CasosServiceName = conf.GetConfigStringDefault("casosServiceName", "casos")
 	}
 	if req.CasosServicePort == 0 {
-		req.CasosServicePort = int32(beego.AppConfig.DefaultInt("casosServicePort", 9000))
+		req.CasosServicePort = int32(conf.GetConfigIntDefault("casosServicePort", 9000))
 	}
 
 	key := req.Namespace + "/" + req.IngressName

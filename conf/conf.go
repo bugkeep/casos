@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/beego/beego"
+	"github.com/beego/beego/logs"
 )
 
 func init() {
@@ -42,25 +43,55 @@ func GetConfigString(key string) string {
 		return value
 	}
 
+	// the only place in the codebase that reads beego's app.conf directly
 	res := beego.AppConfig.String(key)
 	if res == "" {
 		if key == "staticBaseUrl" {
 			res = "https://cdn.casbin.org"
 		} else if key == "logConfig" {
-			res = fmt.Sprintf("{\"filename\": \"logs/%s.log\", \"maxdays\":99999, \"perm\":\"0770\"}", beego.AppConfig.String("appname"))
+			res = fmt.Sprintf("{\"filename\": \"logs/%s.log\", \"maxdays\":99999, \"perm\":\"0770\"}", GetConfigString("appname"))
 		}
 	}
 
 	return res
 }
 
+// GetConfigStringDefault returns the value for key, falling back to defaultValue
+// when the key is unset or blank.
+func GetConfigStringDefault(key string, defaultValue string) string {
+	value := strings.TrimSpace(GetConfigString(key))
+	if value == "" {
+		return defaultValue
+	}
+	return value
+}
+
 func GetConfigBool(key string) bool {
-	value := GetConfigString(key)
-	if value == "true" {
+	return GetConfigBoolDefault(key, false)
+}
+
+// GetConfigBoolDefault parses key as a boolean, falling back to defaultValue when
+// the key is unset or cannot be parsed. Accepts the strconv forms plus
+// yes/y/on and no/n/off, case-insensitively.
+func GetConfigBoolDefault(key string, defaultValue bool) bool {
+	value := strings.TrimSpace(GetConfigString(key))
+	if value == "" {
+		return defaultValue
+	}
+
+	switch strings.ToLower(value) {
+	case "yes", "y", "on":
 		return true
-	} else {
+	case "no", "n", "off":
 		return false
 	}
+
+	res, err := strconv.ParseBool(value)
+	if err != nil {
+		logs.Warning("invalid boolean config %s=%q, using default %t", key, value, defaultValue)
+		return defaultValue
+	}
+	return res
 }
 
 func GetConfigInt(key string) int {
@@ -70,6 +101,22 @@ func GetConfigInt(key string) int {
 		panic(err)
 	}
 	return num
+}
+
+// GetConfigIntDefault parses key as an int, falling back to defaultValue when the
+// key is unset or cannot be parsed.
+func GetConfigIntDefault(key string, defaultValue int) int {
+	value := strings.TrimSpace(GetConfigString(key))
+	if value == "" {
+		return defaultValue
+	}
+
+	res, err := strconv.Atoi(value)
+	if err != nil {
+		logs.Warning("invalid int config %s=%q, using default %d", key, value, defaultValue)
+		return defaultValue
+	}
+	return res
 }
 
 func GetConfigInt64(key string) (int64, error) {
@@ -107,7 +154,7 @@ func GetLanguage(language string) string {
 }
 
 func IsDemoMode() bool {
-	return strings.ToLower(GetConfigString("isDemoMode")) == "true"
+	return GetConfigBoolDefault("isDemoMode", false)
 }
 
 func GetConfigBatchSize() int {
