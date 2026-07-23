@@ -68,6 +68,11 @@ jobs:
       dataSourceName: root:casos-${{ github.run_id }}-${{ github.run_attempt }}@tcp(127.0.0.1:3306)/
       dbName: casos
       socks5Proxy: ""
+      coreDNSImage: registry.k8s.io/coredns/coredns:v1.12.4
+      flannelImage: ghcr.io/flannel-io/flannel:v0.27.4
+      flannelCNIPluginImage: ghcr.io/flannel-io/flannel-cni-plugin:v1.8.0-flannel1
+      localPathProvisionerImage: docker.io/rancher/local-path-provisioner:v0.0.32
+      localPathHelperImage: docker.io/library/busybox:1.37.0
       E2E_DATA_DIR: /tmp/casos-e2e-${{ github.run_id }}-${{ github.run_attempt }}
       E2E_APISERVER_PORT: 16443
       E2E_WEBHOOK_PORT: 19443
