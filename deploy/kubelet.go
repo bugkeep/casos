@@ -19,10 +19,11 @@ kind: KubeletConfiguration
 cgroupDriver: systemd
 failSwapOn: false
 containerRuntimeEndpoint: unix:///run/containerd/containerd.sock
+resolvConf: %s
 clusterDNS:
   - %s
 clusterDomain: cluster.local
-`, nodeDeployClusterDNS)
+`, nodeDeployResolverPath, nodeDeployClusterDNS)
 }
 
 func kubeletService(nodeName string) string {
@@ -37,6 +38,7 @@ ExecStart=/usr/local/bin/kubelet \
   --config=/var/lib/kubelet/config.yaml \
   --client-ca-file=/etc/kubernetes/ca.crt \
   --register-node=true \
+  --register-with-taints=%s=true:NoSchedule \
   --hostname-override=%s \
   --v=2
 Restart=always
@@ -44,5 +46,5 @@ RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
-`, nodeName)
+`, workerBootstrapTaintKey, nodeName)
 }

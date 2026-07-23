@@ -28,6 +28,22 @@ sysctl --system >/dev/null
 test -e /proc/sys/net/bridge/bridge-nf-call-iptables`); err != nil {
 		return fmt.Errorf("configure Kubernetes kernel networking: %w", err)
 	}
+	if _, err := runner.RunRootContext(ctx, fmt.Sprintf(`set -e
+if systemctl is-active --quiet systemd-resolved 2>/dev/null; then
+  for i in $(seq 1 30); do
+    [ -f /run/systemd/resolve/resolv.conf ] && break
+    sleep 1
+  done
+  test -f /run/systemd/resolve/resolv.conf
+fi
+if [ -f /run/systemd/resolve/resolv.conf ]; then
+  ln -sfn /run/systemd/resolve/resolv.conf %[1]s
+else
+  ln -sfn /etc/resolv.conf %[1]s
+fi
+test -f %[1]s`, nodeDeployResolverPath)); err != nil {
+		return fmt.Errorf("configure node resolver: %w", err)
+	}
 
 	d.logStep(nodeDeployPhaseConfiguring, "Configuring containerd")
 	if err := runner.WriteFileContext(ctx, "/etc/containerd/config.toml", GenerateContainerdConfig(d.config.SandboxImage, d.config.Socks5Proxy), "0644"); err != nil {
