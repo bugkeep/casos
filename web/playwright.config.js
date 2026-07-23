@@ -12,6 +12,10 @@ const e2eDataDir = process.env.E2E_DATA_DIR || path.join(os.tmpdir(), `casos-e2e
 const backendDir = path.resolve(__dirname, "..");
 const browserChannel = process.env.E2E_BROWSER_CHANNEL;
 const videoMode = process.env.E2E_DISABLE_VIDEO ? "off" : "retain-on-failure";
+const isCI = /^true$/i.test(process.env.CI || "");
+const ciCoreDNSImage = "registry.k8s.io/coredns/coredns:v1.12.4";
+const ciFlannelImage = "ghcr.io/flannel-io/flannel:v0.27.4";
+const ciFlannelCNIPluginImage = "ghcr.io/flannel-io/flannel-cni-plugin:v1.8.0-flannel1";
 
 process.env.E2E_TEST_TOKEN = e2eToken;
 
@@ -53,6 +57,9 @@ module.exports = defineConfig({
         apiserverPort: process.env.E2E_APISERVER_PORT || "16443",
         webhookPort: process.env.E2E_WEBHOOK_PORT || "19443",
         socks5Proxy: process.env.socks5Proxy || "",
+        coreDNSImage: isCI ? ciCoreDNSImage : process.env.coreDNSImage || "",
+        flannelImage: isCI ? ciFlannelImage : process.env.flannelImage || "",
+        flannelCNIPluginImage: isCI ? ciFlannelCNIPluginImage : process.env.flannelCNIPluginImage || "",
         e2eTestMode: "true",
         e2eTestToken: e2eToken,
       },
