@@ -37,19 +37,19 @@ describe("installHelmChartStream", () => {
     jest.resetAllMocks();
   });
 
-  test("returns ABORTED when the server aborts the install stream", async() => {
+  test("rejects when the server reports an install failure", async() => {
     global.fetch = jest.fn().mockResolvedValue(mockStreamResponse([
       "data: creating 1 resource(s)\n\n",
-      "data: ABORTED\n\n",
+      "data: ERROR: install failed\n\n",
     ]));
 
     const onLine = jest.fn();
-    const status = await installHelmChartStream({releaseName: "demo"}, onLine);
+    await expect(installHelmChartStream({releaseName: "demo"}, onLine))
+      .rejects.toThrow("install failed");
 
-    expect(status).toBe("ABORTED");
     expect(onLine).toHaveBeenCalledTimes(2);
     expect(onLine).toHaveBeenNthCalledWith(1, "creating 1 resource(s)");
-    expect(onLine).toHaveBeenNthCalledWith(2, "ABORTED");
+    expect(onLine).toHaveBeenNthCalledWith(2, "ERROR: install failed");
   });
 
   test("returns DONE when the server completes the install stream", async() => {

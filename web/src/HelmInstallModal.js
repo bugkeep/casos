@@ -6,6 +6,55 @@ import * as NamespaceBackend from "./backend/NamespaceBackend";
 
 const {Text} = Typography;
 
+const helmTaskStoragePrefix = chartName => `casos.helmTask.${encodeURIComponent(chartName)}.`;
+
+const helmTaskStorageKey = (chartName, namespace, releaseName) =>
+  `${helmTaskStoragePrefix(chartName)}${encodeURIComponent(namespace)}.${encodeURIComponent(releaseName)}`;
+
+const removeStoredHelmTask = key => {
+  if (!key) {return;}
+  try {
+    window.localStorage.removeItem(key);
+  } catch (_) {
+    // Storage may be unavailable; task polling still works for this session.
+  }
+};
+
+const findStoredHelmTask = chartName => {
+  const prefix = helmTaskStoragePrefix(chartName);
+  const matches = [];
+  const invalidKeys = [];
+  try {
+    for (let i = 0; i < window.localStorage.length; i += 1) {
+      const key = window.localStorage.key(i);
+      if (!key?.startsWith(prefix)) {continue;}
+      const raw = window.localStorage.getItem(key);
+      try {
+        const stored = JSON.parse(raw);
+        if (stored?.taskId) {
+          matches.push({
+            key,
+            taskId: String(stored.taskId),
+            createdAt: Number(stored.createdAt) || 0,
+            namespace: stored.namespace,
+            releaseName: stored.releaseName,
+          });
+        }
+      } catch (_) {
+        if (/^\d+$/.test(raw ?? "")) {
+          matches.push({key, taskId: raw, createdAt: 0});
+        } else {
+          invalidKeys.push(key);
+        }
+      }
+    }
+  } catch (_) {
+    return null;
+  }
+  invalidKeys.forEach(removeStoredHelmTask);
+  return matches.sort((a, b) => b.createdAt - a.createdAt)[0] ?? null;
+};
+
 export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
   const {t} = useTranslation();
   const [form] = Form.useForm();
@@ -13,28 +62,96 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
   const [valuesYAML, setValuesYAML] = useState("");
   const [valuesLoading, setValuesLoading] = useState(false);
   const [installing, setInstalling] = useState(false);
-  const [aborted, setAborted] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState(null);
   const [logs, setLogs] = useState([]);
   const logEndRef = useRef(null);
-  const abortCtrlRef = useRef(null);
+  const taskIdRef = useRef(null);
+  const taskStorageKeyRef = useRef(null);
+  const pollTimerRef = useRef(null);
+  const mountedRef = useRef(true);
+  const submittingRef = useRef(false);
+
+  const stopTaskPolling = () => {
+    if (pollTimerRef.current) {
+      clearTimeout(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+  };
+
+  const monitorTask = (taskId, storageKey = taskStorageKeyRef.current) => {
+    stopTaskPolling();
+    const poll = () => {
+      HelmBackend.getHelmOperationTask(taskId)
+        .then(res => {
+          if (!mountedRef.current) {return;}
+          if (res.status !== "ok") {
+            if (res.msg === "Helm operation task not found" && storageKey) {
+              removeStoredHelmTask(storageKey);
+            }
+            setError(res.msg);
+            setInstalling(false);
+            submittingRef.current = false;
+            return;
+          }
+          const task = res.data;
+          setLogs((res.data2 ?? []).map(log => log.message));
+          if (task.status === "succeeded") {
+            setDone(true);
+            setInstalling(false);
+            submittingRef.current = false;
+            removeStoredHelmTask(storageKey);
+            return;
+          }
+          if (task.status === "failed") {
+            setError(task.errorMsg || "Helm operation failed");
+            setInstalling(false);
+            submittingRef.current = false;
+            removeStoredHelmTask(storageKey);
+            return;
+          }
+          setInstalling(true);
+          pollTimerRef.current = setTimeout(poll, 2000);
+        })
+        .catch(e => {
+          if (!mountedRef.current) {return;}
+          setError(e.message);
+          setInstalling(false);
+          submittingRef.current = false;
+        });
+    };
+    poll();
+  };
 
   useEffect(() => {
     if (!open || !chart) {return;}
     setError(null);
     setLogs([]);
     setDone(false);
-    setAborted(false);
+    setInstalling(false);
+    taskIdRef.current = null;
+    taskStorageKeyRef.current = null;
+    submittingRef.current = false;
+    stopTaskPolling();
+
+    const savedTask = findStoredHelmTask(chart.chartName);
+    if (savedTask) {
+      taskIdRef.current = savedTask.taskId;
+      taskStorageKeyRef.current = savedTask.key;
+      submittingRef.current = true;
+      setInstalling(true);
+      monitorTask(savedTask.taskId, savedTask.key);
+    }
 
     NamespaceBackend.getNamespaces().then(res => {
+      if (!mountedRef.current) {return;}
       if (res.status === "ok") {
         const ns = res.data ?? [];
         setNamespaces(ns);
         const def = ns.find(n => n.name === "default") ? "default" : (ns[0]?.name ?? "default");
         form.setFieldsValue({
-          releaseName: chart.chartName,
-          namespace: def,
+          releaseName: savedTask?.releaseName || chart.chartName,
+          namespace: savedTask?.namespace || def,
           version: chart.version ?? "",
         });
       }
@@ -45,15 +162,26 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
       setValuesYAML("");
       HelmBackend.getHelmChartValues(chart.chartName, chart.repoURL, chart.version ?? "")
         .then(res => {
+          if (!mountedRef.current) {return;}
           if (res.status === "ok") {
             setValuesYAML(res.data ?? "");
           } else {
             setError(res.msg);
           }
         })
-        .finally(() => setValuesLoading(false));
+        .finally(() => {
+          if (mountedRef.current) {setValuesLoading(false);}
+        });
     }
   }, [open, chart, form]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      stopTaskPolling();
+    };
+  }, []);
 
   useEffect(() => {
     if (logEndRef.current) {
@@ -62,36 +190,31 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
   }, [logs]);
 
   const handleClose = () => {
+    stopTaskPolling();
+    taskIdRef.current = null;
+    taskStorageKeyRef.current = null;
+    submittingRef.current = false;
     form.resetFields();
     setValuesYAML("");
     setError(null);
     setLogs([]);
     setDone(false);
-    setAborted(false);
     setInstalling(false);
     onClose();
   };
 
-  const handleAbort = () => {
-    if (abortCtrlRef.current) {
-      abortCtrlRef.current.abort();
-    }
-  };
-
   const handleOk = () => {
-    if (done || aborted) {
-      if (done) {onInstalled?.();}
+    if (done) {
+      onInstalled?.();
       handleClose();
       return;
     }
+    if (submittingRef.current) {return;}
+    submittingRef.current = true;
     form.validateFields().then(values => {
       setInstalling(true);
-      setAborted(false);
       setError(null);
       setLogs([]);
-
-      const ctrl = new AbortController();
-      abortCtrlRef.current = ctrl;
 
       HelmBackend.installHelmChartStream(
         {
@@ -103,34 +226,55 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
           valuesYAML,
         },
         line => {
-          if (line === "ABORTED") {
-            setAborted(true);
+          if (!mountedRef.current) {return;}
+          if (line.startsWith("TASK_ID:")) {
+            const taskId = line.slice("TASK_ID:".length).trim();
+            const storageKey = helmTaskStorageKey(chart.chartName, values.namespace, values.releaseName);
+            taskIdRef.current = taskId;
+            taskStorageKeyRef.current = storageKey;
+            try {
+              window.localStorage.setItem(storageKey, JSON.stringify({
+                taskId,
+                createdAt: Date.now(),
+                namespace: values.namespace,
+                releaseName: values.releaseName,
+              }));
+            } catch (_) {
+              // Continue the current install even when persistence is unavailable.
+            }
           } else {
             setLogs(prev => [...prev, line]);
           }
-        },
-        ctrl.signal
+        }
       )
         .then(status => {
+          if (!mountedRef.current) {return;}
           if (status === "DONE") {
             setDone(true);
+            setInstalling(false);
+            submittingRef.current = false;
+            removeStoredHelmTask(taskStorageKeyRef.current);
           }
         })
         .catch(e => {
-          if (e.name === "AbortError") {
-            setAborted(true);
-          } else {
-            setError(e.message);
+          if (!mountedRef.current) {return;}
+          if (taskIdRef.current) {
+            monitorTask(taskIdRef.current);
+            return;
           }
-        })
-        .finally(() => setInstalling(false));
+          setError(e.message);
+          setInstalling(false);
+          submittingRef.current = false;
+        });
+    }).catch(() => {
+      submittingRef.current = false;
     });
   };
 
   if (!chart) {return null;}
 
   const nsOptions = namespaces.map(ns => ({label: ns.name, value: ns.name}));
-  const showLog = installing || done || aborted || (error && logs.length > 0);
+  const showLog = installing || done || (error && logs.length > 0);
 
   const lineColor = (line, i, total) => {
     if (line.startsWith("ERROR")) {return "#f87171";}
@@ -156,20 +300,17 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
       maskClosable={!installing}
       footer={
         <div style={{display: "flex", justifyContent: "flex-end", gap: 8}}>
-          {installing && (
-            <Button danger onClick={handleAbort}>{t("helm:Abort")}</Button>
-          )}
           {!installing && (
             <Button onClick={handleClose}>
-              {done || aborted ? t("general:Close") : t("general:Cancel")}
+              {done ? t("general:Close") : t("general:Cancel")}
             </Button>
           )}
-          {!done && !aborted && (
+          {!done && (
             <Button type="primary" loading={installing} onClick={handleOk}>
               {t("helm:Install")}
             </Button>
           )}
-          {(done || aborted) && (
+          {done && (
             <Button type="primary" onClick={handleOk}>
               {t("general:Done")}
             </Button>
@@ -181,9 +322,6 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
     >
       {error && (
         <Alert type="error" message={error} showIcon style={{marginBottom: 16}} closable onClose={() => setError(null)} />
-      )}
-      {aborted && (
-        <Alert type="warning" message={t("helm:Install aborted")} showIcon style={{marginBottom: 16}} />
       )}
 
       {!showLog && (

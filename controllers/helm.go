@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/casosorg/casos/object"
@@ -240,7 +241,22 @@ func (c *ApiController) InstallHelmChartStream() {
 
 	flusher, canFlush := w.(http.Flusher)
 	ctx := c.Ctx.Request.Context()
-	logCh := store.InstallHelmChartStream(ctx, cfg, req.ReleaseName, req.Namespace, req.ChartName, req.RepoURL, req.Version, req.ValuesYAML)
+	task, err := object.CreateHelmOperationTask(helmOperationOwner(c), object.HelmOperationInstall, req.ReleaseName, req.Namespace, req.ChartName, req.Version)
+	if err != nil {
+		fmt.Fprintf(w, "data: ERROR: %s\n\n", err.Error())
+		c.StopRun()
+		return
+	}
+	if _, err := fmt.Fprintf(w, "data: TASK_ID:%d\n\n", task.Id); err != nil {
+		_ = object.FinishHelmOperationTask(task.Id, false, fmt.Sprintf("failed to send Helm operation task id: %v", err))
+		c.StopRun()
+		return
+	}
+	if canFlush {
+		flusher.Flush()
+	}
+	recorder := object.NewHelmOperationRecorder(task.Id)
+	logCh := store.InstallHelmChartStream(ctx, recorder, cfg, req.ReleaseName, req.Namespace, req.ChartName, req.RepoURL, req.Version, req.ValuesYAML)
 	for line := range logCh {
 		if _, err := fmt.Fprintf(w, "data: %s\n\n", line); err != nil {
 			break
@@ -250,6 +266,49 @@ func (c *ApiController) InstallHelmChartStream() {
 		}
 	}
 	c.StopRun()
+}
+
+// GetHelmOperationTask returns a persisted install task and its log history so
+// an administrator can reconnect after an SSE stream is interrupted.
+// @router /api/get-helm-operation-task [get]
+func (c *ApiController) GetHelmOperationTask() {
+	if c.RequireAdmin() {
+		return
+	}
+	id, err := strconv.ParseInt(c.GetString("id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.ResponseError("invalid task id")
+		return
+	}
+	if err := object.ExpireStaleHelmOperationTask(id); err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
+	task, err := object.GetHelmOperationTask(id)
+	if err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
+	if task == nil || task.Owner != helmOperationOwner(c) {
+		c.ResponseError("Helm operation task not found")
+		return
+	}
+	logs, err := object.GetHelmOperationLogs(id, 1000)
+	if err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
+	c.ResponseOk(task, logs)
+}
+
+func helmOperationOwner(c *ApiController) string {
+	if user := c.GetSessionUser(); user != nil {
+		if user.Name != "" {
+			return user.Name
+		}
+		return user.Id
+	}
+	return ""
 }
 
 // UpgradeHelmRelease upgrades an existing Helm release.
