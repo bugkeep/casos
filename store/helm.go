@@ -1217,6 +1217,13 @@ func InstallHelmChart(cfg *rest.Config, releaseName, namespace, chartName, repoU
 	if err != nil {
 		return err
 	}
+	vals, fallbackApplied, err := prepareHelmInstallValues(ch, repoURL, vals)
+	if err != nil {
+		return err
+	}
+	if fallbackApplied {
+		logrus.Warn(bitnamiLegacyImageWarning)
+	}
 
 	attachHelmCapabilities(actionConfig, cfg, namespace, helmWarningLog)
 	if err := validateHelmChartCompatibility(context.Background(), cfg, actionConfig, releaseName, namespace, ch, vals); err != nil {
@@ -1310,6 +1317,17 @@ func InstallHelmChartStream(ctx context.Context, lifecycle HelmInstallLifecycle,
 			}
 			return
 		}
+		vals, fallbackApplied, err := prepareHelmInstallValues(helmChart, repoURL, vals)
+		if err != nil {
+			send("ERROR: " + err.Error())
+			if finishErr := lifecycle.Finish(err); finishErr != nil {
+				logrus.Errorf("failed to finish Helm operation after values preparation error: %v", finishErr)
+			}
+			return
+		}
+		if fallbackApplied {
+			send("WARNING: " + bitnamiLegacyImageWarning)
+		}
 		attachHelmCapabilities(actionConfig, cfg, namespace, logFn)
 		if err := validateHelmChartCompatibility(installCtx, cfg, actionConfig, releaseName, namespace, helmChart, vals); err != nil {
 			send("ERROR: " + err.Error())
@@ -1372,6 +1390,13 @@ func UpgradeHelmRelease(cfg *rest.Config, releaseName, namespace, chartName, rep
 	vals, err := parseValues(valuesYAML)
 	if err != nil {
 		return err
+	}
+	vals, fallbackApplied, err := prepareHelmInstallValues(ch, repoURL, vals)
+	if err != nil {
+		return err
+	}
+	if fallbackApplied {
+		logrus.Warn(bitnamiLegacyImageWarning)
 	}
 
 	attachHelmCapabilities(actionConfig, cfg, namespace, helmWarningLog)
@@ -1459,20 +1484,4 @@ func GetHelmReleaseHistory(cfg *rest.Config, releaseName, namespace string) ([]H
 		})
 	}
 	return result, nil
-}
-
-// GetHelmChartDefaultValues downloads a chart and returns its default values.yaml content.
-func GetHelmChartDefaultValues(chartName, repoURL, version string) (string, error) {
-	ch, err := loadChart(chartName, repoURL, version)
-	if err != nil {
-		return "", err
-	}
-	if ch.Values == nil {
-		return "", nil
-	}
-	data, err := yaml.Marshal(ch.Values)
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
 }
