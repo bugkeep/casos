@@ -395,6 +395,21 @@ func newOCIRegistryClient() (*registry.Client, error) {
 // pullOCIChart pulls the chart hosted at repoURL, resolving to the newest published
 // semver tag when version is empty.
 func pullOCIChart(repoURL, version string) (*registry.PullResult, error) {
+	var lastErr error
+	for index, candidate := range ociChartPullCandidates(repoURL) {
+		pull, err := pullOCIChartFromRegistry(candidate, version)
+		if err == nil {
+			return pull, nil
+		}
+		lastErr = err
+		if index == 0 && candidate != repoURL {
+			logrus.Warnf("Bitnami OCI mirror pull failed, falling back to the official registry: %v", err)
+		}
+	}
+	return nil, lastErr
+}
+
+func pullOCIChartFromRegistry(repoURL, version string) (*registry.PullResult, error) {
 	ref, resolvedVersion := resolveOCIChartRef(repoURL, version)
 
 	rc, err := newOCIRegistryClient()
@@ -1217,6 +1232,13 @@ func InstallHelmChart(cfg *rest.Config, releaseName, namespace, chartName, repoU
 	if err != nil {
 		return err
 	}
+	vals, fallbackApplied, err := prepareHelmInstallValues(ch, repoURL, vals)
+	if err != nil {
+		return err
+	}
+	if fallbackApplied {
+		logrus.Warn(bitnamiLegacyImageWarning())
+	}
 
 	attachHelmCapabilities(actionConfig, cfg, namespace, helmWarningLog)
 	if err := validateHelmChartCompatibility(context.Background(), cfg, actionConfig, releaseName, namespace, ch, vals); err != nil {
@@ -1310,6 +1332,17 @@ func InstallHelmChartStream(ctx context.Context, lifecycle HelmInstallLifecycle,
 			}
 			return
 		}
+		vals, fallbackApplied, err := prepareHelmInstallValues(helmChart, repoURL, vals)
+		if err != nil {
+			send("ERROR: " + err.Error())
+			if finishErr := lifecycle.Finish(err); finishErr != nil {
+				logrus.Errorf("failed to finish Helm operation after values preparation error: %v", finishErr)
+			}
+			return
+		}
+		if fallbackApplied {
+			send("WARNING: " + bitnamiLegacyImageWarning())
+		}
 		attachHelmCapabilities(actionConfig, cfg, namespace, logFn)
 		if err := validateHelmChartCompatibility(installCtx, cfg, actionConfig, releaseName, namespace, helmChart, vals); err != nil {
 			send("ERROR: " + err.Error())
@@ -1372,6 +1405,13 @@ func UpgradeHelmRelease(cfg *rest.Config, releaseName, namespace, chartName, rep
 	vals, err := parseValues(valuesYAML)
 	if err != nil {
 		return err
+	}
+	vals, fallbackApplied, err := prepareHelmInstallValues(ch, repoURL, vals)
+	if err != nil {
+		return err
+	}
+	if fallbackApplied {
+		logrus.Warn(bitnamiLegacyImageWarning())
 	}
 
 	attachHelmCapabilities(actionConfig, cfg, namespace, helmWarningLog)
@@ -1459,20 +1499,4 @@ func GetHelmReleaseHistory(cfg *rest.Config, releaseName, namespace string) ([]H
 		})
 	}
 	return result, nil
-}
-
-// GetHelmChartDefaultValues downloads a chart and returns its default values.yaml content.
-func GetHelmChartDefaultValues(chartName, repoURL, version string) (string, error) {
-	ch, err := loadChart(chartName, repoURL, version)
-	if err != nil {
-		return "", err
-	}
-	if ch.Values == nil {
-		return "", nil
-	}
-	data, err := yaml.Marshal(ch.Values)
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
 }

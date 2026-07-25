@@ -73,6 +73,7 @@ jobs:
       flannelCNIPluginImage: ghcr.io/flannel-io/flannel-cni-plugin:v1.8.0-flannel1
       localPathProvisionerImage: docker.io/rancher/local-path-provisioner:v0.0.32
       localPathHelperImage: docker.io/library/busybox:1.37.0
+      bitnamiLegacyRegistry: docker.io
       E2E_DATA_DIR: /tmp/casos-e2e-${{ github.run_id }}-${{ github.run_attempt }}
       E2E_APISERVER_PORT: 16443
       E2E_WEBHOOK_PORT: 19443
