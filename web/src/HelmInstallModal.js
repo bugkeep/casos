@@ -14,6 +14,7 @@ import {
 
 const {Text} = Typography;
 const helmOperationTaskNotFoundCode = "helm_task_not_found";
+const helmInstallStreamIdleTimeout = 30 * 1000;
 
 export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
   const {t} = useTranslation();
@@ -35,7 +36,10 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
   const taskIdentityRef = useRef(null);
   const pollTimerRef = useRef(null);
   const pollGenerationRef = useRef(0);
+  const initializationGenerationRef = useRef(0);
   const streamAbortRef = useRef(null);
+  const streamIdleTimerRef = useRef(null);
+  const streamIdleControllerRef = useRef(null);
   const mountedRef = useRef(true);
   const submittingRef = useRef(false);
 
@@ -45,6 +49,15 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
       clearTimeout(pollTimerRef.current);
       pollTimerRef.current = null;
     }
+  };
+
+  const stopStreamIdleTimer = (controller = null) => {
+    if (controller && streamIdleControllerRef.current !== controller) {return;}
+    if (streamIdleTimerRef.current) {
+      clearTimeout(streamIdleTimerRef.current);
+      streamIdleTimerRef.current = null;
+    }
+    streamIdleControllerRef.current = null;
   };
 
   const forgetTask = (storageKey = taskStorageKeyRef.current) => {
@@ -149,7 +162,12 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
   };
 
   useEffect(() => {
+    const generation = initializationGenerationRef.current + 1;
+    initializationGenerationRef.current = generation;
     if (!open || !chart) {return;}
+    const isCurrentInitialization = () => (
+      mountedRef.current && generation === initializationGenerationRef.current
+    );
     setError(null);
     setStorageWarning(null);
     setLogs([]);
@@ -162,10 +180,19 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
     taskIdentityRef.current = null;
     submittingRef.current = false;
     stopTaskPolling();
+    stopStreamIdleTimer();
     streamAbortRef.current?.abort();
     streamAbortRef.current = null;
 
     const savedTask = findStoredHelmTask(chart.chartName);
+    const initialFields = {
+      releaseName: savedTask?.releaseName || chart.chartName,
+      version: chart.version ?? "",
+    };
+    if (savedTask?.namespace) {
+      initialFields.namespace = savedTask.namespace;
+    }
+    form.setFieldsValue(initialFields);
     if (savedTask) {
       taskIdRef.current = savedTask.taskId;
       setActiveTaskId(savedTask.taskId);
@@ -177,16 +204,14 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
     }
 
     NamespaceBackend.getNamespaces().then(res => {
-      if (!mountedRef.current) {return;}
+      if (!isCurrentInitialization()) {return;}
       if (res.status === "ok") {
         const ns = res.data ?? [];
         setNamespaces(ns);
         const def = ns.find(n => n.name === "default") ? "default" : (ns[0]?.name ?? "default");
-        form.setFieldsValue({
-          releaseName: savedTask?.releaseName || chart.chartName,
-          namespace: savedTask?.namespace || def,
-          version: chart.version ?? "",
-        });
+        if (!form.isFieldTouched("namespace") && !form.getFieldValue("namespace")) {
+          form.setFieldsValue({namespace: def});
+        }
       }
     });
 
@@ -196,7 +221,7 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
       setValuesBaselineYAML("");
       HelmBackend.getHelmChartValues(chart.chartName, chart.repoURL, chart.version ?? "")
         .then(res => {
-          if (!mountedRef.current) {return;}
+          if (!isCurrentInitialization()) {return;}
           if (res.status === "ok") {
             const initialValues = res.data ?? "";
             setValuesYAML(initialValues);
@@ -206,7 +231,7 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
           }
         })
         .finally(() => {
-          if (mountedRef.current) {setValuesLoading(false);}
+          if (isCurrentInitialization()) {setValuesLoading(false);}
         });
     }
   }, [open, chart, form]);
@@ -216,6 +241,7 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
     return () => {
       mountedRef.current = false;
       stopTaskPolling();
+      stopStreamIdleTimer();
       streamAbortRef.current?.abort();
       streamAbortRef.current = null;
     };
@@ -229,6 +255,7 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
 
   const handleClose = () => {
     stopTaskPolling();
+    stopStreamIdleTimer();
     streamAbortRef.current?.abort();
     streamAbortRef.current = null;
     taskIdRef.current = null;
@@ -263,8 +290,21 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
       setError(null);
       setLogs([]);
       const streamController = new AbortController();
+      stopStreamIdleTimer();
       streamAbortRef.current?.abort();
       streamAbortRef.current = streamController;
+      const fallBackToTaskPolling = () => {
+        stopStreamIdleTimer(streamController);
+        if (!mountedRef.current || streamAbortRef.current !== streamController || !taskIdRef.current) {return;}
+        streamController.abort();
+        monitorTask(taskIdRef.current, taskStorageKeyRef.current, taskIdentityRef.current);
+      };
+      const resetStreamIdleTimer = () => {
+        if (!taskIdRef.current) {return;}
+        stopStreamIdleTimer();
+        streamIdleControllerRef.current = streamController;
+        streamIdleTimerRef.current = setTimeout(fallBackToTaskPolling, helmInstallStreamIdleTimeout);
+      };
 
       HelmBackend.installHelmChartStream(
         {
@@ -277,7 +317,7 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
           valuesBaselineYAML,
         },
         line => {
-          if (!mountedRef.current) {return;}
+          if (!mountedRef.current || streamAbortRef.current !== streamController) {return;}
           if (line.startsWith("TASK_ID:")) {
             const taskId = line.slice("TASK_ID:".length).trim();
             const storageKey = helmTaskStorageKey(chart.chartName, values.namespace, values.releaseName);
@@ -304,12 +344,14 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
           } else {
             setLogs(prev => [...prev, line]);
           }
+          resetStreamIdleTimer();
         },
         streamController.signal
       )
         .then(status => {
-          if (!mountedRef.current) {return;}
+          if (!mountedRef.current || streamAbortRef.current !== streamController) {return;}
           if (status === "DONE") {
+            stopStreamIdleTimer(streamController);
             setDone(true);
             setInstalling(false);
             setPollingPaused(false);
@@ -319,7 +361,8 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
           }
         })
         .catch(e => {
-          if (!mountedRef.current) {return;}
+          if (!mountedRef.current || streamAbortRef.current !== streamController) {return;}
+          stopStreamIdleTimer(streamController);
           if (streamController.signal.aborted) {return;}
           if (taskIdRef.current) {
             monitorTask(taskIdRef.current, taskStorageKeyRef.current, taskIdentityRef.current);
@@ -332,6 +375,7 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
         })
         .finally(() => {
           if (streamAbortRef.current === streamController) {
+            stopStreamIdleTimer(streamController);
             streamAbortRef.current = null;
           }
         });
