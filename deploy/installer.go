@@ -7,6 +7,16 @@ import (
 
 const nodeDeployResolverPath = "/etc/casos-resolv.conf"
 
+const (
+	dockerHubHostsPath   = "/etc/containerd/certs.d/docker.io/hosts.toml"
+	k8sRegistryHostsPath = "/etc/containerd/certs.d/registry.k8s.io/hosts.toml"
+)
+
+type registryMirrorFileRunner interface {
+	RunRootContext(ctx context.Context, command string) (string, error)
+	WriteFileContext(ctx context.Context, path, content, mode string) error
+}
+
 func (d *NodeDeployer) installNodeBinaries(ctx context.Context, runner *NodeDeploySSHRunner, arch, k8sVersion string) error {
 	version := k8sVersion
 	cniVersion := defaultNodeDeployCNIVersion
@@ -47,16 +57,11 @@ test -f %[1]s`, nodeDeployResolverPath)); err != nil {
 	}
 
 	d.logStep(nodeDeployPhaseConfiguring, "Configuring containerd")
-	if err := runner.WriteFileContext(ctx, "/etc/containerd/config.toml", GenerateContainerdConfig(d.config.SandboxImage, d.config.Socks5Proxy), "0644"); err != nil {
+	if err := runner.WriteFileContext(ctx, "/etc/containerd/config.toml", GenerateContainerdConfig(d.config.SandboxImage), "0644"); err != nil {
 		return fmt.Errorf("write /etc/containerd/config.toml: %w", err)
 	}
-	if d.config.Socks5Proxy != "" {
-		if err := runner.WriteFileContext(ctx, "/etc/containerd/certs.d/docker.io/hosts.toml", GenerateDockerHubHostsToml(), "0644"); err != nil {
-			return fmt.Errorf("write /etc/containerd/certs.d/docker.io/hosts.toml: %w", err)
-		}
-		if err := runner.WriteFileContext(ctx, "/etc/containerd/certs.d/registry.k8s.io/hosts.toml", GenerateK8sRegistryHostsToml(), "0644"); err != nil {
-			return fmt.Errorf("write /etc/containerd/certs.d/registry.k8s.io/hosts.toml: %w", err)
-		}
+	if err := reconcileRegistryMirrorFiles(ctx, runner, d.config.UseRegistryMirror); err != nil {
+		return err
 	}
 	if _, err := runner.RunRootContext(ctx, "systemctl enable --now containerd && systemctl restart containerd"); err != nil {
 		return fmt.Errorf("start containerd: %w", err)
@@ -91,6 +96,29 @@ if [ ! -x /opt/cni/bin/bridge ] || [ ! -x /opt/cni/bin/loopback ] || [ ! -x /opt
 fi`, version, version, arch, version, arch, cniVersion, arch, cniVersion)
 	if _, err := runner.RunRootContext(ctx, installCmd); err != nil {
 		return fmt.Errorf("install node binaries: %w", err)
+	}
+	return nil
+}
+
+func reconcileRegistryMirrorFiles(ctx context.Context, runner registryMirrorFileRunner, enabled bool) error {
+	if enabled {
+		if err := runner.WriteFileContext(ctx, dockerHubHostsPath, GenerateDockerHubHostsToml(), "0644"); err != nil {
+			return fmt.Errorf("write %s: %w", dockerHubHostsPath, err)
+		}
+		if err := runner.WriteFileContext(ctx, k8sRegistryHostsPath, GenerateK8sRegistryHostsToml(), "0644"); err != nil {
+			return fmt.Errorf("write %s: %w", k8sRegistryHostsPath, err)
+		}
+		return nil
+	}
+
+	cleanupCommand := fmt.Sprintf(`set -e
+for path in %s %s; do
+  if [ -f "$path" ] && [ "$(sed -n '1p' "$path")" = %s ]; then
+    rm -f -- "$path"
+  fi
+done`, shellSingleQuote(dockerHubHostsPath), shellSingleQuote(k8sRegistryHostsPath), shellSingleQuote(generatedRegistryHostsMarker))
+	if _, err := runner.RunRootContext(ctx, cleanupCommand); err != nil {
+		return fmt.Errorf("remove managed containerd registry hosts: %w", err)
 	}
 	return nil
 }

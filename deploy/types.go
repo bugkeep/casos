@@ -117,17 +117,17 @@ type Config struct {
 	ApiserverBind      string
 	ApiserverPort      int
 	SandboxImage       string
-	Socks5Proxy        string
+	UseRegistryMirror  bool
 	GenerateKubeconfig KubeconfigGenerator
 }
 
 func ConfigFromServerConfig(cfg server.Config) Config {
 	return Config{
-		AdvertiseAddress: cfg.AdvertiseAddress,
-		ApiserverBind:    cfg.ApiserverBind,
-		ApiserverPort:    cfg.ApiserverPort,
-		SandboxImage:     cfg.SandboxImage,
-		Socks5Proxy:      cfg.Socks5Proxy,
+		AdvertiseAddress:  cfg.AdvertiseAddress,
+		ApiserverBind:     cfg.ApiserverBind,
+		ApiserverPort:     cfg.ApiserverPort,
+		SandboxImage:      cfg.SandboxImage,
+		UseRegistryMirror: cfg.UseRegistryMirror,
 		GenerateKubeconfig: func(nodeName, apiserverURL string) (*NodeKubeconfig, error) {
 			wk, err := server.GenerateWorkerKubeconfigForServer(cfg, nodeName, apiserverURL)
 			if err != nil {

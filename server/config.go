@@ -17,13 +17,13 @@ type Config struct {
 	WebhookPort               int    // HTTPS port for the Casbin admission webhook server
 	DSN                       string // MySQL DSN forwarded to kine
 	SandboxImage              string // containerd sandbox (pause) image, empty = upstream default
-	Socks5Proxy               string // outbound socks5 proxy, e.g. 127.0.0.1:10808
 	CoreDNSImage              string // CoreDNS image used by the built-in DNS bootstrap
 	LocalPathProvisionerImage string // local-path-provisioner controller image
 	LocalPathHelperImage      string // helper pod image used by local-path-provisioner
 	FlannelImage              string // Flannel daemon image used by the built-in network bootstrap
 	FlannelCNIPluginImage     string // Flannel CNI plugin image installed on worker hosts
 	StorageProvisionerEnabled bool   // install the built-in local-path provisioner for local clusters
+	UseRegistryMirror         bool   // route built-in image pulls through the registry mirrors (resolved from imageRegistryMirror)
 }
 
 // ConfigFromAppConf reads server config from the beego app.conf.
@@ -48,23 +48,19 @@ func ConfigFromAppConf() (Config, error) {
 
 	webhookPort := conf.GetConfigIntDefault("webhookPort", 9443)
 
-	socks5Proxy := conf.GetConfigString("socks5Proxy")
-
-	sandboxImage := conf.GetConfigString("sandboxImage")
-	if sandboxImage == "" {
-		if socks5Proxy != "" {
-			sandboxImage = "registry.aliyuncs.com/google_containers/pause:3.10.1"
-		} else {
-			sandboxImage = "registry.k8s.io/pause:3.10.1"
-		}
-	}
+	sandboxImage := conf.GetConfigStringDefault("sandboxImage", "registry.k8s.io/pause:3.10.1")
 
 	storageProvisionerEnabled := conf.GetConfigBoolDefault("storageProvisionerEnabled", true)
-	coreDNSImage := conf.GetConfigStringDefault("coreDNSImage", "docker.1ms.run/coredns/coredns:1.12.4")
-	localPathProvisionerImage := conf.GetConfigStringDefault("localPathProvisionerImage", "docker.1ms.run/rancher/local-path-provisioner:v0.0.32")
-	localPathHelperImage := conf.GetConfigStringDefault("localPathHelperImage", "docker.1ms.run/library/busybox:1.37.0")
+	coreDNSImage := conf.GetConfigStringDefault("coreDNSImage", "docker.io/coredns/coredns:1.12.4")
+	localPathProvisionerImage := conf.GetConfigStringDefault("localPathProvisionerImage", "docker.io/rancher/local-path-provisioner:v0.0.32")
+	localPathHelperImage := conf.GetConfigStringDefault("localPathHelperImage", "docker.io/library/busybox:1.37.0")
 	flannelImage := conf.GetConfigStringDefault("flannelImage", defaultFlannelImage)
 	flannelCNIPluginImage := conf.GetConfigStringDefault("flannelCNIPluginImage", defaultFlannelCNIPluginImage)
+
+	useRegistryMirror, err := resolveRegistryMirror()
+	if err != nil {
+		return Config{}, err
+	}
 
 	return Config{
 		DataDir:                   dataDir,
@@ -74,13 +70,13 @@ func ConfigFromAppConf() (Config, error) {
 		WebhookPort:               webhookPort,
 		DSN:                       dsn,
 		SandboxImage:              sandboxImage,
-		Socks5Proxy:               socks5Proxy,
 		CoreDNSImage:              coreDNSImage,
 		LocalPathProvisionerImage: localPathProvisionerImage,
 		LocalPathHelperImage:      localPathHelperImage,
 		FlannelImage:              flannelImage,
 		FlannelCNIPluginImage:     flannelCNIPluginImage,
 		StorageProvisionerEnabled: storageProvisionerEnabled,
+		UseRegistryMirror:         useRegistryMirror,
 	}, nil
 }
 
