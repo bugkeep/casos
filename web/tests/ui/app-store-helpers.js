@@ -3,12 +3,26 @@ const {expect} = require("@playwright/test");
 const {expectOkJson} = require("./e2e-helpers");
 
 const API_UNINSTALL_HELM_RELEASE = "/api/uninstall-helm-release";
+const API_INSTALL_HELM_CHART_STREAM = "/api/install-helm-chart-stream";
 const API_ADD_HELM_REPO = "/api/add-helm-repo";
 const API_GET_HELM_REPOS = "/api/get-helm-repos";
 const API_DELETE_HELM_REPO = "/api/delete-helm-repo";
 const INSTALL_DONE_TIMEOUT_MS = Number(process.env.E2E_APP_INSTALL_DONE_TIMEOUT_MS) || 11 * 60 * 1000;
 const HTTP_CHECK_TIMEOUT_MS = Number(process.env.E2E_APP_HTTP_TIMEOUT_MS) || 180_000;
 const HTTP_CHECK_INTERVAL_MS = 3_000;
+
+async function expectHelmCleanup(response) {
+  expect(response.ok()).toBeTruthy();
+  const body = await response.json();
+  const releaseMissing = body.status === "error" &&
+    typeof body.msg === "string" &&
+    body.msg.includes("Release not loaded:") &&
+    body.msg.includes("release: not found");
+  if (!releaseMissing) {
+    expect(body.status).toBe("ok");
+  }
+  return body;
+}
 
 const installedReleasesFixture = async({page}, use) => {
   const installedReleases = [];
@@ -20,7 +34,7 @@ const installedReleasesFixture = async({page}, use) => {
       const uninstall = await page.context().request.post(API_UNINSTALL_HELM_RELEASE, {
         data: {releaseName: release.name, namespace: release.namespace},
       });
-      await expectOkJson(uninstall);
+      await expectHelmCleanup(uninstall);
     } catch (error) {
       cleanupErrors.push(`${release.namespace}/${release.name}: ${error.message}`);
     }
@@ -151,8 +165,15 @@ async function installAppFromAppStore(page, {repoName, chartName, releaseName, n
   await dialog.getByLabel("Release name").fill(releaseName);
   await textarea.fill(valuesYAML);
 
+  const installRequestPromise = page.waitForRequest(request =>
+    request.url().includes(API_INSTALL_HELM_CHART_STREAM) && request.method() === "POST"
+  );
   await dialog.getByRole("button", {name: "Install"}).click();
-  installedReleases.push({name: releaseName, namespace});
+  const submittedInstall = (await installRequestPromise).postDataJSON();
+  if (submittedInstall?.releaseName && submittedInstall?.namespace) {
+    installedReleases.push({name: submittedInstall.releaseName, namespace: submittedInstall.namespace});
+  }
+  expect(submittedInstall).toMatchObject({releaseName, namespace});
 
   await waitForInstallDone(dialog);
   await dialog.getByRole("button", {name: "Done"}).click();
