@@ -184,9 +184,16 @@ func (c *ApiController) GetWorkerKubeconfig() {
 		c.ResponseError("generate worker kubeconfig: " + err.Error())
 		return
 	}
-	c.ResponseOk(map[string]string{
+	resp := map[string]string{
 		"nodeName":         wk.NodeName,
 		"kubeconfig":       wk.Kubeconfig,
-		"containerdConfig": deploy.GenerateContainerdConfig(cfg.SandboxImage, cfg.Socks5Proxy),
-	})
+		"containerdConfig": deploy.GenerateContainerdConfig(cfg.SandboxImage),
+	}
+	if cfg.UseRegistryMirror {
+		// Manually joined workers need the per-registry mirror files too;
+		// containerdConfig alone only points config_path at an empty certs.d.
+		resp["dockerHubHostsToml"] = deploy.GenerateDockerHubHostsToml()
+		resp["k8sRegistryHostsToml"] = deploy.GenerateK8sRegistryHostsToml()
+	}
+	c.ResponseOk(resp)
 }
