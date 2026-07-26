@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/casosorg/casos/conf"
+	"github.com/sirupsen/logrus"
 )
 
 // Config holds control-plane settings populated from app.conf.
@@ -17,13 +18,17 @@ type Config struct {
 	WebhookPort               int    // HTTPS port for the Casbin admission webhook server
 	DSN                       string // MySQL DSN forwarded to kine
 	SandboxImage              string // containerd sandbox (pause) image, empty = upstream default
-	Socks5Proxy               string // outbound socks5 proxy, e.g. 127.0.0.1:10808
 	CoreDNSImage              string // CoreDNS image used by the built-in DNS bootstrap
 	LocalPathProvisionerImage string // local-path-provisioner controller image
 	LocalPathHelperImage      string // helper pod image used by local-path-provisioner
 	FlannelImage              string // Flannel daemon image used by the built-in network bootstrap
 	FlannelCNIPluginImage     string // Flannel CNI plugin image installed on worker hosts
+	IngressControllerImage    string // Traefik image used by the built-in Ingress controller
+	ServiceLBImage            string // hostPort proxy image used by the built-in ServiceLB
 	StorageProvisionerEnabled bool   // install the built-in local-path provisioner for local clusters
+	IngressControllerEnabled  bool   // install the built-in Traefik controller
+	ServiceLBEnabled          bool   // run the built-in bare-metal LoadBalancer controller
+	UseRegistryMirror         bool   // route built-in image pulls through the registry mirrors (resolved from imageRegistryMirror)
 }
 
 // ConfigFromAppConf reads server config from the beego app.conf.
@@ -48,25 +53,25 @@ func ConfigFromAppConf() (Config, error) {
 
 	webhookPort := conf.GetConfigIntDefault("webhookPort", 9443)
 
-	socks5Proxy := conf.GetConfigString("socks5Proxy")
-
-	sandboxImage := conf.GetConfigString("sandboxImage")
-	if sandboxImage == "" {
-		if socks5Proxy != "" {
-			sandboxImage = "registry.aliyuncs.com/google_containers/pause:3.10.1"
-		} else {
-			sandboxImage = "registry.k8s.io/pause:3.10.1"
-		}
-	}
+	sandboxImage := conf.GetConfigStringDefault("sandboxImage", "registry.k8s.io/pause:3.10.1")
 
 	storageProvisionerEnabled := conf.GetConfigBoolDefault("storageProvisionerEnabled", true)
-	coreDNSImage := conf.GetConfigStringDefault("coreDNSImage", "docker.1ms.run/coredns/coredns:1.12.4")
-	localPathProvisionerImage := conf.GetConfigStringDefault("localPathProvisionerImage", "docker.1ms.run/rancher/local-path-provisioner:v0.0.32")
-	localPathHelperImage := conf.GetConfigStringDefault("localPathHelperImage", "docker.1ms.run/library/busybox:1.37.0")
+	ingressControllerEnabled := conf.GetConfigBoolDefault("ingressControllerEnabled", false)
+	serviceLBEnabled := conf.GetConfigBoolDefault("serviceLBEnabled", false)
+	coreDNSImage := conf.GetConfigStringDefault("coreDNSImage", "docker.io/coredns/coredns:1.12.4")
+	localPathProvisionerImage := conf.GetConfigStringDefault("localPathProvisionerImage", "docker.io/rancher/local-path-provisioner:v0.0.32")
+	localPathHelperImage := conf.GetConfigStringDefault("localPathHelperImage", "docker.io/library/busybox:1.37.0")
 	flannelImage := conf.GetConfigStringDefault("flannelImage", defaultFlannelImage)
 	flannelCNIPluginImage := conf.GetConfigStringDefault("flannelCNIPluginImage", defaultFlannelCNIPluginImage)
+	ingressControllerImage := conf.GetConfigStringDefault("ingressControllerImage", defaultIngressControllerImage)
+	serviceLBImage := conf.GetConfigStringDefault("serviceLBImage", defaultServiceLBImage)
 
-	return Config{
+	useRegistryMirror, err := resolveRegistryMirror()
+	if err != nil {
+		return Config{}, err
+	}
+
+	config := Config{
 		DataDir:                   dataDir,
 		ApiserverBind:             bind,
 		AdvertiseAddress:          advertise,
@@ -74,14 +79,27 @@ func ConfigFromAppConf() (Config, error) {
 		WebhookPort:               webhookPort,
 		DSN:                       dsn,
 		SandboxImage:              sandboxImage,
-		Socks5Proxy:               socks5Proxy,
 		CoreDNSImage:              coreDNSImage,
 		LocalPathProvisionerImage: localPathProvisionerImage,
 		LocalPathHelperImage:      localPathHelperImage,
 		FlannelImage:              flannelImage,
 		FlannelCNIPluginImage:     flannelCNIPluginImage,
+		IngressControllerImage:    ingressControllerImage,
+		ServiceLBImage:            serviceLBImage,
 		StorageProvisionerEnabled: storageProvisionerEnabled,
-	}, nil
+		IngressControllerEnabled:  ingressControllerEnabled,
+		ServiceLBEnabled:          serviceLBEnabled,
+		UseRegistryMirror:         useRegistryMirror,
+	}
+	normalizeApplicationAccessConfig(&config)
+	return config, nil
+}
+
+func normalizeApplicationAccessConfig(config *Config) {
+	if config != nil && config.IngressControllerEnabled && !config.ServiceLBEnabled {
+		logrus.Warn("ingressControllerEnabled requires serviceLBEnabled; disabling the built-in Ingress controller")
+		config.IngressControllerEnabled = false
+	}
 }
 
 // injectDBName inserts dbName into a MySQL DSN of the form
