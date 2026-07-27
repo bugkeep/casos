@@ -191,6 +191,14 @@ func StartHelmOperationTaskContext(ctx context.Context, id int64, phase string) 
 	return nil
 }
 
+func TouchHelmOperationTaskContext(ctx context.Context, id int64) error {
+	_, err := ormer.Engine.Context(ctx).ID(id).
+		Where("status IN (?, ?)", HelmOperationStatusPending, HelmOperationStatusRunning).
+		Cols("updated_at").
+		Update(&HelmOperationTask{UpdatedAt: time.Now().UTC()})
+	return err
+}
+
 func UpdateHelmOperationTaskPhase(id int64, phase string) error {
 	return UpdateHelmOperationTaskPhaseContext(context.Background(), id, phase)
 }
