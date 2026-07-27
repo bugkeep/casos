@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"sort"
@@ -44,15 +43,13 @@ import (
 )
 
 const (
-	helmOperationTimeout        = 5 * time.Minute
-	helmInstallTimeout          = 10 * time.Minute
-	helmCompatibilityTimeout    = 2 * time.Minute
-	helmChartLoadTimeout        = 2 * time.Minute
-	helmDiagnosticsTimeout      = 15 * time.Second
-	helmInstallOperationTimeout = helmChartLoadTimeout + helmCompatibilityTimeout + helmInstallTimeout + helmDiagnosticsTimeout
-	helmDiagnosticsMaxEvents    = 20
-	helmDiagnosticsMessageLen   = 240
-	helmDiagnosticsEventLen     = 360
+	helmOperationTimeout      = 5 * time.Minute
+	helmCompatibilityTimeout  = 2 * time.Minute
+	helmChartLoadTimeout      = 30 * time.Minute
+	helmDiagnosticsTimeout    = 15 * time.Second
+	helmDiagnosticsMaxEvents  = 20
+	helmDiagnosticsMessageLen = 240
+	helmDiagnosticsEventLen   = 360
 )
 
 // ---------- Types ----------
@@ -283,34 +280,17 @@ func httpClientWithContext(ctx context.Context, base *http.Client) *http.Client 
 	return &client
 }
 
-func helmGet(ctx context.Context, url string) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", "Helm/3.21.2")
-	return proxypkg.ProxyHttpClient.Do(req)
-}
-
 // ---------- Repo index ----------
 
 func fetchIndexFile(ctx context.Context, repoURL string) (*repo.IndexFile, error) {
 	indexURL := strings.TrimRight(repoURL, "/") + "/index.yaml"
-	resp, err := helmGet(ctx, indexURL)
+	data, err := downloadHelmArtifact(ctx, indexURL)
 	if err != nil {
 		return nil, fmt.Errorf(
 			"fetch index %q: %w",
 			redactURLForError(indexURL),
 			sanitizeErrorMessage(err, indexURL, repoURL),
 		)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("index returned HTTP %d", resp.StatusCode)
-	}
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
 	}
 	// Use sigs.k8s.io/yaml (YAML→JSON→struct) so that embedded pointer fields
 	// like *chart.Metadata inside ChartVersion are properly allocated. Plain
@@ -426,7 +406,11 @@ func isOCIChartTag(tag string) bool {
 }
 
 func newOCIRegistryClient(ctx context.Context) (*registry.Client, error) {
-	return registry.NewClient(registry.ClientOptHTTPClient(httpClientWithContext(ctx, proxypkg.ProxyHttpClient)))
+	client := httpClientWithContext(ctx, proxypkg.ProxyHttpClient)
+	if client.Timeout <= 0 {
+		client.Timeout = helmDownloadAttemptTimeout
+	}
+	return registry.NewClient(registry.ClientOptHTTPClient(client))
 }
 
 // pullOCIChart pulls the chart hosted at repoURL, resolving to the newest published
@@ -456,7 +440,12 @@ func pullOCIChartFromRegistry(ctx context.Context, repoURL, version string) (*re
 
 	if resolvedVersion == "" {
 		if !strings.Contains(ref, "@") {
-			tags, err := rc.Tags(ref)
+			var tags []string
+			err = retryOCIRegistryOperation(ctx, func() error {
+				var tagsErr error
+				tags, tagsErr = rc.Tags(ref)
+				return tagsErr
+			})
 			if err != nil {
 				return nil, fmt.Errorf(
 					"list oci tags for %q: %w",
@@ -481,8 +470,18 @@ func pullOCIChartFromRegistry(ctx context.Context, repoURL, version string) (*re
 		}
 		pullRef = fmt.Sprintf("%s:%s", ref, resolvedVersion)
 	}
+	if cached, ok, err := cachedOCIChartPull(pullRef); err != nil {
+		return nil, err
+	} else if ok {
+		return cached, nil
+	}
 
-	pull, err := rc.Pull(pullRef, registry.PullOptWithChart(true))
+	var pull *registry.PullResult
+	err = retryOCIRegistryOperation(ctx, func() error {
+		var pullErr error
+		pull, pullErr = rc.Pull(pullRef, registry.PullOptWithChart(true))
+		return pullErr
+	})
 	if err != nil {
 		return nil, fmt.Errorf(
 			"pull oci chart %q: %w",
@@ -490,7 +489,33 @@ func pullOCIChartFromRegistry(ctx context.Context, repoURL, version string) (*re
 			sanitizeErrorMessage(err, repoURL, ref, pullRef),
 		)
 	}
+	cacheOCIChartPull(pullRef, pull)
 	return pull, nil
+}
+
+func cachedOCIChartPull(pullRef string) (*registry.PullResult, bool, error) {
+	data, ok := defaultHelmArtifactCache.get("oci-chart:" + pullRef)
+	if !ok {
+		return nil, false, nil
+	}
+	loaded, err := loader.LoadArchive(bytes.NewReader(data))
+	if err != nil {
+		return nil, true, fmt.Errorf("load cached oci chart %q: %w", redactURLForError(pullRef), err)
+	}
+	return &registry.PullResult{
+		Chart: &registry.DescriptorPullSummaryWithMeta{
+			DescriptorPullSummary: registry.DescriptorPullSummary{Data: data, Size: int64(len(data))},
+			Meta:                  loaded.Metadata,
+		},
+		Ref: pullRef,
+	}, true, nil
+}
+
+func cacheOCIChartPull(pullRef string, pull *registry.PullResult) {
+	if pull == nil || pull.Chart == nil || len(pull.Chart.Data) == 0 {
+		return
+	}
+	defaultHelmArtifactCache.put("oci-chart:"+pullRef, pull.Chart.Data)
 }
 
 func latestOCISemverTag(tags []string) string {
@@ -743,7 +768,6 @@ func loadChartWithContext(parent context.Context, chartName, repoURL, version st
 	}
 	ctx, cancel := context.WithTimeout(parent, helmChartLoadTimeout)
 	defer cancel()
-
 	if isOCIRepo(repoURL) {
 		ch, err := loadOCIChart(ctx, repoURL, version)
 		if err != nil {
@@ -805,7 +829,7 @@ func loadChartWithContext(parent context.Context, chartName, repoURL, version st
 		chartURL = strings.TrimRight(repoURL, "/") + "/" + strings.TrimLeft(chartURL, "/")
 	}
 
-	resp, err := helmGet(ctx, chartURL)
+	data, err := downloadHelmArtifact(ctx, chartURL)
 	if err != nil {
 		return nil, fmt.Errorf(
 			"load chart %q from repo %q version %q: download chart archive %q failed: %w",
@@ -814,29 +838,6 @@ func loadChartWithContext(parent context.Context, chartName, repoURL, version st
 			entry.Version,
 			redactURLForError(chartURL),
 			sanitizeErrorMessage(err, chartURL, repoURL),
-		)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf(
-			"load chart %q from repo %q version %q: chart archive %q returned HTTP %d",
-			chartName,
-			redactURLForError(repoURL),
-			entry.Version,
-			redactURLForError(chartURL),
-			resp.StatusCode,
-		)
-	}
-
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf(
-			"load chart %q from repo %q version %q: read chart archive %q failed: %w",
-			chartName,
-			redactURLForError(repoURL),
-			entry.Version,
-			redactURLForError(chartURL),
-			err,
 		)
 	}
 	ch, err := loader.LoadArchive(bytes.NewReader(data))
@@ -1267,6 +1268,10 @@ func GetHelmReleases(cfg *rest.Config, namespace string) ([]HelmReleaseSummary, 
 }
 
 func InstallHelmChart(cfg *rest.Config, releaseName, namespace, chartName, repoURL, version, valuesYAML string) error {
+	installTimeout, err := configuredHelmInstallTimeout()
+	if err != nil {
+		return err
+	}
 	actionConfig, err := newHelmConfig(cfg, namespace)
 	if err != nil {
 		return err
@@ -1295,13 +1300,7 @@ func InstallHelmChart(cfg *rest.Config, releaseName, namespace, chartName, repoU
 		return err
 	}
 	install := action.NewInstall(actionConfig)
-	install.ReleaseName = releaseName
-	install.Namespace = namespace
-	install.CreateNamespace = true
-	install.Wait = true
-	install.WaitForJobs = true
-	install.Timeout = helmInstallTimeout
-	install.PostRenderer = configuredLocalImagePullPolicyPostRenderer()
+	configureHelmInstall(install, releaseName, namespace, installTimeout)
 
 	_, err = install.Run(ch, vals)
 	if err != nil {
@@ -1336,8 +1335,6 @@ func InstallHelmChartStream(ctx context.Context, lifecycle HelmInstallLifecycle,
 		if streamCtx == nil {
 			streamCtx = context.Background()
 		}
-		installCtx, cancelInstall := context.WithTimeout(context.WithoutCancel(streamCtx), helmInstallOperationTimeout)
-		defer cancelInstall()
 		send := func(line string) bool {
 			if err := lifecycle.RecordLog(line); err != nil {
 				logrus.Warnf("failed to persist Helm operation log: %v", err)
@@ -1367,6 +1364,19 @@ func InstallHelmChartStream(ctx context.Context, lifecycle HelmInstallLifecycle,
 			}
 			return
 		}
+		installTimeout, err := configuredHelmInstallTimeout()
+		if err != nil {
+			send("ERROR: " + err.Error())
+			if finishErr := lifecycle.Finish(err); finishErr != nil {
+				logrus.Errorf("failed to finish Helm operation after configuration error: %v", finishErr)
+			}
+			return
+		}
+		installCtx, cancelInstall := context.WithTimeout(
+			context.WithoutCancel(streamCtx),
+			helmChartLoadTimeout+helmCompatibilityTimeout+installTimeout+helmDiagnosticsTimeout,
+		)
+		defer cancelInstall()
 		helmChart, err := loadChartWithContext(installCtx, chartName, repoURL, version)
 		if err != nil {
 			send("ERROR: " + err.Error())
@@ -1411,13 +1421,7 @@ func InstallHelmChartStream(ctx context.Context, lifecycle HelmInstallLifecycle,
 			return
 		}
 		install := action.NewInstall(actionConfig)
-		install.ReleaseName = releaseName
-		install.Namespace = namespace
-		install.CreateNamespace = true
-		install.Wait = true
-		install.WaitForJobs = true
-		install.Timeout = helmInstallTimeout
-		install.PostRenderer = configuredLocalImagePullPolicyPostRenderer()
+		configureHelmInstall(install, releaseName, namespace, installTimeout)
 		if _, err = install.RunWithContext(installCtx, helmChart, vals); err != nil {
 			for _, line := range helmReleaseDiagnostics(installCtx, cfg, releaseName, namespace) {
 				send(line)
