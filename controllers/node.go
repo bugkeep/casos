@@ -184,9 +184,13 @@ func (c *ApiController) GetWorkerKubeconfig() {
 		c.ResponseError("generate worker kubeconfig: " + err.Error())
 		return
 	}
-	c.ResponseOk(map[string]string{
-		"nodeName":         wk.NodeName,
-		"kubeconfig":       wk.Kubeconfig,
-		"containerdConfig": deploy.GenerateContainerdConfig(cfg.SandboxImage, cfg.Socks5Proxy),
-	})
+	resp := map[string]string{
+		"nodeName":             wk.NodeName,
+		"kubeconfig":           wk.Kubeconfig,
+		"containerdConfig":     deploy.GenerateContainerdConfig(cfg.SandboxImage),
+		"imageRegistryMirror":  string(cfg.RegistryMirrorMode),
+		"dockerHubHostsToml":   deploy.GenerateDockerHubHostsToml(),
+		"k8sRegistryHostsToml": deploy.GenerateK8sRegistryHostsToml(),
+	}
+	c.ResponseOk(resp)
 }
