@@ -109,7 +109,17 @@
     "Unable to refresh installation status": "无法刷新安装状态：{{error}}",
     "Unable to refresh installation status: invalid response": "无法刷新安装状态：响应无效",
     "The saved installation task no longer matches this chart and was discarded": "已保存的安装任务与当前 chart 不再匹配，已丢弃。",
-    "Helm operation failed": "Helm 操作失败"
+    "Helm operation failed": "Helm 操作失败",
+    "Invalid Helm manifest": "Chart 渲染结果不是有效的 Kubernetes 资源清单。",
+    "Helm resource not served": "当前集群不支持 Chart 所需的资源类型，可能缺少对应 CRD，或 API 版本不兼容。",
+    "Helm resource not found": "兼容性检查所需的 Kubernetes 资源不存在。",
+    "Helm compatibility check forbidden": "CasOS 没有足够权限完成 Helm 兼容性检查，请检查 Kubernetes RBAC。",
+    "Helm resource conflict": "目标集群中存在冲突资源，Helm 预检无法继续。",
+    "Kubernetes discovery failed": "Kubernetes API Discovery 失败，无法确认目标资源类型是否可用。",
+    "Kubernetes API unavailable": "Kubernetes API 当前不可用，请检查控制面状态和网络连接。",
+    "Helm dry run failed": "Helm 预检失败，请检查 Chart 模板、values 和错误详情。",
+    "Missing resource": "缺少资源",
+    "Compatibility details": "详细信息"
   },
   "monitor": {
     "Abnormal Pods": "异常 Pod",

@@ -11,6 +11,8 @@ import {
   helmTaskStorageSchemaVersion,
   removeStoredHelmTask
 } from "./helmTaskStorage";
+import {resolveHelmCompatibilityError} from "./helmCompatibilityErrors";
+import HelmCompatibilityErrorAlert from "./HelmCompatibilityErrorAlert";
 
 const {Text} = Typography;
 const helmOperationTaskNotFoundCode = "helm_task_not_found";
@@ -364,11 +366,19 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
           if (!mountedRef.current || streamAbortRef.current !== streamController) {return;}
           stopStreamIdleTimer(streamController);
           if (streamController.signal.aborted) {return;}
+          if (e.code) {
+            setError(resolveHelmCompatibilityError(e, t));
+            setInstalling(false);
+            setPollingPaused(false);
+            submittingRef.current = false;
+            forgetTask();
+            return;
+          }
           if (taskIdRef.current) {
             monitorTask(taskIdRef.current, taskStorageKeyRef.current, taskIdentityRef.current);
             return;
           }
-          setError(e.message);
+          setError(resolveHelmCompatibilityError(e, t));
           setInstalling(false);
           setPollingPaused(false);
           submittingRef.current = false;
@@ -447,7 +457,7 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
       destroyOnHidden
     >
       {error && (
-        <Alert type="error" message={error} showIcon style={{marginBottom: 16}} closable onClose={() => setError(null)} />
+        <HelmCompatibilityErrorAlert error={error} t={t} onClose={() => setError(null)} />
       )}
 
       {storageWarning && (

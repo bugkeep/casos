@@ -56,8 +56,8 @@ export function installHelmChart(payload) {
   }).then(r => r.json());
 }
 
-// installHelmChartStream posts the payload then reads the SSE response line-by-line.
-// onLine(line) is called for each log line; returns "DONE" and rejects on "ERROR: ...".
+// installHelmChartStream posts the payload then reads structured SSE events.
+// onLine(line) is called for each displayable message; returns "DONE" on completion.
 // Closing the browser stream does not cancel a submitted install.
 export async function installHelmChartStream(payload, onLine, signal) {
   const resp = await fetch(`${Setting.ServerUrl}/api/install-helm-chart-stream`, {
@@ -73,11 +73,21 @@ export async function installHelmChartStream(payload, onLine, signal) {
     const parts = buf.split("\n\n");
     buf = parts.pop();
     for (const part of parts) {
-      const line = part.replace(/^data: /, "");
-      if (line) {
-        onLine(line);
-        if (line.startsWith("ERROR: ")) {throw new Error(line.slice(7));}
-        if (line === "DONE") {return line;}
+      const dataLine = part.split("\n").find(line => line.startsWith("data: "));
+      if (!dataLine) {continue;}
+      const event = JSON.parse(dataLine.slice(6));
+      if (event.message) {
+        onLine(event.type === "warning" ? `WARNING: ${event.message}` : event.message);
+      }
+      if (event.type === "error") {
+        const installError = new Error(event.message || "Helm install failed");
+        installError.code = event.error?.code;
+        installError.gvk = event.error?.gvk;
+        throw installError;
+      }
+      if (event.type === "done") {
+        onLine("DONE");
+        return "DONE";
       }
     }
   }

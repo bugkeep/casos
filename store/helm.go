@@ -3,6 +3,7 @@ package store
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -1320,54 +1321,93 @@ type HelmInstallLifecycle interface {
 	Finish(installErr error) error
 }
 
+const (
+	HelmInstallStreamEventLog     = "log"
+	HelmInstallStreamEventWarning = "warning"
+	HelmInstallStreamEventError   = "error"
+	HelmInstallStreamEventDone    = "done"
+)
+
+type HelmInstallStreamEvent struct {
+	Type    string                      `json:"type"`
+	Message string                      `json:"message,omitempty"`
+	Error   *HelmCompatibilityErrorInfo `json:"error,omitempty"`
+}
+
+func newHelmErrorEvent(err error) HelmInstallStreamEvent {
+	event := HelmInstallStreamEvent{Type: HelmInstallStreamEventError, Message: err.Error()}
+	if info, ok := HelmCompatibilityErrorInfoFrom(err); ok {
+		event.Error = &info
+	}
+	return event
+}
+
 // InstallHelmChartStream runs a Helm install independently of the browser
 // request. Lifecycle persistence is supplied by the caller so store remains
 // independent of the database layer.
-func InstallHelmChartStream(ctx context.Context, lifecycle HelmInstallLifecycle, cfg *rest.Config, releaseName, namespace, chartName, repoURL, version, valuesYAML string) <-chan string {
+func InstallHelmChartStream(ctx context.Context, lifecycle HelmInstallLifecycle, cfg *rest.Config, releaseName, namespace, chartName, repoURL, version, valuesYAML string) <-chan HelmInstallStreamEvent {
 	return installHelmChartStream(ctx, lifecycle, cfg, releaseName, namespace, chartName, repoURL, version, valuesYAML, "")
 }
 
-func InstallHelmChartStreamWithValuesBaseline(ctx context.Context, lifecycle HelmInstallLifecycle, cfg *rest.Config, releaseName, namespace, chartName, repoURL, version, valuesYAML, valuesBaselineYAML string) <-chan string {
+func InstallHelmChartStreamWithValuesBaseline(ctx context.Context, lifecycle HelmInstallLifecycle, cfg *rest.Config, releaseName, namespace, chartName, repoURL, version, valuesYAML, valuesBaselineYAML string) <-chan HelmInstallStreamEvent {
 	return installHelmChartStream(ctx, lifecycle, cfg, releaseName, namespace, chartName, repoURL, version, valuesYAML, valuesBaselineYAML)
 }
 
-func installHelmChartStream(ctx context.Context, lifecycle HelmInstallLifecycle, cfg *rest.Config, releaseName, namespace, chartName, repoURL, version, valuesYAML, valuesBaselineYAML string) <-chan string {
-	logCh := make(chan string, 64)
+func installHelmChartStream(ctx context.Context, lifecycle HelmInstallLifecycle, cfg *rest.Config, releaseName, namespace, chartName, repoURL, version, valuesYAML, valuesBaselineYAML string) <-chan HelmInstallStreamEvent {
+	eventCh := make(chan HelmInstallStreamEvent, 64)
 	if lifecycle == nil {
-		logCh <- "ERROR: Helm install lifecycle is required"
-		close(logCh)
-		return logCh
+		eventCh <- newHelmErrorEvent(errors.New("Helm install lifecycle is required"))
+		close(eventCh)
+		return eventCh
 	}
 	go func() {
-		defer close(logCh)
+		defer close(eventCh)
 		streamCtx := ctx
 		if streamCtx == nil {
 			streamCtx = context.Background()
 		}
-		send := func(line string) bool {
-			if err := lifecycle.RecordLog(line); err != nil {
-				logrus.Warnf("failed to persist Helm operation log: %v", err)
+		send := func(event HelmInstallStreamEvent) bool {
+			persistedMessage := event.Message
+			switch event.Type {
+			case HelmInstallStreamEventError:
+				persistedMessage = "ERROR: " + event.Message
+			case HelmInstallStreamEventWarning:
+				persistedMessage = "WARNING: " + event.Message
+			}
+			if persistedMessage != "" {
+				if err := lifecycle.RecordLog(persistedMessage); err != nil {
+					logrus.Warnf("failed to persist Helm operation log: %v", err)
+				}
 			}
 			select {
-			case logCh <- line:
+			case eventCh <- event:
 				return true
 			case <-streamCtx.Done():
 				return false
 			}
 		}
-		if err := lifecycle.StartLoading(); err != nil {
-			send("ERROR: " + err.Error())
+		sendLog := func(message string) bool {
+			return send(HelmInstallStreamEvent{Type: HelmInstallStreamEventLog, Message: message})
+		}
+		sendWarning := func(message string) bool {
+			return send(HelmInstallStreamEvent{Type: HelmInstallStreamEventWarning, Message: message})
+		}
+		sendError := func(err error) bool {
+			return send(newHelmErrorEvent(err))
+		}
+		finishWithError := func(err error, context string) {
+			sendError(err)
 			if finishErr := lifecycle.Finish(err); finishErr != nil {
-				logrus.Errorf("failed to finish Helm operation after loading error: %v", finishErr)
+				logrus.Errorf("failed to finish Helm operation after %s: %v", context, finishErr)
 			}
+		}
+		if err := lifecycle.StartLoading(); err != nil {
+			finishWithError(err, "loading error")
 			return
 		}
 		installTimeout, err := configuredHelmInstallTimeout()
 		if err != nil {
-			send("ERROR: " + err.Error())
-			if finishErr := lifecycle.Finish(err); finishErr != nil {
-				logrus.Errorf("failed to finish Helm operation after configuration error: %v", finishErr)
-			}
+			finishWithError(err, "configuration error")
 			return
 		}
 		installCtx, cancelInstall := context.WithTimeout(
@@ -1376,65 +1416,46 @@ func installHelmChartStream(ctx context.Context, lifecycle HelmInstallLifecycle,
 		)
 		defer cancelInstall()
 		logFn := func(format string, args ...interface{}) {
-			send(fmt.Sprintf(format, args...))
+			sendLog(fmt.Sprintf(format, args...))
 		}
 		actionConfig, err := newHelmConfigWithLog(cfg, namespace, logFn)
 		if err != nil {
-			send("ERROR: " + err.Error())
-			if finishErr := lifecycle.Finish(err); finishErr != nil {
-				logrus.Errorf("failed to finish Helm operation after configuration error: %v", finishErr)
-			}
+			finishWithError(err, "configuration error")
 			return
 		}
 		helmChart, err := loadChartWithContext(installCtx, chartName, repoURL, version)
 		if err != nil {
-			send("ERROR: " + err.Error())
-			if finishErr := lifecycle.Finish(err); finishErr != nil {
-				logrus.Errorf("failed to finish Helm operation after chart loading error: %v", finishErr)
-			}
+			finishWithError(err, "chart loading error")
 			return
 		}
 		valuesYAML, inputIsOverrides, err := getHelmValueOverrides(valuesYAML, valuesBaselineYAML)
 		if err != nil {
-			send("ERROR: " + err.Error())
-			if finishErr := lifecycle.Finish(err); finishErr != nil {
-				logrus.Errorf("failed to finish Helm operation after value override parsing error: %v", finishErr)
-			}
+			finishWithError(err, "value override parsing error")
 			return
 		}
 		vals, err := parseValues(valuesYAML)
 		if err != nil {
-			send("ERROR: " + err.Error())
-			if finishErr := lifecycle.Finish(err); finishErr != nil {
-				logrus.Errorf("failed to finish Helm operation after values parsing error: %v", finishErr)
-			}
+			finishWithError(err, "values parsing error")
 			return
 		}
 		vals, adjustments, err := prepareHelmInstallValuesWithMode(helmChart, repoURL, vals, inputIsOverrides)
 		if err != nil {
-			send("ERROR: " + err.Error())
-			if finishErr := lifecycle.Finish(err); finishErr != nil {
-				logrus.Errorf("failed to finish Helm operation after values preparation error: %v", finishErr)
-			}
+			finishWithError(err, "values preparation error")
 			return
 		}
 		for _, warning := range adjustments.warnings() {
-			send("WARNING: " + warning)
+			sendWarning(warning)
 		}
 		compatibilityCtx, cancelCompatibility := context.WithTimeout(installCtx, helmCompatibilityTimeout)
 		attachHelmCapabilities(compatibilityCtx, actionConfig, cfg, logFn)
 		err = validateHelmChartCompatibility(compatibilityCtx, cfg, actionConfig, releaseName, namespace, helmChart, vals)
 		cancelCompatibility()
 		if err != nil {
-			send("ERROR: " + err.Error())
-			_ = lifecycle.Finish(err)
+			finishWithError(err, "compatibility validation error")
 			return
 		}
 		if err := lifecycle.MarkInstalling(); err != nil {
-			send("ERROR: " + err.Error())
-			if finishErr := lifecycle.Finish(err); finishErr != nil {
-				logrus.Errorf("failed to finish Helm operation after phase transition error: %v", finishErr)
-			}
+			finishWithError(err, "phase transition error")
 			return
 		}
 		install := action.NewInstall(actionConfig)
@@ -1445,35 +1466,29 @@ func installHelmChartStream(ctx context.Context, lifecycle HelmInstallLifecycle,
 				installErr,
 				func(installErr error) error {
 					for _, line := range helmReleaseDiagnostics(installCtx, cfg, releaseName, namespace) {
-						send(line)
+						sendLog(line)
 					}
 					return installErr
 				},
 				func() error { return cleanupFailedHelmRelease(actionConfig, install, failedRelease) },
 			)
-			send("ERROR: " + err.Error())
-			if finishErr := lifecycle.Finish(err); finishErr != nil {
-				logrus.Errorf("failed to finish Helm operation after install error: %v", finishErr)
-			}
+			finishWithError(err, "install error")
 			return
 		}
 		reportHelmReadiness(inspectHelmReleaseResources(installCtx, cfg, releaseName, namespace), func(message string) {
-			send("WARNING: " + message)
+			sendWarning(message)
 		})
 		if err := lifecycle.Finish(nil); err != nil {
 			logrus.Warnf("failed to finish Helm operation: %v", err)
-			select {
-			case logCh <- "ERROR: " + err.Error():
-			case <-streamCtx.Done():
-			}
+			sendError(err)
 			return
 		}
 		select {
-		case logCh <- "DONE":
+		case eventCh <- HelmInstallStreamEvent{Type: HelmInstallStreamEventDone}:
 		case <-streamCtx.Done():
 		}
 	}()
-	return logCh
+	return eventCh
 }
 
 func UpgradeHelmRelease(cfg *rest.Config, releaseName, namespace, chartName, repoURL, version, valuesYAML string) error {

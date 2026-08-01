@@ -109,7 +109,17 @@
     "Unable to refresh installation status": "Unable to refresh installation status: {{error}}",
     "Unable to refresh installation status: invalid response": "Unable to refresh installation status: invalid response",
     "The saved installation task no longer matches this chart and was discarded": "The saved installation task no longer matches this chart and was discarded.",
-    "Helm operation failed": "Helm operation failed"
+    "Helm operation failed": "Helm operation failed",
+    "Invalid Helm manifest": "The chart rendered an invalid Kubernetes manifest.",
+    "Helm resource not served": "The target cluster does not serve a resource required by this chart. A CRD may be missing or the API version may be incompatible.",
+    "Helm resource not found": "A Kubernetes resource required for the compatibility check was not found.",
+    "Helm compatibility check forbidden": "CasOS does not have permission to complete the Helm compatibility check. Check Kubernetes RBAC.",
+    "Helm resource conflict": "A conflicting resource exists in the target cluster, so the Helm preflight check cannot continue.",
+    "Kubernetes discovery failed": "Kubernetes API discovery failed, so the required resource types could not be verified.",
+    "Kubernetes API unavailable": "The Kubernetes API is unavailable. Check the control plane and network connection.",
+    "Helm dry run failed": "The Helm preflight check failed. Check the chart templates, values, and error details.",
+    "Missing resource": "Missing resource",
+    "Compatibility details": "Details"
   },
   "monitor": {
     "Abnormal Pods": "Abnormal Pods",
