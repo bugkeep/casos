@@ -19,6 +19,28 @@ import (
 
 const helmOperationTaskNotFoundCode = "helm_task_not_found"
 
+func helmErrorResponse(err error) Response {
+	response := Response{Status: "error", Msg: err.Error()}
+	if info, ok := store.HelmCompatibilityErrorInfoFrom(err); ok {
+		response.Data = info
+	}
+	return response
+}
+
+func (c *ApiController) responseHelmError(err error) {
+	c.Data["json"] = helmErrorResponse(err)
+	c.ServeJSON()
+}
+
+func writeHelmInstallStreamEvent(w io.Writer, event store.HelmInstallStreamEvent) error {
+	payload, err := json.Marshal(event)
+	if err != nil {
+		return fmt.Errorf("marshal Helm install stream event: %w", err)
+	}
+	_, err = fmt.Fprintf(w, "data: %s\n\n", payload)
+	return err
+}
+
 // ---------- ArtifactHub proxy ----------
 
 type ahSearchResult struct {
@@ -144,7 +166,7 @@ func (c *ApiController) GetRepoCharts() {
 
 // ---------- Chart values (via store/Helm SDK) ----------
 
-// GetHelmChartValues fetches the default values.yaml for a chart.
+// GetHelmChartValues fetches the values.yaml shown in the App Store install dialog.
 // @router /api/get-helm-chart-values [get]
 func (c *ApiController) GetHelmChartValues() {
 	if c.RequireSignedIn() {
@@ -157,7 +179,7 @@ func (c *ApiController) GetHelmChartValues() {
 		c.ResponseError("chart and repo are required")
 		return
 	}
-	values, err := store.GetHelmChartDefaultValues(chartName, repoURL, version)
+	values, err := store.GetHelmChartInstallValues(chartName, repoURL, version)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
@@ -188,12 +210,13 @@ func (c *ApiController) GetHelmReleases() {
 }
 
 type helmInstallReq struct {
-	ReleaseName string `json:"releaseName"`
-	Namespace   string `json:"namespace"`
-	ChartName   string `json:"chartName"`
-	RepoURL     string `json:"repoURL"`
-	Version     string `json:"version"`
-	ValuesYAML  string `json:"valuesYAML"`
+	ReleaseName        string `json:"releaseName"`
+	Namespace          string `json:"namespace"`
+	ChartName          string `json:"chartName"`
+	RepoURL            string `json:"repoURL"`
+	Version            string `json:"version"`
+	ValuesYAML         string `json:"valuesYAML"`
+	ValuesBaselineYAML string `json:"valuesBaselineYAML"`
 }
 
 // InstallHelmChart installs a new Helm release.
@@ -212,8 +235,8 @@ func (c *ApiController) InstallHelmChart() {
 		c.ResponseError(err.Error())
 		return
 	}
-	if err := store.InstallHelmChart(cfg, req.ReleaseName, req.Namespace, req.ChartName, req.RepoURL, req.Version, req.ValuesYAML); err != nil {
-		c.ResponseError(err.Error())
+	if err := store.InstallHelmChartWithValuesBaseline(cfg, req.ReleaseName, req.Namespace, req.ChartName, req.RepoURL, req.Version, req.ValuesYAML, req.ValuesBaselineYAML); err != nil {
+		c.responseHelmError(err)
 		return
 	}
 	c.ResponseOk()
@@ -225,32 +248,29 @@ func (c *ApiController) InstallHelmChartStream() {
 	if c.RequireAdmin() {
 		return
 	}
+	w := c.Ctx.ResponseWriter.ResponseWriter
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no")
 	cfg := getAdminRestConfig()
 	if cfg == nil {
-		c.Ctx.ResponseWriter.ResponseWriter.Header().Set("Content-Type", "text/event-stream")
-		fmt.Fprintf(c.Ctx.ResponseWriter.ResponseWriter, "data: ERROR: cluster not ready\n\n")
+		_ = writeHelmInstallStreamEvent(w, store.HelmInstallStreamEvent{Type: store.HelmInstallStreamEventError, Message: "cluster not ready"})
 		c.StopRun()
 		return
 	}
 	var req helmInstallReq
 	if err := json.Unmarshal(c.Ctx.Input.RequestBody, &req); err != nil {
-		c.Ctx.ResponseWriter.ResponseWriter.Header().Set("Content-Type", "text/event-stream")
-		fmt.Fprintf(c.Ctx.ResponseWriter.ResponseWriter, "data: ERROR: %s\n\n", err.Error())
+		_ = writeHelmInstallStreamEvent(w, store.HelmInstallStreamEvent{Type: store.HelmInstallStreamEventError, Message: err.Error()})
 		c.StopRun()
 		return
 	}
 	owner := helmOperationOwner(c)
 	if owner == "" {
-		c.Ctx.ResponseWriter.ResponseWriter.Header().Set("Content-Type", "text/event-stream")
-		fmt.Fprint(c.Ctx.ResponseWriter.ResponseWriter, "data: ERROR: unable to identify Helm operation owner\n\n")
+		_ = writeHelmInstallStreamEvent(w, store.HelmInstallStreamEvent{Type: store.HelmInstallStreamEventError, Message: "unable to identify Helm operation owner"})
 		c.StopRun()
 		return
 	}
 
-	w := c.Ctx.ResponseWriter.ResponseWriter
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 
 	ctx := c.Ctx.Request.Context()
@@ -262,7 +282,7 @@ func (c *ApiController) InstallHelmChartStream() {
 		} else {
 			logs.Error("create Helm operation task: %v", err)
 		}
-		fmt.Fprintf(w, "data: ERROR: %s\n\n", message)
+		_ = writeHelmInstallStreamEvent(w, store.HelmInstallStreamEvent{Type: store.HelmInstallStreamEventError, Message: message})
 		c.StopRun()
 		return
 	}
@@ -273,7 +293,7 @@ func (c *ApiController) InstallHelmChartStream() {
 			logs.Error("finish unstarted Helm operation task %d: %v", task.Id, finishErr)
 		}
 	}
-	if _, err := fmt.Fprintf(w, "data: TASK_ID:%d\n\n", task.Id); err != nil {
+	if err := writeHelmInstallStreamEvent(w, store.HelmInstallStreamEvent{Type: store.HelmInstallStreamEventLog, Message: fmt.Sprintf("TASK_ID:%d", task.Id)}); err != nil {
 		finishUnstartedTask(fmt.Errorf("failed to send Helm operation task id: %w", err))
 		c.StopRun()
 		return
@@ -285,9 +305,9 @@ func (c *ApiController) InstallHelmChartStream() {
 		return
 	}
 	recorder := object.NewHelmOperationRecorder(task.Id)
-	logCh := store.InstallHelmChartStream(ctx, recorder, cfg, req.ReleaseName, req.Namespace, req.ChartName, req.RepoURL, req.Version, req.ValuesYAML)
-	for line := range logCh {
-		if _, err := fmt.Fprintf(w, "data: %s\n\n", line); err != nil {
+	logCh := store.InstallHelmChartStreamWithValuesBaseline(ctx, recorder, cfg, req.ReleaseName, req.Namespace, req.ChartName, req.RepoURL, req.Version, req.ValuesYAML, req.ValuesBaselineYAML)
+	for event := range logCh {
+		if err := writeHelmInstallStreamEvent(w, event); err != nil {
 			break
 		}
 		if err := responseController.Flush(); err != nil {
@@ -369,8 +389,8 @@ func (c *ApiController) UpgradeHelmRelease() {
 		c.ResponseError(err.Error())
 		return
 	}
-	if err := store.UpgradeHelmRelease(cfg, req.ReleaseName, req.Namespace, req.ChartName, req.RepoURL, req.Version, req.ValuesYAML); err != nil {
-		c.ResponseError(err.Error())
+	if err := store.UpgradeHelmReleaseWithValuesBaseline(cfg, req.ReleaseName, req.Namespace, req.ChartName, req.RepoURL, req.Version, req.ValuesYAML, req.ValuesBaselineYAML); err != nil {
+		c.responseHelmError(err)
 		return
 	}
 	c.ResponseOk()
@@ -399,7 +419,7 @@ func (c *ApiController) RollbackHelmRelease() {
 		return
 	}
 	if err := store.RollbackHelmRelease(cfg, req.ReleaseName, req.Namespace, req.Revision); err != nil {
-		c.ResponseError(err.Error())
+		c.responseHelmError(err)
 		return
 	}
 	c.ResponseOk()

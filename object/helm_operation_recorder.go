@@ -22,6 +22,7 @@ const (
 	helmOperationFinishTimeout     = HelmOperationPersistenceTimeout
 	helmOperationFinishAttempts    = 3
 	helmOperationFinishRetryDelay  = 100 * time.Millisecond
+	helmOperationHeartbeatInterval = time.Minute
 )
 
 type HelmOperationRecorder struct {
@@ -36,32 +37,36 @@ type HelmOperationRecorder struct {
 	finish    sync.Once
 	finishErr error
 
-	persistLogs      func(context.Context, int64, []*HelmOperationLog) error
-	finishTask       func(context.Context, int64, bool, string) error
-	terminalMatches  func(context.Context, int64, bool, string) (bool, error)
-	persistTimeout   time.Duration
-	shutdownTimeout  time.Duration
-	finishTimeout    time.Duration
-	finishRetryDelay time.Duration
-	persistCtx       context.Context
-	cancelPersist    context.CancelFunc
+	persistLogs       func(context.Context, int64, []*HelmOperationLog) error
+	finishTask        func(context.Context, int64, bool, string) error
+	terminalMatches   func(context.Context, int64, bool, string) (bool, error)
+	touchTask         func(context.Context, int64) error
+	persistTimeout    time.Duration
+	heartbeatInterval time.Duration
+	shutdownTimeout   time.Duration
+	finishTimeout     time.Duration
+	finishRetryDelay  time.Duration
+	persistCtx        context.Context
+	cancelPersist     context.CancelFunc
 }
 
 func NewHelmOperationRecorder(taskID int64) *HelmOperationRecorder {
 	persistCtx, cancelPersist := context.WithCancel(context.Background())
 	recorder := &HelmOperationRecorder{
-		taskID:           taskID,
-		queue:            make(chan *HelmOperationLog, helmOperationLogBatchSize*2),
-		done:             make(chan struct{}),
-		persistLogs:      addHelmOperationLogsContext,
-		finishTask:       FinishHelmOperationTaskContext,
-		terminalMatches:  HelmOperationTaskHasTerminalOutcomeContext,
-		persistTimeout:   helmOperationLogPersistTimeout,
-		shutdownTimeout:  helmOperationRecorderShutdown,
-		finishTimeout:    helmOperationFinishTimeout,
-		finishRetryDelay: helmOperationFinishRetryDelay,
-		persistCtx:       persistCtx,
-		cancelPersist:    cancelPersist,
+		taskID:            taskID,
+		queue:             make(chan *HelmOperationLog, helmOperationLogBatchSize*2),
+		done:              make(chan struct{}),
+		persistLogs:       addHelmOperationLogsContext,
+		finishTask:        FinishHelmOperationTaskContext,
+		terminalMatches:   HelmOperationTaskHasTerminalOutcomeContext,
+		touchTask:         TouchHelmOperationTaskContext,
+		persistTimeout:    helmOperationLogPersistTimeout,
+		heartbeatInterval: helmOperationHeartbeatInterval,
+		shutdownTimeout:   helmOperationRecorderShutdown,
+		finishTimeout:     helmOperationFinishTimeout,
+		finishRetryDelay:  helmOperationFinishRetryDelay,
+		persistCtx:        persistCtx,
+		cancelPersist:     cancelPersist,
 	}
 	go recorder.run()
 	return recorder
@@ -219,6 +224,8 @@ func (r *HelmOperationRecorder) run() {
 	}()
 	ticker := time.NewTicker(helmOperationLogFlushInterval)
 	defer ticker.Stop()
+	heartbeatTicker := time.NewTicker(r.heartbeatInterval)
+	defer heartbeatTicker.Stop()
 	batch := make([]*HelmOperationLog, 0, helmOperationLogBatchSize)
 	flush := func() {
 		if len(batch) == 0 {
@@ -247,6 +254,13 @@ func (r *HelmOperationRecorder) run() {
 			}
 		case <-ticker.C:
 			flush()
+		case <-heartbeatTicker.C:
+			ctx, cancel := context.WithTimeout(r.persistCtx, r.persistTimeout)
+			err := r.touchTask(ctx, r.taskID)
+			cancel()
+			if err != nil && !errors.Is(err, context.Canceled) {
+				logs.Warning("refresh Helm operation task %d heartbeat: %v", r.taskID, err)
+			}
 		}
 	}
 }

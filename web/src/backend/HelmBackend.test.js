@@ -37,25 +37,29 @@ describe("installHelmChartStream", () => {
     jest.resetAllMocks();
   });
 
-  test("rejects when the server reports an install failure", async() => {
+  test("rejects with a compatibility code from a structured error event", async() => {
     global.fetch = jest.fn().mockResolvedValue(mockStreamResponse([
-      "data: creating 1 resource(s)\n\n",
-      "data: ERROR: install failed\n\n",
+      "data: {\"type\":\"log\",\"message\":\"creating 1 resource(s)\"}\n\n",
+      "data: {\"type\":\"error\",\"message\":\"install failed\",\"error\":{\"code\":\"RESOURCE_NOT_SERVED\",\"gvk\":\"cert-manager.io/v1, Kind=Certificate\"}}\n\n",
     ]));
 
     const onLine = jest.fn();
     await expect(installHelmChartStream({releaseName: "demo"}, onLine))
-      .rejects.toThrow("install failed");
+      .rejects.toMatchObject({
+        message: "install failed",
+        code: "RESOURCE_NOT_SERVED",
+        gvk: "cert-manager.io/v1, Kind=Certificate",
+      });
 
     expect(onLine).toHaveBeenCalledTimes(2);
     expect(onLine).toHaveBeenNthCalledWith(1, "creating 1 resource(s)");
-    expect(onLine).toHaveBeenNthCalledWith(2, "ERROR: install failed");
+    expect(onLine).toHaveBeenNthCalledWith(2, "install failed");
   });
 
   test("returns DONE when the server completes the install stream", async() => {
     global.fetch = jest.fn().mockResolvedValue(mockStreamResponse([
-      "data: creating 1 resource(s)\n\n",
-      "data: DONE\n\n",
+      "data: {\"type\":\"log\",\"message\":\"creating 1 resource(s)\"}\n\n",
+      "data: {\"type\":\"done\"}\n\n",
     ]));
 
     const onLine = jest.fn();
@@ -68,8 +72,8 @@ describe("installHelmChartStream", () => {
 
   test("forwards the task id and abort signal", async() => {
     global.fetch = jest.fn().mockResolvedValue(mockStreamResponse([
-      "data: TASK_ID:42\n\n",
-      "data: DONE\n\n",
+      "data: {\"type\":\"log\",\"message\":\"TASK_ID:42\"}\n\n",
+      "data: {\"type\":\"done\"}\n\n",
     ]));
     const signal = {aborted: false};
     const onLine = jest.fn();
