@@ -19,8 +19,8 @@ import (
 )
 
 const (
-	defaultFlannelImage          = "docker.1ms.run/flannel/flannel:v0.27.4"
-	defaultFlannelCNIPluginImage = "docker.1ms.run/flannel/flannel-cni-plugin:v1.8.0-flannel1"
+	defaultFlannelImage          = "docker.io/flannel/flannel:v0.27.4"
+	defaultFlannelCNIPluginImage = "docker.io/flannel/flannel-cni-plugin:v1.8.0-flannel1"
 	flannelNamespace             = "kube-flannel"
 	flannelServiceAccount        = "flannel"
 	flannelConfigMap             = "kube-flannel-cfg"
