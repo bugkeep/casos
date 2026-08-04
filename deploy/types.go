@@ -118,6 +118,8 @@ type Config struct {
 	ApiserverPort      int
 	SandboxImage       string
 	RegistryMirrorMode server.RegistryMirrorMode
+	ContainerdProxy    string
+	ContainerdNoProxy  []string
 	GenerateKubeconfig KubeconfigGenerator
 }
 
@@ -128,6 +130,8 @@ func ConfigFromServerConfig(cfg server.Config) Config {
 		ApiserverPort:      cfg.ApiserverPort,
 		SandboxImage:       cfg.SandboxImage,
 		RegistryMirrorMode: cfg.RegistryMirrorMode,
+		ContainerdProxy:    cfg.ContainerdProxy,
+		ContainerdNoProxy:  append([]string(nil), cfg.ContainerdNoProxy...),
 		GenerateKubeconfig: func(nodeName, apiserverURL string) (*NodeKubeconfig, error) {
 			wk, err := server.GenerateWorkerKubeconfigForServer(cfg, nodeName, apiserverURL)
 			if err != nil {

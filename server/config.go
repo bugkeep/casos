@@ -27,6 +27,8 @@ type Config struct {
 	ServiceLBImage            string             // hostPort proxy image used by the built-in ServiceLB
 	StorageProvisionerEnabled bool               // install the built-in local-path provisioner for local clusters
 	RegistryMirrorMode        RegistryMirrorMode // imageRegistryMirror mode, evaluated on each target worker
+	ContainerdProxy           string             // proxy URL reachable from target workers, empty = disabled
+	ContainerdNoProxy         []string           // additional worker-side direct egress destinations
 	IngressControllerEnabled  bool               // install the built-in Traefik controller
 	ServiceLBEnabled          bool               // run the built-in bare-metal LoadBalancer controller
 }
@@ -65,6 +67,14 @@ func ConfigFromAppConf() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	containerdProxy, err := normalizeContainerdProxy(conf.GetConfigString("containerdProxy"))
+	if err != nil {
+		return Config{}, fmt.Errorf("invalid containerdProxy in app.conf: %w", err)
+	}
+	containerdNoProxy, err := parseContainerdNoProxy(conf.GetConfigString("containerdNoProxy"))
+	if err != nil {
+		return Config{}, fmt.Errorf("invalid containerdNoProxy in app.conf: %w", err)
+	}
 	ingressControllerEnabled := conf.GetConfigBoolDefault("ingressControllerEnabled", false)
 	serviceLBEnabled := conf.GetConfigBoolDefault("serviceLBEnabled", false)
 	ingressControllerImage := conf.GetConfigStringDefault("ingressControllerImage", defaultIngressControllerImage)
@@ -86,6 +96,8 @@ func ConfigFromAppConf() (Config, error) {
 		ServiceLBImage:            serviceLBImage,
 		StorageProvisionerEnabled: storageProvisionerEnabled,
 		RegistryMirrorMode:        registryMirrorMode,
+		ContainerdProxy:           containerdProxy,
+		ContainerdNoProxy:         containerdNoProxy,
 		IngressControllerEnabled:  ingressControllerEnabled,
 		ServiceLBEnabled:          serviceLBEnabled,
 	}
