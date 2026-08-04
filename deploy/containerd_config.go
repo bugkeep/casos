@@ -31,7 +31,7 @@ func GenerateDockerHubHostsToml() string {
 server = "https://registry-1.docker.io"
 
 [host."https://docker.1ms.run"]
-  capabilities = ["pull", "resolve"]
+  capabilities = ["pull"]
 `
 }
 
@@ -43,7 +43,7 @@ func GenerateK8sRegistryHostsToml() string {
 server = "https://registry.k8s.io"
 
 [host."https://registry.aliyuncs.com/v2/google_containers"]
-  capabilities = ["pull", "resolve"]
+  capabilities = ["pull"]
   override_path = true
 `
 }

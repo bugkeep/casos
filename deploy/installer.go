@@ -2,11 +2,8 @@ package deploy
 
 import (
 	"context"
-	"crypto/sha256"
 	"fmt"
 	"strings"
-
-	"github.com/casosorg/casos/server"
 )
 
 const nodeDeployResolverPath = "/etc/casos-resolv.conf"
@@ -18,12 +15,6 @@ const (
 
 type registryMirrorFileRunner interface {
 	RunRootContext(ctx context.Context, command string) (string, error)
-	WriteFileContext(ctx context.Context, path, content, mode string) error
-}
-
-type registryMirrorSelection struct {
-	dockerHub bool
-	k8s       bool
 }
 
 func (d *NodeDeployer) installNodeBinaries(ctx context.Context, runner *NodeDeploySSHRunner, arch, k8sVersion string) error {
@@ -34,6 +25,30 @@ func (d *NodeDeployer) installNodeBinaries(ctx context.Context, runner *NodeDepl
 	if _, err := runner.RunRootContext(ctx, "dpkg -s ca-certificates curl iptables socat conntrack ebtables ethtool kmod containerd >/dev/null 2>&1 || (apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl iptables socat conntrack ebtables ethtool kmod containerd)"); err != nil {
 		return fmt.Errorf("install packages: %w", err)
 	}
+
+	d.logStep(nodeDeployPhaseConfiguring, "Preflighting containerd egress routes")
+	routing, err := d.resolveRegistryRouting(ctx, runner)
+	if err != nil {
+		return err
+	}
+	routeDetails, err := preflightContainerdEgress(ctx, runner, routing, d.config.ContainerdProxy)
+	if err != nil {
+		return fmt.Errorf("containerd egress preflight: %w", err)
+	}
+	if d.config.ContainerdProxy != "" {
+		d.logStep(nodeDeployPhaseConfiguring, fmt.Sprintf("Containerd egress preflight succeeded for %s (%d paths)", redactProxyURL(d.config.ContainerdProxy), len(routeDetails)))
+	} else {
+		d.logStep(nodeDeployPhaseConfiguring, fmt.Sprintf("Containerd egress preflight succeeded without a proxy (%d paths)", len(routeDetails)))
+	}
+	workerHosts, err := discoverContainerdWorkerHosts(ctx, runner)
+	if err != nil {
+		return err
+	}
+	desiredFiles, noProxy, err := buildContainerdDesiredFiles(d.config, routing, workerHosts)
+	if err != nil {
+		return fmt.Errorf("render containerd configuration: %w", err)
+	}
+
 	if _, err := runner.RunRootContext(ctx, `set -e
 install -d /etc/modules-load.d /etc/sysctl.d
 printf '%s\n' overlay br_netfilter vxlan > /etc/modules-load.d/casos-kubernetes.conf
@@ -66,18 +81,41 @@ test -f %[1]s`, nodeDeployResolverPath)); err != nil {
 	}
 
 	d.logStep(nodeDeployPhaseConfiguring, "Configuring containerd")
-	mirrors, err := d.resolveRegistryMirrors(ctx, runner)
+	if d.config.ContainerdProxy != "" {
+		d.logStep(nodeDeployPhaseConfiguring, fmt.Sprintf("Containerd egress proxy selected: %s (%d direct destinations)", redactProxyURL(d.config.ContainerdProxy), len(noProxy)))
+	} else {
+		d.logStep(nodeDeployPhaseConfiguring, "Containerd egress proxy disabled; CasOS-managed proxy files will be removed")
+	}
+	result, err := reconcileContainerdFiles(ctx, runner, desiredFiles, d.config.SandboxImage)
+	for _, warning := range result.Warnings {
+		d.log("warning", warning, nodeDeployPhaseConfiguring)
+	}
 	if err != nil {
-		return err
+		if result.RollbackCompleted {
+			return fmt.Errorf("reconcile containerd configuration failed; previous configuration restored: %w", err)
+		}
+		if result.RolledBackFrom != nil {
+			return fmt.Errorf("reconcile containerd configuration failed and rollback was incomplete: %w", err)
+		}
+		return fmt.Errorf("reconcile containerd configuration: %w", err)
 	}
-	if err := runner.WriteFileContext(ctx, "/etc/containerd/config.toml", GenerateContainerdConfig(d.config.SandboxImage), "0644"); err != nil {
-		return fmt.Errorf("write /etc/containerd/config.toml: %w", err)
+	if result.Changed {
+		d.logStep(nodeDeployPhaseConfiguring, fmt.Sprintf("Reconciled containerd files: %s", strings.Join(sortedContainerdChangedPaths(result), ", ")))
+	} else {
+		d.logStep(nodeDeployPhaseConfiguring, "Containerd configuration already matches the desired state")
 	}
-	if err := d.reconcileRegistryMirrorFiles(ctx, runner, mirrors); err != nil {
-		return err
+	switch result.Verification {
+	case "cri-pull:sandbox,implicit-docker-hub":
+		d.logStep(nodeDeployPhaseConfiguring, fmt.Sprintf("Verified CRI pulls for the sandbox image and implicit Docker Hub image %s", containerdImplicitDockerHubVerificationImage))
+	case "cri-ready-only":
+		d.log("warning", "crictl is unavailable; verified containerd and its CRI plugin, but skipped real image pulls", nodeDeployPhaseConfiguring)
+	default:
+		return fmt.Errorf("unexpected containerd verification result %q", result.Verification)
 	}
-	if _, err := runner.RunRootContext(ctx, "systemctl enable --now containerd && systemctl restart containerd"); err != nil {
-		return fmt.Errorf("start containerd: %w", err)
+	if result.Restarted {
+		d.logStep(nodeDeployPhaseConfiguring, "Restarted containerd after configuration changes")
+	} else if result.Reloaded {
+		d.logStep(nodeDeployPhaseConfiguring, "Reloaded systemd after containerd unit changes")
 	}
 
 	d.logStep(nodeDeployPhaseInstalling, "Ensuring upstream kubelet, kube-proxy, and CNI plugins")
@@ -111,179 +149,6 @@ fi`, version, version, arch, version, arch, cniVersion, arch, cniVersion)
 		return fmt.Errorf("install node binaries: %w", err)
 	}
 	return nil
-}
-
-func (d *NodeDeployer) resolveRegistryMirrors(ctx context.Context, runner registryMirrorFileRunner) (registryMirrorSelection, error) {
-	switch d.config.RegistryMirrorMode {
-	case server.RegistryMirrorModeAlways:
-		d.logStep(nodeDeployPhaseConfiguring, "Registry mirror mode always: enabling Docker Hub and registry.k8s.io mirrors")
-		return registryMirrorSelection{dockerHub: true, k8s: true}, nil
-	case server.RegistryMirrorModeNever:
-		d.logStep(nodeDeployPhaseConfiguring, "Registry mirror mode never: disabling Docker Hub and registry.k8s.io mirrors")
-		return registryMirrorSelection{}, nil
-	case server.RegistryMirrorModeAuto:
-		d.logStep(nodeDeployPhaseConfiguring, "Registry mirror mode auto: probing canonical registries from the target worker")
-	default:
-		return registryMirrorSelection{}, fmt.Errorf("unsupported registry mirror mode %q", d.config.RegistryMirrorMode)
-	}
-
-	dockerHubReachable, dockerHubDetail, err := probeCanonicalRegistry(ctx, runner, "https://registry-1.docker.io/v2/")
-	if err != nil {
-		return registryMirrorSelection{}, fmt.Errorf("probe Docker Hub from worker: %w", err)
-	}
-	d.logRegistryProbe("Docker Hub", dockerHubReachable, dockerHubDetail)
-
-	k8sReachable, k8sDetail, err := probeCanonicalRegistry(ctx, runner, "https://registry.k8s.io/v2/")
-	if err != nil {
-		return registryMirrorSelection{}, fmt.Errorf("probe registry.k8s.io from worker: %w", err)
-	}
-	d.logRegistryProbe("registry.k8s.io", k8sReachable, k8sDetail)
-
-	return registryMirrorSelection{dockerHub: !dockerHubReachable, k8s: !k8sReachable}, nil
-}
-
-func probeCanonicalRegistry(ctx context.Context, runner registryMirrorFileRunner, url string) (bool, string, error) {
-	command := fmt.Sprintf(`if curl -sS --location --noproxy '*' --output /dev/null --connect-timeout 4 --max-time 8 %s 2>/dev/null; then
-  printf reachable
-else
-  rc=$?
-  printf 'unreachable:%%s' "$rc"
-fi`, shellSingleQuote(url))
-	output, err := runner.RunRootContext(ctx, command)
-	if err != nil {
-		return false, "", err
-	}
-	result := strings.TrimSpace(output)
-	if result == "reachable" {
-		return true, "HTTP response received", nil
-	}
-	if strings.HasPrefix(result, "unreachable:") {
-		return false, "curl exit " + strings.TrimPrefix(result, "unreachable:"), nil
-	}
-	return false, "", fmt.Errorf("unexpected probe result %q", result)
-}
-
-func (d *NodeDeployer) logRegistryProbe(name string, reachable bool, detail string) {
-	if reachable {
-		d.logStep(nodeDeployPhaseConfiguring, fmt.Sprintf("%s is reachable from the target worker (%s); mirror disabled", name, detail))
-		return
-	}
-	d.logStep(nodeDeployPhaseConfiguring, fmt.Sprintf("%s is unreachable from the target worker (%s); mirror enabled", name, detail))
-}
-
-func (d *NodeDeployer) reconcileRegistryMirrorFiles(ctx context.Context, runner registryMirrorFileRunner, selection registryMirrorSelection) error {
-	targets := []struct {
-		name          string
-		path          string
-		content       string
-		legacyContent string
-		enabled       bool
-	}{
-		{name: "Docker Hub", path: dockerHubHostsPath, content: GenerateDockerHubHostsToml(), legacyContent: legacyDockerHubHostsToml(), enabled: selection.dockerHub},
-		{name: "registry.k8s.io", path: k8sRegistryHostsPath, content: GenerateK8sRegistryHostsToml(), legacyContent: legacyK8sRegistryHostsToml(), enabled: selection.k8s},
-	}
-	for _, target := range targets {
-		action, err := reconcileRegistryMirrorFile(ctx, runner, target.path, target.content, target.legacyContent, target.enabled)
-		if err != nil {
-			return fmt.Errorf("reconcile %s registry mirror: %w", target.name, err)
-		}
-		switch action {
-		case "written":
-			d.logStep(nodeDeployPhaseConfiguring, fmt.Sprintf("Wrote CasOS managed %s mirror configuration", target.name))
-		case "removed-managed":
-			d.logStep(nodeDeployPhaseConfiguring, fmt.Sprintf("Removed CasOS managed %s mirror configuration", target.name))
-		case "removed-legacy":
-			d.logStep(nodeDeployPhaseConfiguring, fmt.Sprintf("Removed legacy CasOS %s mirror configuration", target.name))
-		case "preserved":
-			d.logStep(nodeDeployPhaseConfiguring, fmt.Sprintf("Preserved unmanaged %s registry configuration", target.name))
-		case "absent":
-			d.logStep(nodeDeployPhaseConfiguring, fmt.Sprintf("No CasOS managed %s mirror configuration to remove", target.name))
-		default:
-			return fmt.Errorf("reconcile %s registry mirror: unexpected action %q", target.name, action)
-		}
-	}
-	return nil
-}
-
-func reconcileRegistryMirrorFile(ctx context.Context, runner registryMirrorFileRunner, path, content, legacyContent string, enabled bool) (string, error) {
-	legacyDigest := fmt.Sprintf("%x", sha256.Sum256([]byte(legacyContent)))
-	if enabled {
-		state, err := registryMirrorFileState(ctx, runner, path, legacyDigest)
-		if err != nil {
-			return "", err
-		}
-		if state == "unmanaged" {
-			return "preserved", nil
-		}
-		if err := runner.WriteFileContext(ctx, path, content, "0644"); err != nil {
-			return "", fmt.Errorf("write %s: %w", path, err)
-		}
-		return "written", nil
-	}
-
-	cleanupCommand := fmt.Sprintf(`set -e
-path=%s
-if [ -L "$path" ] || { [ -e "$path" ] && [ ! -f "$path" ]; }; then
-  printf preserved
-  exit 0
-fi
-if [ ! -e "$path" ]; then
-  printf absent
-  exit 0
-fi
-if [ "$(sed -n '1p' "$path")" = %s ]; then
-  rm -f -- "$path"
-  printf removed-managed
-  exit 0
-fi
-actual_digest=$(sha256sum "$path")
-actual_digest=${actual_digest%%%% *}
-if [ "$actual_digest" = %s ]; then
-  rm -f -- "$path"
-  printf removed-legacy
-  exit 0
-fi
-printf preserved`, shellSingleQuote(path), shellSingleQuote(generatedRegistryHostsMarker), shellSingleQuote(legacyDigest))
-	action, err := runner.RunRootContext(ctx, cleanupCommand)
-	if err != nil {
-		return "", fmt.Errorf("clean up %s: %w", path, err)
-	}
-	return strings.TrimSpace(action), nil
-}
-
-func registryMirrorFileState(ctx context.Context, runner registryMirrorFileRunner, path, legacyDigest string) (string, error) {
-	command := fmt.Sprintf(`set -e
-path=%s
-if [ -L "$path" ] || { [ -e "$path" ] && [ ! -f "$path" ]; }; then
-  printf unmanaged
-  exit 0
-fi
-if [ ! -e "$path" ]; then
-  printf absent
-  exit 0
-fi
-if [ "$(sed -n '1p' "$path")" = %s ]; then
-  printf managed
-  exit 0
-fi
-actual_digest=$(sha256sum "$path")
-actual_digest=${actual_digest%%%% *}
-if [ "$actual_digest" = %s ]; then
-  printf legacy
-  exit 0
-fi
-printf unmanaged`, shellSingleQuote(path), shellSingleQuote(generatedRegistryHostsMarker), shellSingleQuote(legacyDigest))
-	state, err := runner.RunRootContext(ctx, command)
-	if err != nil {
-		return "", fmt.Errorf("inspect %s: %w", path, err)
-	}
-	state = strings.TrimSpace(state)
-	switch state {
-	case "absent", "managed", "legacy", "unmanaged":
-		return state, nil
-	default:
-		return "", fmt.Errorf("inspect %s: unexpected state %q", path, state)
-	}
 }
 
 func (d *NodeDeployer) writeNodeFiles(ctx context.Context, runner *NodeDeploySSHRunner, nodeName, kubeconfig string) error {
