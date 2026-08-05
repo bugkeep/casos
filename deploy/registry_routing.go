@@ -33,7 +33,7 @@ type registryRoutingSelection struct {
 	Kubernetes registryRouteDecision
 }
 
-func (s registryRoutingSelection) DirectHosts() []string {
+func (s registryRoutingSelection) directHosts() []string {
 	hosts := make([]string, 0, 4)
 	seen := make(map[string]struct{}, 4)
 	for _, decision := range []registryRouteDecision{s.DockerHub, s.Kubernetes} {
