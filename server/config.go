@@ -67,9 +67,13 @@ func ConfigFromAppConf() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	containerdProxy, err := normalizeContainerdProxy(conf.GetConfigString("socks5Proxy"))
+	containerdProxy, err := normalizeContainerdProxy(conf.GetConfigString("containerdProxy"))
 	if err != nil {
-		return Config{}, fmt.Errorf("invalid socks5Proxy in app.conf: %w", err)
+		return Config{}, fmt.Errorf("invalid containerdProxy in app.conf: %w", err)
+	}
+	containerdNoProxy, err := parseContainerdNoProxy(conf.GetConfigString("containerdNoProxy"))
+	if err != nil {
+		return Config{}, fmt.Errorf("invalid containerdNoProxy in app.conf: %w", err)
 	}
 	ingressControllerEnabled := conf.GetConfigBoolDefault("ingressControllerEnabled", false)
 	serviceLBEnabled := conf.GetConfigBoolDefault("serviceLBEnabled", false)
@@ -93,6 +97,7 @@ func ConfigFromAppConf() (Config, error) {
 		StorageProvisionerEnabled: storageProvisionerEnabled,
 		RegistryMirrorMode:        registryMirrorMode,
 		ContainerdProxy:           containerdProxy,
+		ContainerdNoProxy:         containerdNoProxy,
 		IngressControllerEnabled:  ingressControllerEnabled,
 		ServiceLBEnabled:          serviceLBEnabled,
 	}
