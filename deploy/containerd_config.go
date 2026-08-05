@@ -27,7 +27,7 @@ version = 2
 // /etc/containerd/certs.d/docker.io/hosts.toml. The canonical server remains
 // the fallback when the mirror is unavailable.
 func GenerateDockerHubHostsToml() string {
-	return GenerateDockerHubHostsTomlWithResolve(false)
+	return GenerateDockerHubHostsTomlWithResolve(true)
 }
 
 func GenerateDockerHubHostsTomlWithResolve(resolve bool) string {
@@ -47,7 +47,7 @@ server = "https://registry-1.docker.io"
 // /etc/containerd/certs.d/registry.k8s.io/hosts.toml. The canonical server
 // remains the fallback when the mirror is unavailable.
 func GenerateK8sRegistryHostsToml() string {
-	return GenerateK8sRegistryHostsTomlWithResolve(false)
+	return GenerateK8sRegistryHostsTomlWithResolve(true)
 }
 
 func GenerateK8sRegistryHostsTomlWithResolve(resolve bool) string {

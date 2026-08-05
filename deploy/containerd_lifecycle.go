@@ -317,10 +317,17 @@ hostname -I 2>/dev/null || true`)
 }
 
 func preflightContainerdEgress(ctx context.Context, runner registryMirrorFileRunner, routing registryRoutingSelection, proxyURL string, noProxy []string) ([]string, error) {
-	decisions := []registryRouteDecision{routing.DockerHub, routing.Kubernetes}
 	details := make([]string, 0, 6)
-	for index, target := range registryRouteTargets {
-		decision := decisions[index]
+	for _, target := range registryRouteTargets {
+		var decision registryRouteDecision
+		switch target.namespace {
+		case "docker.io":
+			decision = routing.DockerHub
+		case "registry.k8s.io":
+			decision = routing.Kubernetes
+		default:
+			return details, fmt.Errorf("unsupported registry namespace %q", target.namespace)
+		}
 		if strings.TrimSpace(decision.RegistryHost) == "" {
 			continue
 		}
