@@ -643,8 +643,8 @@ func reconcileContainerdFiles(ctx context.Context, runner containerdLifecycleRun
 	switch result.Verification {
 	case containerdVerifiedPulls:
 	case containerdVerifiedReady:
-		if requireRealPull {
-			return result, rollback(fmt.Errorf("verify containerd CRI: crictl is unavailable; the selected registry route requires a real image pull"))
+		if requireRealPull || result.Changed {
+			return result, rollback(fmt.Errorf("verify containerd CRI: crictl is unavailable; a real image pull is required after changing containerd egress"))
 		}
 	default:
 		return result, rollback(fmt.Errorf("verify containerd CRI: unexpected result %q", result.Verification))
