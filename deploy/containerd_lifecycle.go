@@ -232,14 +232,14 @@ func buildContainerdDesiredFiles(config Config, routing RegistryRoutingSelection
 		},
 		{
 			Path:    dockerHubHostsPath,
-			Content: GenerateDockerHubHostsToml(),
+			Content: GenerateDockerHubHostsTomlWithResolve(routing.DockerHub.MirrorEnabled && !routing.DockerHub.CanonicalRequired),
 			Mode:    "0644",
 			Enabled: routing.DockerHub.MirrorEnabled,
 			Legacy:  []string{legacyDockerHubHostsToml()},
 		},
 		{
 			Path:    k8sRegistryHostsPath,
-			Content: GenerateK8sRegistryHostsToml(),
+			Content: GenerateK8sRegistryHostsTomlWithResolve(routing.Kubernetes.MirrorEnabled && !routing.Kubernetes.CanonicalRequired),
 			Mode:    "0644",
 			Enabled: routing.Kubernetes.MirrorEnabled,
 			Legacy:  []string{legacyK8sRegistryHostsToml()},
@@ -278,22 +278,26 @@ func preflightContainerdEgress(ctx context.Context, runner registryMirrorFileRun
 		if strings.TrimSpace(decision.RegistryHost) == "" {
 			continue
 		}
-		canonicalProxy, err := proxyForRegistryRoute(decision.CanonicalRoute, proxyURL)
-		if err != nil {
-			return details, fmt.Errorf("preflight %s canonical route: %w", target.name, err)
-		}
-		detail, err := requireRegistryPath(ctx, runner, target.name+" canonical", target.canonicalURL, canonicalProxy)
-		if err != nil {
-			return details, err
-		}
-		details = append(details, fmt.Sprintf("%s canonical %s: %s", target.name, decision.CanonicalRoute, detail))
-
-		if strings.TrimSpace(proxyURL) != "" && decision.CanonicalRoute != RegistryEgressProxy {
-			detail, err = requireRegistryPath(ctx, runner, target.name+" canonical through configured proxy", target.canonicalURL, proxyURL)
+		var detail string
+		var err error
+		if decision.CanonicalRequired {
+			canonicalProxy, err := proxyForRegistryRoute(decision.CanonicalRoute, proxyURL)
+			if err != nil {
+				return details, fmt.Errorf("preflight %s canonical route: %w", target.name, err)
+			}
+			detail, err = requireRegistryPath(ctx, runner, target.name+" canonical", target.canonicalURL, canonicalProxy)
 			if err != nil {
 				return details, err
 			}
-			details = append(details, fmt.Sprintf("%s canonical proxy: %s", target.name, detail))
+			details = append(details, fmt.Sprintf("%s canonical %s: %s", target.name, decision.CanonicalRoute, detail))
+
+			if strings.TrimSpace(proxyURL) != "" && decision.CanonicalRoute != RegistryEgressProxy {
+				detail, err = requireRegistryPath(ctx, runner, target.name+" canonical through configured proxy", target.canonicalURL, proxyURL)
+				if err != nil {
+					return details, err
+				}
+				details = append(details, fmt.Sprintf("%s canonical proxy: %s", target.name, detail))
+			}
 		}
 
 		if !decision.MirrorEnabled {
