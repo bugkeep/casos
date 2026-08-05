@@ -316,7 +316,7 @@ hostname -I 2>/dev/null || true`)
 	return hosts, nil
 }
 
-func preflightContainerdEgress(ctx context.Context, runner registryMirrorFileRunner, routing registryRoutingSelection, proxyURL string, noProxy []string) ([]string, error) {
+func preflightContainerdEgress(ctx context.Context, runner registryMirrorFileRunner, routing registryRoutingSelection, proxyURL string) ([]string, error) {
 	details := make([]string, 0, 6)
 	for _, target := range registryRouteTargets {
 		var decision registryRouteDecision
@@ -343,14 +343,6 @@ func preflightContainerdEgress(ctx context.Context, runner registryMirrorFileRun
 				return details, err
 			}
 			details = append(details, fmt.Sprintf("%s canonical %s: %s", target.name, decision.CanonicalRoute, detail))
-
-			if strings.TrimSpace(proxyURL) != "" && decision.CanonicalRoute != registryEgressProxy && !registryProxyBypassed(decision.RegistryHost, noProxy) {
-				detail, err = requireRegistryPath(ctx, runner, target.name+" canonical through configured proxy", target.canonicalURL, proxyURL)
-				if err != nil {
-					return details, err
-				}
-				details = append(details, fmt.Sprintf("%s canonical proxy: %s", target.name, detail))
-			}
 		}
 
 		if !decision.MirrorEnabled {

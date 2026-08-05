@@ -39,7 +39,7 @@ func (d *NodeDeployer) installNodeBinaries(ctx context.Context, runner *NodeDepl
 	if err != nil {
 		return fmt.Errorf("render containerd configuration: %w", err)
 	}
-	routeDetails, err := preflightContainerdEgress(ctx, runner, routing, d.config.ContainerdProxy, noProxy)
+	routeDetails, err := preflightContainerdEgress(ctx, runner, routing, d.config.ContainerdProxy)
 	if err != nil {
 		return fmt.Errorf("containerd egress preflight: %w", err)
 	}
