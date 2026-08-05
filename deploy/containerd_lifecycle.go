@@ -247,9 +247,12 @@ func buildContainerdDesiredFiles(config Config, routing RegistryRoutingSelection
 	return desired, noProxy, nil
 }
 
-func discoverContainerdWorkerHosts(ctx context.Context, runner interface {
-	RunRootContext(context.Context, string) (string, error)
-}) ([]string, error) {
+func discoverContainerdWorkerHosts(
+	ctx context.Context,
+	runner interface {
+		RunRootContext(context.Context, string) (string, error)
+	},
+) ([]string, error) {
 	output, err := runner.RunRootContext(ctx, `set -e
 hostname
 hostname -f 2>/dev/null || true
