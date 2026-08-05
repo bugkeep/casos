@@ -3,42 +3,44 @@ package deploy
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 
 	"github.com/casosorg/casos/server"
+	"golang.org/x/net/http/httpproxy"
 )
 
-type RegistryEgressRoute string
+type registryEgressRoute string
 
 const (
-	RegistryEgressDirect RegistryEgressRoute = "direct"
-	RegistryEgressProxy  RegistryEgressRoute = "proxy"
+	registryEgressDirect registryEgressRoute = "direct"
+	registryEgressProxy  registryEgressRoute = "proxy"
 )
 
-type RegistryRouteDecision struct {
+type registryRouteDecision struct {
 	RegistryNamespace string
 	RegistryHost      string
 	MirrorHost        string
 	MirrorEnabled     bool
-	CanonicalRoute    RegistryEgressRoute
+	CanonicalRoute    registryEgressRoute
 	CanonicalRequired bool
-	MirrorRoute       RegistryEgressRoute
+	MirrorRoute       registryEgressRoute
 }
 
-type RegistryRoutingSelection struct {
-	DockerHub  RegistryRouteDecision
-	Kubernetes RegistryRouteDecision
+type registryRoutingSelection struct {
+	DockerHub  registryRouteDecision
+	Kubernetes registryRouteDecision
 }
 
-func (s RegistryRoutingSelection) DirectHosts() []string {
+func (s registryRoutingSelection) DirectHosts() []string {
 	hosts := make([]string, 0, 4)
 	seen := make(map[string]struct{}, 4)
-	for _, decision := range []RegistryRouteDecision{s.DockerHub, s.Kubernetes} {
-		if decision.CanonicalRoute == RegistryEgressDirect {
+	for _, decision := range []registryRouteDecision{s.DockerHub, s.Kubernetes} {
+		if decision.CanonicalRoute == registryEgressDirect {
 			hosts = appendUniqueHost(hosts, seen, decision.RegistryHost)
 		}
-		if decision.MirrorEnabled && decision.MirrorRoute == RegistryEgressDirect {
+		if decision.MirrorEnabled && decision.MirrorRoute == registryEgressDirect {
 			hosts = appendUniqueHost(hosts, seen, decision.MirrorHost)
 		}
 	}
@@ -66,7 +68,7 @@ type registryRouteTarget struct {
 	mirrorURL    string
 }
 
-var registryRouteTargets = []registryRouteTarget{
+var registryRouteTargets = [...]registryRouteTarget{
 	{
 		name:         "Docker Hub",
 		namespace:    "docker.io",
@@ -85,87 +87,98 @@ var registryRouteTargets = []registryRouteTarget{
 	},
 }
 
-func (d *NodeDeployer) resolveRegistryRouting(ctx context.Context, runner registryMirrorFileRunner) (RegistryRoutingSelection, error) {
+func (d *NodeDeployer) resolveRegistryRouting(ctx context.Context, runner registryMirrorFileRunner) (registryRoutingSelection, error) {
 	switch d.config.RegistryMirrorMode {
 	case server.RegistryMirrorModeAlways:
 		d.logStep(nodeDeployPhaseConfiguring, "Registry mirror mode always: enabling Docker Hub and registry.k8s.io mirrors")
-		return staticRegistryRouting(true, d.config.ContainerdProxy != ""), nil
+		return staticRegistryRouting(true, d.config.ContainerdProxy != "", d.config.ContainerdNoProxy, false), nil
 	case server.RegistryMirrorModeNever:
 		d.logStep(nodeDeployPhaseConfiguring, "Registry mirror mode never: disabling Docker Hub and registry.k8s.io mirrors")
-		return staticRegistryRouting(false, d.config.ContainerdProxy != ""), nil
+		return staticRegistryRouting(false, d.config.ContainerdProxy != "", d.config.ContainerdNoProxy, true), nil
 	case server.RegistryMirrorModeAuto:
 		d.logStep(nodeDeployPhaseConfiguring, "Registry mirror mode auto: probing canonical registries, mirrors, and configured proxy from the target worker")
 	default:
-		return RegistryRoutingSelection{}, fmt.Errorf("unsupported registry mirror mode %q", d.config.RegistryMirrorMode)
+		return registryRoutingSelection{}, fmt.Errorf("unsupported registry mirror mode %q", d.config.RegistryMirrorMode)
 	}
 
-	decisions := make([]RegistryRouteDecision, 0, len(registryRouteTargets))
+	selection := registryRoutingSelection{}
 	for _, target := range registryRouteTargets {
 		decision, err := d.resolveRegistryRoute(ctx, runner, target)
 		if err != nil {
-			return RegistryRoutingSelection{}, err
+			return registryRoutingSelection{}, err
 		}
-		decisions = append(decisions, decision)
+		switch target.namespace {
+		case "docker.io":
+			selection.DockerHub = decision
+		case "registry.k8s.io":
+			selection.Kubernetes = decision
+		}
 	}
-	return RegistryRoutingSelection{DockerHub: decisions[0], Kubernetes: decisions[1]}, nil
+	return selection, nil
 }
 
-func staticRegistryRouting(mirrorsEnabled, proxyConfigured bool) RegistryRoutingSelection {
-	decisions := make([]RegistryRouteDecision, 0, len(registryRouteTargets))
+func staticRegistryRouting(mirrorsEnabled, proxyConfigured bool, noProxy []string, canonicalRequired bool) registryRoutingSelection {
+	selection := registryRoutingSelection{}
 	for _, target := range registryRouteTargets {
-		canonicalRoute := RegistryEgressDirect
-		if proxyConfigured {
-			canonicalRoute = RegistryEgressProxy
+		canonicalRoute := registryEgressDirect
+		if proxyConfigured && !registryProxyBypassed(target.registryHost, noProxy) {
+			canonicalRoute = registryEgressProxy
 		}
-		decision := RegistryRouteDecision{
+		decision := registryRouteDecision{
 			RegistryNamespace: target.namespace,
 			RegistryHost:      target.registryHost,
 			MirrorHost:        target.mirrorHost,
 			MirrorEnabled:     mirrorsEnabled,
 			CanonicalRoute:    canonicalRoute,
-			CanonicalRequired: true,
+			CanonicalRequired: canonicalRequired,
 		}
 		if mirrorsEnabled {
-			decision.MirrorRoute = RegistryEgressDirect
+			decision.MirrorRoute = registryEgressDirect
 		}
-		decisions = append(decisions, decision)
+		switch target.namespace {
+		case "docker.io":
+			selection.DockerHub = decision
+		case "registry.k8s.io":
+			selection.Kubernetes = decision
+		}
 	}
-	return RegistryRoutingSelection{DockerHub: decisions[0], Kubernetes: decisions[1]}
+	return selection
 }
 
-func (d *NodeDeployer) resolveRegistryRoute(ctx context.Context, runner registryMirrorFileRunner, target registryRouteTarget) (RegistryRouteDecision, error) {
+func (d *NodeDeployer) resolveRegistryRoute(ctx context.Context, runner registryMirrorFileRunner, target registryRouteTarget) (registryRouteDecision, error) {
 	directReachable, directDetail, err := probeRegistryPath(ctx, runner, target.canonicalURL, "")
 	if err != nil {
-		return RegistryRouteDecision{}, fmt.Errorf("probe %s canonical registry directly from worker: %w", target.name, err)
+		return registryRouteDecision{}, fmt.Errorf("probe %s canonical registry directly from worker: %w", target.name, err)
 	}
 	if directReachable {
 		d.logStep(nodeDeployPhaseConfiguring, fmt.Sprintf("%s canonical registry is directly reachable (%s); mirror disabled", target.name, directDetail))
-		return RegistryRouteDecision{
+		return registryRouteDecision{
 			RegistryNamespace: target.namespace,
 			RegistryHost:      target.registryHost,
 			MirrorHost:        target.mirrorHost,
-			CanonicalRoute:    RegistryEgressDirect,
+			CanonicalRoute:    registryEgressDirect,
 			CanonicalRequired: true,
 		}, nil
 	}
 
 	mirrorReachable, mirrorDetail, err := probeRegistryPath(ctx, runner, target.mirrorURL, "")
 	if err != nil {
-		return RegistryRouteDecision{}, fmt.Errorf("probe %s mirror directly from worker: %w", target.name, err)
+		return registryRouteDecision{}, fmt.Errorf("probe %s mirror directly from worker: %w", target.name, err)
 	}
 	proxyReachable := false
 	proxyDetail := "node proxy is not configured"
-	if d.config.ContainerdProxy != "" {
+	proxyConfigured := d.config.ContainerdProxy != "" && !registryProxyBypassed(target.registryHost, d.config.ContainerdNoProxy)
+	if proxyConfigured {
 		proxyReachable, proxyDetail, err = probeRegistryPath(ctx, runner, target.canonicalURL, d.config.ContainerdProxy)
 		if err != nil {
-			return RegistryRouteDecision{}, fmt.Errorf("probe %s canonical registry through node proxy: %w", target.name, err)
+			return registryRouteDecision{}, fmt.Errorf("probe %s canonical registry through node proxy: %w", target.name, err)
 		}
 	}
 	decision, err := selectRegistryRoute(target, directReachable, mirrorReachable, proxyReachable)
 	if err != nil {
-		return RegistryRouteDecision{}, fmt.Errorf("no complete pull path for %s: canonical direct unavailable (%s), canonical proxy unavailable (%s), mirror direct reachable=%t (%s)", target.name, directDetail, proxyDetail, mirrorReachable, mirrorDetail)
+		return registryRouteDecision{}, fmt.Errorf("no complete pull path for %s: canonical direct unavailable (%s), canonical proxy unavailable (%s), mirror direct reachable=%t (%s)", target.name, directDetail, proxyDetail, mirrorReachable, mirrorDetail)
 	}
-	if decision.CanonicalRoute == RegistryEgressProxy && decision.MirrorEnabled {
+	if decision.CanonicalRoute == registryEgressProxy && decision.MirrorEnabled {
 		d.logStep(nodeDeployPhaseConfiguring, fmt.Sprintf("%s canonical registry will use the node proxy (%s); directly reachable mirror enabled (%s)", target.name, proxyDetail, mirrorDetail))
 	} else if decision.MirrorEnabled {
 		d.logStep(nodeDeployPhaseConfiguring, fmt.Sprintf("%s canonical registry is unavailable (%s); directly reachable mirror enabled (%s)", target.name, directDetail, mirrorDetail))
@@ -175,34 +188,51 @@ func (d *NodeDeployer) resolveRegistryRoute(ctx context.Context, runner registry
 	return decision, nil
 }
 
-func selectRegistryRoute(target registryRouteTarget, directReachable, mirrorReachable, proxyReachable bool) (RegistryRouteDecision, error) {
-	decision := RegistryRouteDecision{
+func selectRegistryRoute(target registryRouteTarget, directReachable, mirrorReachable, proxyReachable bool) (registryRouteDecision, error) {
+	decision := registryRouteDecision{
 		RegistryNamespace: target.namespace,
 		RegistryHost:      target.registryHost,
 		MirrorHost:        target.mirrorHost,
 	}
 	if directReachable {
-		decision.CanonicalRoute = RegistryEgressDirect
+		decision.CanonicalRoute = registryEgressDirect
 		decision.CanonicalRequired = true
 		return decision, nil
 	}
 	if proxyReachable {
-		decision.CanonicalRoute = RegistryEgressProxy
+		decision.CanonicalRoute = registryEgressProxy
 		decision.CanonicalRequired = true
 		if mirrorReachable {
 			decision.MirrorEnabled = true
-			decision.MirrorRoute = RegistryEgressDirect
+			decision.MirrorRoute = registryEgressDirect
 		}
 		return decision, nil
 	}
 	if mirrorReachable {
-		decision.CanonicalRoute = RegistryEgressDirect
+		decision.CanonicalRoute = registryEgressDirect
 		decision.CanonicalRequired = false
 		decision.MirrorEnabled = true
-		decision.MirrorRoute = RegistryEgressDirect
+		decision.MirrorRoute = registryEgressDirect
 		return decision, nil
 	}
-	return RegistryRouteDecision{}, fmt.Errorf("no route available")
+	return registryRouteDecision{}, fmt.Errorf("no route available")
+}
+
+func registryProxyBypassed(host string, noProxy []string) bool {
+	if len(noProxy) == 0 {
+		return false
+	}
+	target, err := url.Parse("https://" + host + "/v2/")
+	if err != nil {
+		return false
+	}
+	proxyFunc := (&httpproxy.Config{
+		HTTPProxy:  "socks5h://proxy.invalid:1",
+		HTTPSProxy: "socks5h://proxy.invalid:1",
+		NoProxy:    strings.Join(noProxy, ","),
+	}).ProxyFunc()
+	proxy, err := proxyFunc(target)
+	return err == nil && proxy == nil
 }
 
 func probeRegistryPath(ctx context.Context, runner registryMirrorFileRunner, targetURL, proxyURL string) (bool, string, error) {
