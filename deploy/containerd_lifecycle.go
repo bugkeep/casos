@@ -278,8 +278,14 @@ func desiredState(enabled bool) containerdDesiredState {
 }
 
 func registryRoutingRequiresRealPull(routing registryRoutingSelection) bool {
-	return (routing.DockerHub.MirrorEnabled && !routing.DockerHub.CanonicalRequired) ||
-		(routing.Kubernetes.MirrorEnabled && !routing.Kubernetes.CanonicalRequired)
+	for _, decision := range []registryRouteDecision{routing.DockerHub, routing.Kubernetes} {
+		if decision.CanonicalRoute == registryEgressProxy ||
+			(decision.MirrorEnabled && decision.MirrorRoute == registryEgressProxy) ||
+			decision.MirrorEnabled {
+			return true
+		}
+	}
+	return false
 }
 
 func discoverContainerdWorkerHosts(
@@ -484,7 +490,7 @@ func reconcileContainerdFiles(ctx context.Context, runner containerdLifecycleRun
 	switch result.Verification {
 	case containerdVerifiedPulls:
 	case containerdVerifiedReady:
-		if requireRealPull || result.Changed {
+		if requireRealPull {
 			return result, rollback(fmt.Errorf("verify containerd CRI: crictl is unavailable; a real image pull is required after changing containerd egress"))
 		}
 	default:
