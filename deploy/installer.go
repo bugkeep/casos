@@ -86,7 +86,7 @@ test -f %[1]s`, nodeDeployResolverPath)); err != nil {
 	} else {
 		d.logStep(nodeDeployPhaseConfiguring, "Containerd egress proxy disabled; CasOS-managed proxy files will be removed")
 	}
-	result, err := reconcileContainerdFiles(ctx, runner, desiredFiles, d.config.SandboxImage)
+	result, err := reconcileContainerdFiles(ctx, runner, desiredFiles, d.config.SandboxImage, d.config.ContainerdVerificationImage)
 	for _, warning := range result.Warnings {
 		d.log("warning", warning, nodeDeployPhaseConfiguring)
 	}
@@ -105,8 +105,8 @@ test -f %[1]s`, nodeDeployResolverPath)); err != nil {
 		d.logStep(nodeDeployPhaseConfiguring, "Containerd configuration already matches the desired state")
 	}
 	switch result.Verification {
-	case "cri-pull:sandbox,implicit-docker-hub":
-		d.logStep(nodeDeployPhaseConfiguring, fmt.Sprintf("Verified CRI pulls for the sandbox image and implicit Docker Hub image %s", containerdImplicitDockerHubVerificationImage))
+	case "cri-pull:sandbox,verification":
+		d.logStep(nodeDeployPhaseConfiguring, fmt.Sprintf("Verified CRI pulls for the sandbox image and configured verification image %s", d.config.ContainerdVerificationImage))
 	case "cri-ready-only":
 		d.log("warning", "crictl is unavailable; verified containerd and its CRI plugin, but skipped real image pulls", nodeDeployPhaseConfiguring)
 	default:

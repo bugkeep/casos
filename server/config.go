@@ -11,26 +11,27 @@ import (
 
 // Config holds control-plane settings populated from app.conf.
 type Config struct {
-	DataDir                   string
-	ApiserverBind             string // actual bind / SAN IP (may be loopback in dev)
-	AdvertiseAddress          string // non-loopback IP registered as kubernetes service endpoint
-	ApiserverPort             int
-	WebhookPort               int                // HTTPS port for the Casbin admission webhook server
-	DSN                       string             // MySQL DSN forwarded to kine
-	SandboxImage              string             // containerd sandbox (pause) image, empty = upstream default
-	CoreDNSImage              string             // CoreDNS image used by the built-in DNS bootstrap
-	LocalPathProvisionerImage string             // local-path-provisioner controller image
-	LocalPathHelperImage      string             // helper pod image used by local-path-provisioner
-	FlannelImage              string             // Flannel daemon image used by the built-in network bootstrap
-	FlannelCNIPluginImage     string             // Flannel CNI plugin image installed on worker hosts
-	IngressControllerImage    string             // Traefik image used by the built-in Ingress controller
-	ServiceLBImage            string             // hostPort proxy image used by the built-in ServiceLB
-	StorageProvisionerEnabled bool               // install the built-in local-path provisioner for local clusters
-	RegistryMirrorMode        RegistryMirrorMode // imageRegistryMirror mode, evaluated on each target worker
-	ContainerdProxy           string             // proxy URL reachable from target workers, empty = disabled
-	ContainerdNoProxy         []string           // additional worker-side direct egress destinations
-	IngressControllerEnabled  bool               // install the built-in Traefik controller
-	ServiceLBEnabled          bool               // run the built-in bare-metal LoadBalancer controller
+	DataDir                     string
+	ApiserverBind               string // actual bind / SAN IP (may be loopback in dev)
+	AdvertiseAddress            string // non-loopback IP registered as kubernetes service endpoint
+	ApiserverPort               int
+	WebhookPort                 int                // HTTPS port for the Casbin admission webhook server
+	DSN                         string             // MySQL DSN forwarded to kine
+	SandboxImage                string             // containerd sandbox (pause) image, empty = upstream default
+	CoreDNSImage                string             // CoreDNS image used by the built-in DNS bootstrap
+	LocalPathProvisionerImage   string             // local-path-provisioner controller image
+	LocalPathHelperImage        string             // helper pod image used by local-path-provisioner
+	FlannelImage                string             // Flannel daemon image used by the built-in network bootstrap
+	FlannelCNIPluginImage       string             // Flannel CNI plugin image installed on worker hosts
+	IngressControllerImage      string             // Traefik image used by the built-in Ingress controller
+	ServiceLBImage              string             // hostPort proxy image used by the built-in ServiceLB
+	StorageProvisionerEnabled   bool               // install the built-in local-path provisioner for local clusters
+	RegistryMirrorMode          RegistryMirrorMode // imageRegistryMirror mode, evaluated on each target worker
+	ContainerdProxy             string             // proxy URL reachable from target workers, empty = disabled
+	ContainerdNoProxy           []string           // additional worker-side direct egress destinations
+	ContainerdVerificationImage string             // optional worker-side CRI verification image
+	IngressControllerEnabled    bool               // install the built-in Traefik controller
+	ServiceLBEnabled            bool               // run the built-in bare-metal LoadBalancer controller
 }
 
 // ConfigFromAppConf reads server config from the beego app.conf.
@@ -76,25 +77,26 @@ func ConfigFromAppConf() (Config, error) {
 	ingressControllerImage := conf.GetConfigStringDefault("ingressControllerImage", defaultIngressControllerImage)
 	serviceLBImage := conf.GetConfigStringDefault("serviceLBImage", defaultServiceLBImage)
 	config := Config{
-		DataDir:                   dataDir,
-		ApiserverBind:             bind,
-		AdvertiseAddress:          advertise,
-		ApiserverPort:             port,
-		WebhookPort:               webhookPort,
-		DSN:                       dsn,
-		SandboxImage:              sandboxImage,
-		CoreDNSImage:              coreDNSImage,
-		LocalPathProvisionerImage: localPathProvisionerImage,
-		LocalPathHelperImage:      localPathHelperImage,
-		FlannelImage:              flannelImage,
-		FlannelCNIPluginImage:     flannelCNIPluginImage,
-		IngressControllerImage:    ingressControllerImage,
-		ServiceLBImage:            serviceLBImage,
-		StorageProvisionerEnabled: storageProvisionerEnabled,
-		RegistryMirrorMode:        registryMirrorMode,
-		ContainerdProxy:           containerdProxy,
-		IngressControllerEnabled:  ingressControllerEnabled,
-		ServiceLBEnabled:          serviceLBEnabled,
+		DataDir:                     dataDir,
+		ApiserverBind:               bind,
+		AdvertiseAddress:            advertise,
+		ApiserverPort:               port,
+		WebhookPort:                 webhookPort,
+		DSN:                         dsn,
+		SandboxImage:                sandboxImage,
+		CoreDNSImage:                coreDNSImage,
+		LocalPathProvisionerImage:   localPathProvisionerImage,
+		LocalPathHelperImage:        localPathHelperImage,
+		FlannelImage:                flannelImage,
+		FlannelCNIPluginImage:       flannelCNIPluginImage,
+		IngressControllerImage:      ingressControllerImage,
+		ServiceLBImage:              serviceLBImage,
+		StorageProvisionerEnabled:   storageProvisionerEnabled,
+		RegistryMirrorMode:          registryMirrorMode,
+		ContainerdProxy:             containerdProxy,
+		ContainerdVerificationImage: conf.GetConfigStringDefault("containerdVerificationImage", "nginx:1.27.5-alpine"),
+		IngressControllerEnabled:    ingressControllerEnabled,
+		ServiceLBEnabled:            serviceLBEnabled,
 	}
 	normalizeApplicationAccessConfig(&config)
 	return config, nil

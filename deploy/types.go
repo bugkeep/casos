@@ -113,25 +113,27 @@ type NodeKubeconfig struct {
 type KubeconfigGenerator func(nodeName, apiserverURL string) (*NodeKubeconfig, error)
 
 type Config struct {
-	AdvertiseAddress   string
-	ApiserverBind      string
-	ApiserverPort      int
-	SandboxImage       string
-	RegistryMirrorMode server.RegistryMirrorMode
-	ContainerdProxy    string
-	ContainerdNoProxy  []string
-	GenerateKubeconfig KubeconfigGenerator
+	AdvertiseAddress            string
+	ApiserverBind               string
+	ApiserverPort               int
+	SandboxImage                string
+	RegistryMirrorMode          server.RegistryMirrorMode
+	ContainerdProxy             string
+	ContainerdNoProxy           []string
+	ContainerdVerificationImage string
+	GenerateKubeconfig          KubeconfigGenerator
 }
 
 func ConfigFromServerConfig(cfg server.Config) Config {
 	return Config{
-		AdvertiseAddress:   cfg.AdvertiseAddress,
-		ApiserverBind:      cfg.ApiserverBind,
-		ApiserverPort:      cfg.ApiserverPort,
-		SandboxImage:       cfg.SandboxImage,
-		RegistryMirrorMode: cfg.RegistryMirrorMode,
-		ContainerdProxy:    cfg.ContainerdProxy,
-		ContainerdNoProxy:  append([]string(nil), cfg.ContainerdNoProxy...),
+		AdvertiseAddress:            cfg.AdvertiseAddress,
+		ApiserverBind:               cfg.ApiserverBind,
+		ApiserverPort:               cfg.ApiserverPort,
+		SandboxImage:                cfg.SandboxImage,
+		RegistryMirrorMode:          cfg.RegistryMirrorMode,
+		ContainerdProxy:             cfg.ContainerdProxy,
+		ContainerdNoProxy:           append([]string(nil), cfg.ContainerdNoProxy...),
+		ContainerdVerificationImage: cfg.ContainerdVerificationImage,
 		GenerateKubeconfig: func(nodeName, apiserverURL string) (*NodeKubeconfig, error) {
 			wk, err := server.GenerateWorkerKubeconfigForServer(cfg, nodeName, apiserverURL)
 			if err != nil {
