@@ -218,7 +218,7 @@ func buildContainerdDesiredFiles(config Config, routing registryRoutingSelection
 	noProxy := buildContainerdNoProxy(containerdNoProxyInput{
 		WorkerHosts: workerHosts,
 		APIServer:   apiServer,
-		DirectHosts: routing.DirectHosts(),
+		DirectHosts: routing.directHosts(),
 		Additional:  config.ContainerdNoProxy,
 	})
 
