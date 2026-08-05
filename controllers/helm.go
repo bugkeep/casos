@@ -14,6 +14,7 @@ import (
 
 	"github.com/beego/beego/logs"
 	"github.com/casosorg/casos/object"
+	proxypkg "github.com/casosorg/casos/proxy"
 	"github.com/casosorg/casos/store"
 )
 
@@ -66,8 +67,14 @@ func (c *ApiController) SearchArtifactHub() {
 		url += "&ts_query_web=" + q
 	}
 
-	client := &http.Client{Timeout: 15 * time.Second}
-	req, _ := http.NewRequest("GET", url, nil)
+	client := proxypkg.HTTPClient()
+	ctx, cancel := context.WithTimeout(c.Ctx.Request.Context(), 15*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := client.Do(req)

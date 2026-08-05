@@ -1,9 +1,11 @@
 package controllers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
 	"sync"
 
@@ -16,16 +18,22 @@ type namespaceInfo struct {
 
 // fetchNamespaceGravatar tries the orgs then users endpoint for a Docker Hub namespace.
 // Returns the gravatar_url with d=404 so callers can detect missing avatars via HTTP 404.
-func fetchNamespaceGravatar(namespace string) string {
+func fetchNamespaceGravatar(ctx context.Context, namespace string) string {
 	for _, kind := range []string{"orgs", "users"} {
 		apiURL := fmt.Sprintf("https://hub.docker.com/v2/%s/%s/", kind, namespace)
-		resp, err := proxy.GetHttpClient(apiURL).Get(apiURL)
+		req, cancel, err := newDockerHubRequest(ctx, apiURL)
 		if err != nil {
+			continue
+		}
+		resp, err := proxy.HTTPClient().Do(req)
+		if err != nil {
+			cancel()
 			continue
 		}
 		body, readErr := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		if readErr != nil || resp.StatusCode != 200 {
+		cancel()
+		if readErr != nil || resp.StatusCode != http.StatusOK {
 			continue
 		}
 		var info namespaceInfo
@@ -39,6 +47,10 @@ func fetchNamespaceGravatar(namespace string) string {
 // FetchNamespaceLogos concurrently fetches gravatar URLs for a set of Docker Hub namespaces.
 // Returns a map of namespace -> gravatar URL (empty string if not found).
 func FetchNamespaceLogos(namespaces []string) map[string]string {
+	return fetchNamespaceLogos(context.Background(), namespaces)
+}
+
+func fetchNamespaceLogos(ctx context.Context, namespaces []string) map[string]string {
 	result := make(map[string]string, len(namespaces))
 	if len(namespaces) == 0 {
 		return result
@@ -50,7 +62,7 @@ func FetchNamespaceLogos(namespaces []string) map[string]string {
 		wg.Add(1)
 		go func(ns string) {
 			defer wg.Done()
-			logo := fetchNamespaceGravatar(ns)
+			logo := fetchNamespaceGravatar(ctx, ns)
 			mu.Lock()
 			result[ns] = logo
 			mu.Unlock()

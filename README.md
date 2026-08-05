@@ -95,11 +95,28 @@ clientSecret        = <your-client-secret>
 casdoorOrganization = <your-org>
 casdoorApplication  = <your-app>
 
+; Optional control-plane SOCKS5 proxy
+; Leave blank to use environment proxy settings or direct access.
+; When set, the proxy is required for requests not matched by NO_PROXY.
+socks5Proxy =
+
 ; Kubernetes control plane
 apiserverPort = 6443
 apiserverBind = 127.0.0.1
 dataDir       = /var/lib/casos
 ```
+
+The control-plane proxy accepts `host:port`, `socks5://`, and `socks5h://`
+addresses. When `socks5Proxy` is set, CasOS fails requests that cannot use the
+configured proxy instead of silently falling back to direct access. Destinations
+matched by the CasOS process `NO_PROXY` environment variable continue to use
+direct access. When `socks5Proxy` is blank, CasOS follows `HTTP_PROXY`,
+`HTTPS_PROXY`, and `NO_PROXY`, and uses direct access when no environment proxy
+is configured.
+
+**Upgrade notice:** the previous example default of `127.0.0.1:10808` has been
+removed. Set `socks5Proxy` explicitly before upgrading if that local proxy is a
+required control-plane dependency.
 
 ## Development
 

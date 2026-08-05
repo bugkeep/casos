@@ -1,14 +1,29 @@
 package controllers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/casosorg/casos/proxy"
 )
+
+const dockerHubRequestTimeout = 15 * time.Second
+
+func newDockerHubRequest(ctx context.Context, apiURL string) (*http.Request, context.CancelFunc, error) {
+	requestCtx, cancel := context.WithTimeout(ctx, dockerHubRequestTimeout)
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, apiURL, nil)
+	if err != nil {
+		cancel()
+		return nil, nil, err
+	}
+	return req, cancel, nil
+}
 
 type dockerHubSearchResult struct {
 	Count   int              `json:"count"`
@@ -44,7 +59,14 @@ func (c *ApiController) SearchDockerHubImages() {
 		url.QueryEscape(q),
 	)
 
-	resp, err := proxy.GetHttpClient(apiURL).Get(apiURL)
+	req, cancel, err := newDockerHubRequest(c.Ctx.Request.Context(), apiURL)
+	if err != nil {
+		c.ResponseError(fmt.Sprintf("failed to create Docker Hub request: %v", err))
+		return
+	}
+	defer cancel()
+
+	resp, err := proxy.HTTPClient().Do(req)
 	if err != nil {
 		c.ResponseError(fmt.Sprintf("failed to reach Docker Hub: %v", err))
 		return
@@ -67,7 +89,7 @@ func (c *ApiController) SearchDockerHubImages() {
 	for i, r := range result.Results {
 		names[i] = r.Name
 	}
-	nsLogos := FetchNamespaceLogos(uniqueNamespaces(names))
+	nsLogos := fetchNamespaceLogos(c.Ctx.Request.Context(), uniqueNamespaces(names))
 
 	items := make([]ImageSearchItem, len(result.Results))
 	for i, r := range result.Results {
@@ -115,7 +137,14 @@ func (c *ApiController) GetDockerHubImageTags() {
 		url.PathEscape(namespace), url.PathEscape(name),
 	)
 
-	resp, err := proxy.GetHttpClient(apiURL).Get(apiURL)
+	req, cancel, err := newDockerHubRequest(c.Ctx.Request.Context(), apiURL)
+	if err != nil {
+		c.ResponseError(fmt.Sprintf("failed to create Docker Hub request: %v", err))
+		return
+	}
+	defer cancel()
+
+	resp, err := proxy.HTTPClient().Do(req)
 	if err != nil {
 		c.ResponseError(fmt.Sprintf("failed to reach Docker Hub: %v", err))
 		return
