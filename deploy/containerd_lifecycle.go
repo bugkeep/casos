@@ -37,6 +37,29 @@ const (
 	containerdFileRemove containerdFileAction = "remove"
 )
 
+type containerdFileRole string
+
+const (
+	containerdFileRoleConfig       containerdFileRole = "config"
+	containerdFileRoleProxyEnv     containerdFileRole = "proxy-env"
+	containerdFileRoleProxyDropIn  containerdFileRole = "proxy-drop-in"
+	containerdFileRoleRegistryHost containerdFileRole = "registry-hosts"
+)
+
+type containerdDesiredState string
+
+const (
+	containerdDesiredAbsent  containerdDesiredState = "absent"
+	containerdDesiredPresent containerdDesiredState = "present"
+)
+
+type containerdVerificationResult string
+
+const (
+	containerdVerifiedPulls containerdVerificationResult = "cri-pull:sandbox,verification"
+	containerdVerifiedReady containerdVerificationResult = "cri-ready-only"
+)
+
 type containerdNoProxyInput struct {
 	WorkerHosts []string
 	APIServer   string
@@ -45,13 +68,15 @@ type containerdNoProxyInput struct {
 }
 
 type containerdDesiredFile struct {
-	Path         string
-	Content      string
-	Mode         string
-	Enabled      bool
-	DaemonReload bool
-	Restart      bool
-	Legacy       []string
+	Path             string
+	Role             containerdFileRole
+	Content          string
+	Mode             string
+	State            containerdDesiredState
+	BlockIfUnmanaged bool
+	DaemonReload     bool
+	Restart          bool
+	Legacy           []string
 }
 
 type containerdFileSnapshot struct {
@@ -80,7 +105,7 @@ type containerdReconcileResult struct {
 	Changed           bool
 	Reloaded          bool
 	Restarted         bool
-	Verification      string
+	Verification      containerdVerificationResult
 	Warnings          []string
 	ChangedPaths      []string
 	RolledBackFrom    error
@@ -181,7 +206,7 @@ func buildContainerdNoProxy(input containerdNoProxyInput) []string {
 	return stableUniqueNonEmpty(values)
 }
 
-func buildContainerdDesiredFiles(config Config, routing RegistryRoutingSelection, workerHosts []string) ([]containerdDesiredFile, []string, error) {
+func buildContainerdDesiredFiles(config Config, routing registryRoutingSelection, workerHosts []string) ([]containerdDesiredFile, []string, error) {
 	apiServer := ""
 	apiServerHost := strings.TrimSpace(config.AdvertiseAddress)
 	if apiServerHost == "" {
@@ -209,42 +234,61 @@ func buildContainerdDesiredFiles(config Config, routing RegistryRoutingSelection
 	desired := []containerdDesiredFile{
 		{
 			Path:    containerdConfigPath,
+			Role:    containerdFileRoleConfig,
 			Content: GenerateContainerdConfig(config.SandboxImage),
 			Mode:    "0644",
-			Enabled: true,
+			State:   containerdDesiredPresent,
 			Restart: true,
 		},
 		{
 			Path:    containerdProxyEnvPath,
+			Role:    containerdFileRoleProxyEnv,
 			Content: proxyEnv,
 			Mode:    "0600",
-			Enabled: proxyEnabled,
+			State:   desiredState(proxyEnabled),
 			Restart: true,
 		},
 		{
 			Path:         containerdEgressDropInPath,
+			Role:         containerdFileRoleProxyDropIn,
 			Content:      renderContainerdEgressDropIn(),
 			Mode:         "0644",
-			Enabled:      proxyEnabled,
+			State:        desiredState(proxyEnabled),
 			DaemonReload: true,
 			Restart:      true,
 		},
 		{
-			Path:    dockerHubHostsPath,
-			Content: GenerateDockerHubHostsTomlWithResolve(routing.DockerHub.MirrorEnabled && !routing.DockerHub.CanonicalRequired),
-			Mode:    "0644",
-			Enabled: routing.DockerHub.MirrorEnabled,
-			Legacy:  []string{legacyDockerHubHostsToml()},
+			Path:             dockerHubHostsPath,
+			Role:             containerdFileRoleRegistryHost,
+			Content:          GenerateDockerHubHostsTomlWithResolve(routing.DockerHub.MirrorEnabled && !routing.DockerHub.CanonicalRequired),
+			Mode:             "0644",
+			State:            desiredState(routing.DockerHub.MirrorEnabled),
+			BlockIfUnmanaged: routing.DockerHub.MirrorEnabled && !routing.DockerHub.CanonicalRequired,
+			Legacy:           []string{legacyDockerHubHostsToml()},
 		},
 		{
-			Path:    k8sRegistryHostsPath,
-			Content: GenerateK8sRegistryHostsTomlWithResolve(routing.Kubernetes.MirrorEnabled && !routing.Kubernetes.CanonicalRequired),
-			Mode:    "0644",
-			Enabled: routing.Kubernetes.MirrorEnabled,
-			Legacy:  []string{legacyK8sRegistryHostsToml()},
+			Path:             k8sRegistryHostsPath,
+			Role:             containerdFileRoleRegistryHost,
+			Content:          GenerateK8sRegistryHostsTomlWithResolve(routing.Kubernetes.MirrorEnabled && !routing.Kubernetes.CanonicalRequired),
+			Mode:             "0644",
+			State:            desiredState(routing.Kubernetes.MirrorEnabled),
+			BlockIfUnmanaged: routing.Kubernetes.MirrorEnabled && !routing.Kubernetes.CanonicalRequired,
+			Legacy:           []string{legacyK8sRegistryHostsToml()},
 		},
 	}
 	return desired, noProxy, nil
+}
+
+func desiredState(enabled bool) containerdDesiredState {
+	if enabled {
+		return containerdDesiredPresent
+	}
+	return containerdDesiredAbsent
+}
+
+func registryRoutingRequiresRealPull(routing registryRoutingSelection) bool {
+	return (routing.DockerHub.MirrorEnabled && !routing.DockerHub.CanonicalRequired) ||
+		(routing.Kubernetes.MirrorEnabled && !routing.Kubernetes.CanonicalRequired)
 }
 
 func discoverContainerdWorkerHosts(
@@ -272,8 +316,8 @@ hostname -I 2>/dev/null || true`)
 	return hosts, nil
 }
 
-func preflightContainerdEgress(ctx context.Context, runner registryMirrorFileRunner, routing RegistryRoutingSelection, proxyURL string) ([]string, error) {
-	decisions := []RegistryRouteDecision{routing.DockerHub, routing.Kubernetes}
+func preflightContainerdEgress(ctx context.Context, runner registryMirrorFileRunner, routing registryRoutingSelection, proxyURL string, noProxy []string) ([]string, error) {
+	decisions := []registryRouteDecision{routing.DockerHub, routing.Kubernetes}
 	details := make([]string, 0, 6)
 	for index, target := range registryRouteTargets {
 		decision := decisions[index]
@@ -293,7 +337,7 @@ func preflightContainerdEgress(ctx context.Context, runner registryMirrorFileRun
 			}
 			details = append(details, fmt.Sprintf("%s canonical %s: %s", target.name, decision.CanonicalRoute, detail))
 
-			if strings.TrimSpace(proxyURL) != "" && decision.CanonicalRoute != RegistryEgressProxy {
+			if strings.TrimSpace(proxyURL) != "" && decision.CanonicalRoute != registryEgressProxy && !registryProxyBypassed(decision.RegistryHost, noProxy) {
 				detail, err = requireRegistryPath(ctx, runner, target.name+" canonical through configured proxy", target.canonicalURL, proxyURL)
 				if err != nil {
 					return details, err
@@ -318,11 +362,11 @@ func preflightContainerdEgress(ctx context.Context, runner registryMirrorFileRun
 	return details, nil
 }
 
-func proxyForRegistryRoute(route RegistryEgressRoute, proxyURL string) (string, error) {
+func proxyForRegistryRoute(route registryEgressRoute, proxyURL string) (string, error) {
 	switch route {
-	case RegistryEgressDirect:
+	case registryEgressDirect:
 		return "", nil
-	case RegistryEgressProxy:
+	case registryEgressProxy:
 		if strings.TrimSpace(proxyURL) == "" {
 			return "", fmt.Errorf("proxy route selected without containerdProxy")
 		}
@@ -368,7 +412,7 @@ func planContainerdFiles(desired []containerdDesiredFile, current map[string]con
 	proxyPairUnmanaged := proxyEnv.Kind == containerdFileUnmanaged || dropIn.Kind == containerdFileUnmanaged
 	proxyEnabled := false
 	for _, file := range desired {
-		if (file.Path == containerdProxyEnvPath || file.Path == containerdEgressDropInPath) && file.Enabled {
+		if (file.Role == containerdFileRoleProxyEnv || file.Role == containerdFileRoleProxyDropIn) && file.State == containerdDesiredPresent {
 			proxyEnabled = true
 		}
 	}
@@ -384,7 +428,11 @@ func planContainerdFiles(desired []containerdDesiredFile, current map[string]con
 		}
 		managed := snapshot.Kind == containerdFileManaged || matchesLegacyContainerdContent(snapshot.Content, file.Legacy)
 		if snapshot.Kind == containerdFileUnmanaged && !managed {
-			if file.Path == containerdConfigPath && file.Enabled {
+			if file.BlockIfUnmanaged && file.State == containerdDesiredPresent {
+				plan.Blocked = append(plan.Blocked, fmt.Sprintf("required containerd file %s is unmanaged; migrate or explicitly adopt it before applying the selected registry route", file.Path))
+				continue
+			}
+			if file.Role == containerdFileRoleConfig && file.State == containerdDesiredPresent {
 				plan.Blocked = append(plan.Blocked, "containerd config.toml is unmanaged; migrate or explicitly adopt it before CasOS can manage egress")
 				continue
 			}
@@ -394,11 +442,11 @@ func planContainerdFiles(desired []containerdDesiredFile, current map[string]con
 
 		var change *containerdFileChange
 		switch {
-		case file.Enabled && snapshot.Kind == containerdFileAbsent:
+		case file.State == containerdDesiredPresent && snapshot.Kind == containerdFileAbsent:
 			change = &containerdFileChange{Path: file.Path, Action: containerdFileWrite, Content: file.Content, Mode: file.Mode, Previous: snapshot}
-		case file.Enabled && (snapshot.Content != file.Content || snapshot.Mode != file.Mode):
+		case file.State == containerdDesiredPresent && (snapshot.Content != file.Content || snapshot.Mode != file.Mode):
 			change = &containerdFileChange{Path: file.Path, Action: containerdFileWrite, Content: file.Content, Mode: file.Mode, Previous: snapshot}
-		case !file.Enabled && managed:
+		case file.State == containerdDesiredAbsent && managed:
 			change = &containerdFileChange{Path: file.Path, Action: containerdFileRemove, Previous: snapshot}
 		}
 		if change == nil {
@@ -481,7 +529,7 @@ func parseContainerdFileSnapshot(output string) (containerdFileSnapshot, error) 
 	return containerdFileSnapshot{Kind: kind, Content: text, Mode: mode}, nil
 }
 
-func reconcileContainerdFiles(ctx context.Context, runner containerdLifecycleRunner, desired []containerdDesiredFile, sandboxImage, verificationImage string) (containerdReconcileResult, error) {
+func reconcileContainerdFiles(ctx context.Context, runner containerdLifecycleRunner, desired []containerdDesiredFile, sandboxImage, verificationImage string, requireRealPull bool) (containerdReconcileResult, error) {
 	result := containerdReconcileResult{}
 	if runner == nil {
 		return result, fmt.Errorf("containerd lifecycle runner is required")
@@ -584,9 +632,13 @@ func reconcileContainerdFiles(ctx context.Context, runner containerdLifecycleRun
 	if err != nil {
 		return result, rollback(fmt.Errorf("verify containerd CRI: %w", err))
 	}
-	result.Verification = strings.TrimSpace(verification)
+	result.Verification = containerdVerificationResult(strings.TrimSpace(verification))
 	switch result.Verification {
-	case "cri-pull:sandbox,verification", "cri-ready-only":
+	case containerdVerifiedPulls:
+	case containerdVerifiedReady:
+		if requireRealPull {
+			return result, rollback(fmt.Errorf("verify containerd CRI: crictl is unavailable; the selected registry route requires a real image pull"))
+		}
 	default:
 		return result, rollback(fmt.Errorf("verify containerd CRI: unexpected result %q", result.Verification))
 	}
@@ -620,10 +672,10 @@ if command -v crictl >/dev/null 2>&1; then
   if [ -n %s ]; then
     crictl --runtime-endpoint unix:///run/containerd/containerd.sock pull %s >/dev/null
   fi
-  printf 'cri-pull:sandbox,verification'
+printf '%%s' 'cri-pull:sandbox,verification'
 else
   ctr plugins ls | awk '$1 == "io.containerd.grpc.v1" && $2 == "cri" && $NF == "ok" { found=1 } END { exit !found }'
-  printf cri-ready-only
+printf '%%s' cri-ready-only
 fi`, shellSingleQuote(sandboxImage), shellSingleQuote(sandboxImage), shellSingleQuote(verificationImage), shellSingleQuote(verificationImage))
 }
 

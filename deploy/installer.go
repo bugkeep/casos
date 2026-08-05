@@ -31,15 +31,6 @@ func (d *NodeDeployer) installNodeBinaries(ctx context.Context, runner *NodeDepl
 	if err != nil {
 		return err
 	}
-	routeDetails, err := preflightContainerdEgress(ctx, runner, routing, d.config.ContainerdProxy)
-	if err != nil {
-		return fmt.Errorf("containerd egress preflight: %w", err)
-	}
-	if d.config.ContainerdProxy != "" {
-		d.logStep(nodeDeployPhaseConfiguring, fmt.Sprintf("Containerd egress preflight succeeded for %s (%d paths)", redactProxyURL(d.config.ContainerdProxy), len(routeDetails)))
-	} else {
-		d.logStep(nodeDeployPhaseConfiguring, fmt.Sprintf("Containerd egress preflight succeeded without a proxy (%d paths)", len(routeDetails)))
-	}
 	workerHosts, err := discoverContainerdWorkerHosts(ctx, runner)
 	if err != nil {
 		return err
@@ -47,6 +38,15 @@ func (d *NodeDeployer) installNodeBinaries(ctx context.Context, runner *NodeDepl
 	desiredFiles, noProxy, err := buildContainerdDesiredFiles(d.config, routing, workerHosts)
 	if err != nil {
 		return fmt.Errorf("render containerd configuration: %w", err)
+	}
+	routeDetails, err := preflightContainerdEgress(ctx, runner, routing, d.config.ContainerdProxy, noProxy)
+	if err != nil {
+		return fmt.Errorf("containerd egress preflight: %w", err)
+	}
+	if d.config.ContainerdProxy != "" {
+		d.logStep(nodeDeployPhaseConfiguring, fmt.Sprintf("Containerd egress preflight succeeded for %s (%d paths)", redactProxyURL(d.config.ContainerdProxy), len(routeDetails)))
+	} else {
+		d.logStep(nodeDeployPhaseConfiguring, fmt.Sprintf("Containerd egress preflight succeeded without a proxy (%d paths)", len(routeDetails)))
 	}
 
 	if _, err := runner.RunRootContext(ctx, `set -e
@@ -86,7 +86,7 @@ test -f %[1]s`, nodeDeployResolverPath)); err != nil {
 	} else {
 		d.logStep(nodeDeployPhaseConfiguring, "Containerd egress proxy disabled; CasOS-managed proxy files will be removed")
 	}
-	result, err := reconcileContainerdFiles(ctx, runner, desiredFiles, d.config.SandboxImage, d.config.ContainerdVerificationImage)
+	result, err := reconcileContainerdFiles(ctx, runner, desiredFiles, d.config.SandboxImage, d.config.ContainerdVerificationImage, registryRoutingRequiresRealPull(routing))
 	for _, warning := range result.Warnings {
 		d.log("warning", warning, nodeDeployPhaseConfiguring)
 	}
@@ -105,9 +105,9 @@ test -f %[1]s`, nodeDeployResolverPath)); err != nil {
 		d.logStep(nodeDeployPhaseConfiguring, "Containerd configuration already matches the desired state")
 	}
 	switch result.Verification {
-	case "cri-pull:sandbox,verification":
+	case containerdVerifiedPulls:
 		d.logStep(nodeDeployPhaseConfiguring, fmt.Sprintf("Verified CRI pulls for the sandbox image and configured verification image %s", d.config.ContainerdVerificationImage))
-	case "cri-ready-only":
+	case containerdVerifiedReady:
 		d.log("warning", "crictl is unavailable; verified containerd and its CRI plugin, but skipped real image pulls", nodeDeployPhaseConfiguring)
 	default:
 		return fmt.Errorf("unexpected containerd verification result %q", result.Verification)
