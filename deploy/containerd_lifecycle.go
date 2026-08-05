@@ -439,7 +439,9 @@ func unmanagedContainerdProxyFileActive(snapshot containerdFileSnapshot, envFile
 		}
 		return false
 	}
-	return strings.Contains(snapshot.Content, containerdProxyEnvPath)
+	// An unmanaged drop-in can define proxy variables or load another env file.
+	// Treat it as active rather than claiming the worker proxy is disabled.
+	return true
 }
 
 func matchesLegacyContainerdContent(content string, legacy []string) bool {

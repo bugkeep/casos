@@ -43,3 +43,23 @@ func normalizeContainerdProxy(value string) (string, error) {
 	parsed.Path = ""
 	return parsed.String(), nil
 }
+
+func parseContainerdNoProxy(value string) ([]string, error) {
+	seen := make(map[string]struct{})
+	entries := make([]string, 0)
+	for _, item := range strings.Split(value, ",") {
+		item = strings.ToLower(strings.TrimSpace(item))
+		if item == "" {
+			continue
+		}
+		if strings.IndexFunc(item, unicode.IsControl) >= 0 || strings.IndexFunc(item, unicode.IsSpace) >= 0 {
+			return nil, fmt.Errorf("NO_PROXY entry contains whitespace or control characters")
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		entries = append(entries, item)
+	}
+	return entries, nil
+}
