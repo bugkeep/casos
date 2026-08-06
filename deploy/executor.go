@@ -163,6 +163,14 @@ func (r *NodeDeploySSHRunner) Run(command string) (string, error) {
 }
 
 func (r *NodeDeploySSHRunner) RunContext(ctx context.Context, command string) (string, error) {
+	return r.runContext(ctx, command, true)
+}
+
+func (r *NodeDeploySSHRunner) runContext(ctx context.Context, command string, includeOutputOnError bool) (string, error) {
+	return r.runContextWithInput(ctx, command, nil, includeOutputOnError)
+}
+
+func (r *NodeDeploySSHRunner) runContextWithInput(ctx context.Context, command string, input io.Reader, includeOutputOnError bool) (string, error) {
 	// command is passed directly to the remote shell. Callers must not
 	// concatenate unescaped user-controlled values into this string.
 	if err := contextErr(ctx); err != nil {
@@ -175,17 +183,24 @@ func (r *NodeDeploySSHRunner) RunContext(ctx context.Context, command string) (s
 	defer session.Close()
 
 	var out lockedBuffer
+	if input != nil {
+		session.Stdin = input
+	}
 	session.Stdout = &out
 	session.Stderr = &out
 	err = r.runSessionWithContext(ctx, session, command)
-	text := strings.TrimSpace(out.String())
-	if err != nil {
-		if text == "" {
-			return "", err
-		}
-		return text, fmt.Errorf("%w: %s", err, text)
+	return nodeDeployCommandResult(out.String(), err, includeOutputOnError)
+}
+
+func nodeDeployCommandResult(output string, err error, includeOutputOnError bool) (string, error) {
+	text := strings.TrimSpace(output)
+	if err == nil {
+		return text, nil
 	}
-	return text, nil
+	if text == "" || !includeOutputOnError {
+		return "", err
+	}
+	return text, fmt.Errorf("%w: %s", err, text)
 }
 
 func (r *NodeDeploySSHRunner) RunQuiet(command string) error {
@@ -220,11 +235,36 @@ func (r *NodeDeploySSHRunner) RunRootContext(ctx context.Context, command string
 		shellSingleQuote(command), shellSingleQuote(command)))
 }
 
+// RunRootSensitiveContext discards captured remote output when the command
+// fails, preventing secrets in that output from being persisted in errors.
+func (r *NodeDeploySSHRunner) RunRootSensitiveContext(ctx context.Context, command string) (string, error) {
+	wrapped := fmt.Sprintf("if [ \"$(id -u)\" = 0 ]; then sh -c %s; else sudo sh -c %s; fi",
+		shellSingleQuote(command), shellSingleQuote(command))
+	return r.runContext(ctx, wrapped, false)
+}
+
+// RunRootInputSensitiveContext passes sensitive input over stdin and discards
+// captured remote output on failure. The input never appears in the remote
+// shell command line.
+func (r *NodeDeploySSHRunner) RunRootInputSensitiveContext(ctx context.Context, command, input string) (string, error) {
+	wrapped := fmt.Sprintf("if [ \"$(id -u)\" = 0 ]; then sh -c %s; else sudo sh -c %s; fi",
+		shellSingleQuote(command), shellSingleQuote(command))
+	return r.runContextWithInput(ctx, wrapped, strings.NewReader(input), false)
+}
+
 func (r *NodeDeploySSHRunner) WriteFile(path, content string, mode string) error {
 	return r.WriteFileContext(context.Background(), path, content, mode)
 }
 
 func (r *NodeDeploySSHRunner) WriteFileContext(ctx context.Context, path, content string, mode string) error {
+	return r.writeFileContext(ctx, path, content, mode, false)
+}
+
+func (r *NodeDeploySSHRunner) WriteFileAtomicContext(ctx context.Context, path, content string, mode string) error {
+	return r.writeFileContext(ctx, path, content, mode, true)
+}
+
+func (r *NodeDeploySSHRunner) writeFileContext(ctx context.Context, path, content string, mode string, atomic bool) error {
 	if !isAllowedNodeDeployPath(path) {
 		return fmt.Errorf("unsupported node deployment path: %s", path)
 	}
@@ -253,6 +293,12 @@ func (r *NodeDeploySSHRunner) WriteFileContext(ctx context.Context, path, conten
 
 	cmd := fmt.Sprintf("if [ \"$(id -u)\" = 0 ]; then install -D -m %s /dev/stdin %s; else sudo install -D -m %s /dev/stdin %s; fi",
 		shellSingleQuote(mode), shellSingleQuote(path), shellSingleQuote(mode), shellSingleQuote(path))
+	if atomic {
+		installCommand := fmt.Sprintf("set -e; target=%s; install -d \"$(dirname \"$target\")\"; tmp=$(mktemp \"$(dirname \"$target\")/.casos-tmp.XXXXXX\"); trap 'rm -f -- \"$tmp\"' EXIT; install -m %s /dev/stdin \"$tmp\"; mv -f -- \"$tmp\" \"$target\"; trap - EXIT",
+			shellSingleQuote(path), shellSingleQuote(mode))
+		cmd = fmt.Sprintf("if [ \"$(id -u)\" = 0 ]; then sh -c %s; else sudo sh -c %s; fi",
+			shellSingleQuote(installCommand), shellSingleQuote(installCommand))
+	}
 	waitCh, err := r.startSessionWithContext(ctx, session, cmd)
 	if err != nil {
 		_ = pipe.Close()
@@ -271,6 +317,43 @@ func (r *NodeDeploySSHRunner) WriteFileContext(ctx context.Context, path, conten
 		return fmt.Errorf("%w: %s", waitErr, summarizeSSHOutput(out.String()))
 	}
 	return nil
+}
+
+func (r *NodeDeploySSHRunner) InspectFileContext(ctx context.Context, path string) (containerdFileSnapshot, error) {
+	if !isAllowedNodeDeployPath(path) {
+		return containerdFileSnapshot{}, fmt.Errorf("unsupported node deployment path: %s", path)
+	}
+	command := fmt.Sprintf(`set -e
+path=%s
+if [ -L "$path" ] || { [ -e "$path" ] && [ ! -f "$path" ]; }; then
+  printf unmanaged
+elif [ ! -e "$path" ]; then
+  printf absent
+else
+  mode=$(stat -c '%%a' "$path")
+  encoded=$(base64 -w 0 "$path")
+  printf 'regular:%%s:%%s' "$mode" "$encoded"
+fi`, shellSingleQuote(path))
+	output, err := r.RunRootSensitiveContext(ctx, command)
+	if err != nil {
+		return containerdFileSnapshot{}, err
+	}
+	return parseContainerdFileSnapshot(output)
+}
+
+func (r *NodeDeploySSHRunner) RemoveFileContext(ctx context.Context, path string) error {
+	if !isAllowedNodeDeployPath(path) {
+		return fmt.Errorf("unsupported node deployment path: %s", path)
+	}
+	command := fmt.Sprintf(`set -e
+path=%s
+if [ -L "$path" ] || { [ -e "$path" ] && [ ! -f "$path" ]; }; then
+  echo "refusing to remove non-regular file" >&2
+  exit 1
+fi
+rm -f -- "$path"`, shellSingleQuote(path))
+	_, err := r.RunRootContext(ctx, command)
+	return err
 }
 
 func (r *NodeDeploySSHRunner) AppendAuthorizedKey(publicKey string) error {
@@ -341,6 +424,8 @@ func isAllowedNodeDeployPath(path string) bool {
 		"/etc/containerd/config.toml",
 		"/etc/containerd/certs.d/docker.io/hosts.toml",
 		"/etc/containerd/certs.d/registry.k8s.io/hosts.toml",
+		containerdProxyEnvPath,
+		containerdEgressDropInPath,
 		"/etc/kubernetes/worker.kubeconfig",
 		"/etc/kubernetes/ca.crt",
 		"/etc/systemd/system/kubelet.service",

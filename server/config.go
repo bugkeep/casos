@@ -9,12 +9,15 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+const DefaultServiceClusterIPRange = "10.43.0.0/16"
+
 // Config holds control-plane settings populated from app.conf.
 type Config struct {
 	DataDir                   string
 	ApiserverBind             string // actual bind / SAN IP (may be loopback in dev)
 	AdvertiseAddress          string // non-loopback IP registered as kubernetes service endpoint
 	ApiserverPort             int
+	ServiceClusterIPRange     string
 	WebhookPort               int                // HTTPS port for the Casbin admission webhook server
 	DSN                       string             // MySQL DSN forwarded to kine
 	SandboxImage              string             // containerd sandbox (pause) image, empty = upstream default
@@ -27,6 +30,7 @@ type Config struct {
 	ServiceLBImage            string             // hostPort proxy image used by the built-in ServiceLB
 	StorageProvisionerEnabled bool               // install the built-in local-path provisioner for local clusters
 	RegistryMirrorMode        RegistryMirrorMode // imageRegistryMirror mode, evaluated on each target worker
+	WorkerSocks5Proxy         string             // configured control-plane proxy; worker fallback seed after direct registry routes fail
 	IngressControllerEnabled  bool               // install the built-in Traefik controller
 	ServiceLBEnabled          bool               // run the built-in bare-metal LoadBalancer controller
 }
@@ -65,6 +69,10 @@ func ConfigFromAppConf() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	workerSocks5Proxy, err := normalizeContainerdProxy(conf.GetConfigString("socks5Proxy"))
+	if err != nil {
+		return Config{}, fmt.Errorf("invalid socks5Proxy for worker containerd: %w", err)
+	}
 	ingressControllerEnabled := conf.GetConfigBoolDefault("ingressControllerEnabled", false)
 	serviceLBEnabled := conf.GetConfigBoolDefault("serviceLBEnabled", false)
 	ingressControllerImage := conf.GetConfigStringDefault("ingressControllerImage", defaultIngressControllerImage)
@@ -74,6 +82,7 @@ func ConfigFromAppConf() (Config, error) {
 		ApiserverBind:             bind,
 		AdvertiseAddress:          advertise,
 		ApiserverPort:             port,
+		ServiceClusterIPRange:     DefaultServiceClusterIPRange,
 		WebhookPort:               webhookPort,
 		DSN:                       dsn,
 		SandboxImage:              sandboxImage,
@@ -86,6 +95,7 @@ func ConfigFromAppConf() (Config, error) {
 		ServiceLBImage:            serviceLBImage,
 		StorageProvisionerEnabled: storageProvisionerEnabled,
 		RegistryMirrorMode:        registryMirrorMode,
+		WorkerSocks5Proxy:         workerSocks5Proxy,
 		IngressControllerEnabled:  ingressControllerEnabled,
 		ServiceLBEnabled:          serviceLBEnabled,
 	}

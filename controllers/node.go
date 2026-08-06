@@ -179,6 +179,11 @@ func (c *ApiController) GetWorkerKubeconfig() {
 		c.ResponseError("server config not ready")
 		return
 	}
+	containerdConfig, err := deploy.GenerateContainerdConfigForVersion(cfg.SandboxImage, c.GetString("containerdVersion"))
+	if err != nil {
+		c.ResponseError("generate containerd config: " + err.Error())
+		return
+	}
 	wk, err := server.GenerateWorkerKubeconfig(*cfg, nodeName)
 	if err != nil {
 		c.ResponseError("generate worker kubeconfig: " + err.Error())
@@ -187,7 +192,7 @@ func (c *ApiController) GetWorkerKubeconfig() {
 	resp := map[string]string{
 		"nodeName":             wk.NodeName,
 		"kubeconfig":           wk.Kubeconfig,
-		"containerdConfig":     deploy.GenerateContainerdConfig(cfg.SandboxImage),
+		"containerdConfig":     containerdConfig,
 		"imageRegistryMirror":  string(cfg.RegistryMirrorMode),
 		"dockerHubHostsToml":   deploy.GenerateDockerHubHostsToml(),
 		"k8sRegistryHostsToml": deploy.GenerateK8sRegistryHostsToml(),
