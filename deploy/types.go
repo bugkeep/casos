@@ -24,10 +24,11 @@ const (
 type NodeDeployLogger func(level, message, phase string)
 
 type MachineNodeDeployRequest struct {
-	Owner        string `json:"owner"`
-	MachineName  string `json:"machineName"`
-	NodeName     string `json:"nodeName"`
-	ApiserverURL string `json:"apiserverUrl"`
+	Owner                 string `json:"owner"`
+	MachineName           string `json:"machineName"`
+	NodeName              string `json:"nodeName"`
+	ApiserverURL          string `json:"apiserverUrl"`
+	AdoptContainerdConfig bool   `json:"adoptContainerdConfig"`
 }
 
 func (r *MachineNodeDeployRequest) normalize() {
@@ -64,9 +65,10 @@ func (r *MachineNodeDeployRequest) validate() error {
 }
 
 type NodeDeployOptions struct {
-	Machine      NodeDeployMachine
-	NodeName     string
-	ApiserverURL string
+	Machine               NodeDeployMachine
+	NodeName              string
+	ApiserverURL          string
+	AdoptContainerdConfig bool
 }
 
 func (opts *NodeDeployOptions) validate() error {
@@ -116,8 +118,10 @@ type Config struct {
 	AdvertiseAddress   string
 	ApiserverBind      string
 	ApiserverPort      int
+	ServiceCIDR        string
 	SandboxImage       string
 	RegistryMirrorMode server.RegistryMirrorMode
+	WorkerSocks5Proxy  string
 	GenerateKubeconfig KubeconfigGenerator
 }
 
@@ -126,8 +130,10 @@ func ConfigFromServerConfig(cfg server.Config) Config {
 		AdvertiseAddress:   cfg.AdvertiseAddress,
 		ApiserverBind:      cfg.ApiserverBind,
 		ApiserverPort:      cfg.ApiserverPort,
+		ServiceCIDR:        cfg.ServiceClusterIPRange,
 		SandboxImage:       cfg.SandboxImage,
 		RegistryMirrorMode: cfg.RegistryMirrorMode,
+		WorkerSocks5Proxy:  cfg.WorkerSocks5Proxy,
 		GenerateKubeconfig: func(nodeName, apiserverURL string) (*NodeKubeconfig, error) {
 			wk, err := server.GenerateWorkerKubeconfigForServer(cfg, nodeName, apiserverURL)
 			if err != nil {

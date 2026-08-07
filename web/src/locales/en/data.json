@@ -167,6 +167,7 @@
   },
   "machine": {
     "Add Machine": "Add Machine",
+    "Adopt existing containerd configuration": "Adopt existing containerd configuration",
     "Apiserver URL": "Apiserver URL",
     "Apiserver URL placeholder": "Default: CasOS advertise address",
     "Auth type": "Auth type",
@@ -175,6 +176,7 @@
     "Deploy worker node\", \"Deploy worker node": "Deploy worker node\", \"Deploy worker node",
     "Deployment failed": "Deployment failed",
     "Edit Machine": "Edit Machine",
+    "Existing containerd configuration warning": "CasOS will back up and replace a containerd configuration that it does not manage. Deployment stops if the backup fails.",
     "Failed to load node logs": "Failed to load node logs",
     "Failed to load node tasks": "Failed to load node tasks",
     "IP address": "IP address",

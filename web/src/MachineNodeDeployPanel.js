@@ -1,5 +1,5 @@
 import React from "react";
-import {Alert, Button, Descriptions, Drawer, Form, Input, Space, Table, Tag, Typography} from "antd";
+import {Alert, Button, Checkbox, Descriptions, Drawer, Form, Input, Space, Table, Tag, Typography} from "antd";
 import {CloudSyncOutlined, FileSearchOutlined, ReloadOutlined, ToolOutlined} from "@ant-design/icons";
 import * as MachineNodeDeployBackend from "./backend/MachineNodeDeployBackend";
 import * as Setting from "./Setting";
@@ -65,6 +65,7 @@ class MachineNodeDeployPanel extends React.Component {
       this.formRef.current?.setFieldsValue({
         workerNodeName: machine?.name || "",
         apiserverUrl: "",
+        adoptContainerdConfig: false,
       });
     });
   }
@@ -92,6 +93,7 @@ class MachineNodeDeployPanel extends React.Component {
       machineName: machine?.name,
       nodeName: values.workerNodeName || machine?.name,
       apiserverUrl: values.apiserverUrl || "",
+      adoptContainerdConfig: Boolean(values.adoptContainerdConfig),
     };
   }
 
@@ -318,6 +320,19 @@ class MachineNodeDeployPanel extends React.Component {
           </Form.Item>
           <Form.Item label={i18next.t("machine:Apiserver URL")} name="apiserverUrl">
             <Input placeholder={i18next.t("machine:Apiserver URL placeholder")} />
+          </Form.Item>
+          <Form.Item name="adoptContainerdConfig" valuePropName="checked">
+            <Checkbox>{i18next.t("machine:Adopt existing containerd configuration")}</Checkbox>
+          </Form.Item>
+          <Form.Item noStyle shouldUpdate={(previous, current) => previous.adoptContainerdConfig !== current.adoptContainerdConfig}>
+            {({getFieldValue}) => getFieldValue("adoptContainerdConfig") ? (
+              <Alert
+                type="warning"
+                showIcon
+                style={{marginBottom: 24}}
+                message={i18next.t("machine:Existing containerd configuration warning")}
+              />
+            ) : null}
           </Form.Item>
         </Form>
 

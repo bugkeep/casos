@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/casosorg/casos/server"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -28,6 +29,9 @@ type NodeDeployer struct {
 const flannelDaemonSetName = "kube-flannel-ds"
 
 func NewNodeDeployer(config Config, restConfig *rest.Config, log NodeDeployLogger) *NodeDeployer {
+	if strings.TrimSpace(config.ServiceCIDR) == "" {
+		config.ServiceCIDR = server.DefaultServiceClusterIPRange
+	}
 	if log == nil {
 		log = func(string, string, string) {}
 	}
@@ -90,7 +94,7 @@ func (d *NodeDeployer) Deploy(ctx context.Context, opts NodeDeployOptions) (*Nod
 		return nil, fmt.Errorf("query apiserver version: %w", err)
 	}
 
-	if err = d.installNodeBinaries(ctx, runner, preflightResult.Arch, k8sVersion); err != nil {
+	if err = d.installNodeBinaries(ctx, runner, preflightResult.Arch, k8sVersion, preflightResult.WSL, opts.ApiserverURL, opts.AdoptContainerdConfig); err != nil {
 		return nil, err
 	}
 	if err = d.writeNodeFiles(ctx, runner, opts.NodeName, wk.Kubeconfig); err != nil {

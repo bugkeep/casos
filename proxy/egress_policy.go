@@ -28,7 +28,7 @@ func NewEgressPolicy(proxyAddress, noProxy string) (*EgressPolicy, error) {
 		}, nil
 	}
 
-	normalized, err := normalizeSocks5ProxyAddress(proxyAddress)
+	normalized, err := NormalizeSocks5ProxyAddress(proxyAddress)
 	if err != nil {
 		return nil, err
 	}
@@ -59,7 +59,9 @@ func (p *EgressPolicy) HTTPClient() *http.Client {
 	return &http.Client{Transport: transport}
 }
 
-func normalizeSocks5ProxyAddress(raw string) (string, error) {
+// NormalizeSocks5ProxyAddress validates a SOCKS5 endpoint and normalizes it to
+// socks5h so DNS resolution follows the same policy on every consumer.
+func NormalizeSocks5ProxyAddress(raw string) (string, error) {
 	candidate := strings.TrimSpace(raw)
 	if !strings.Contains(candidate, "://") {
 		candidate = "socks5h://" + candidate

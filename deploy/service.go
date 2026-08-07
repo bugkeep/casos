@@ -141,7 +141,7 @@ func (s *Service) DeployMachineNode(req MachineNodeDeployRequest) (*object.Machi
 				cleanupMachineNodeDeployPanic(task.Id, machine.Owner, machine.Name, message)
 			}
 		}()
-		s.runMachineNodeDeployTask(ctx, task.Id, config, restConfig)
+		s.runMachineNodeDeployTask(ctx, task.Id, config, restConfig, req.AdoptContainerdConfig)
 	}(deployCtx)
 
 	return task, nil
@@ -227,7 +227,7 @@ func (s *Service) releaseDeploymentSlot() {
 	<-s.semaphore
 }
 
-func (s *Service) runMachineNodeDeployTask(parentCtx context.Context, taskId int64, config Config, restConfig *rest.Config) {
+func (s *Service) runMachineNodeDeployTask(parentCtx context.Context, taskId int64, config Config, restConfig *rest.Config, adoptContainerdConfig bool) {
 	if parentCtx == nil {
 		parentCtx = context.Background()
 	}
@@ -284,9 +284,10 @@ func (s *Service) runMachineNodeDeployTask(parentCtx context.Context, taskId int
 	defer cancel()
 
 	result, err := deployer.Deploy(ctx, NodeDeployOptions{
-		Machine:      deployMachine,
-		NodeName:     task.NodeName,
-		ApiserverURL: task.ApiserverURL,
+		Machine:               deployMachine,
+		NodeName:              task.NodeName,
+		ApiserverURL:          task.ApiserverURL,
+		AdoptContainerdConfig: adoptContainerdConfig,
 	})
 	if err != nil {
 		logTask(object.MachineNodeDeployLogLevelError, "Node deployment failed: "+err.Error())

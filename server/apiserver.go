@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/casosorg/casos/util"
@@ -23,8 +24,7 @@ import (
 )
 
 const (
-	serviceClusterIPRange = "10.43.0.0/16"
-	kubernetesServiceIP   = "10.43.0.1"
+	kubernetesServiceIP = "10.43.0.1"
 )
 
 // Start launches kine and the apiserver in-process.
@@ -140,6 +140,10 @@ func authzMode(kubeconfig string) string {
 }
 
 func buildApiserverArgs(cfg Config, certDir, etcdEndpoint, authzKubeconfig string) []string {
+	serviceClusterIPRange := strings.TrimSpace(cfg.ServiceClusterIPRange)
+	if serviceClusterIPRange == "" {
+		serviceClusterIPRange = DefaultServiceClusterIPRange
+	}
 	saKey := filepath.Join(certDir, "sa.key")
 	saPub := filepath.Join(certDir, "sa.pub")
 	args := []string{

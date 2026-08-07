@@ -167,6 +167,7 @@
   },
   "machine": {
     "Add Machine": "Add Machine",
+    "Adopt existing containerd configuration": "接管现有 containerd 配置",
     "Apiserver URL": "Apiserver 地址",
     "Apiserver URL placeholder": "默认：CasOS 通告地址",
     "Auth type": "Auth type",
@@ -175,6 +176,7 @@
     "Deploy worker node\", \"Deploy worker node": "Deploy worker node\", \"Deploy worker node",
     "Deployment failed": "部署失败",
     "Edit Machine": "Edit Machine",
+    "Existing containerd configuration warning": "CasOS 将先备份再替换不受其管理的 containerd 配置；备份失败时部署会停止。",
     "Failed to load node logs": "加载节点日志失败",
     "Failed to load node tasks": "加载节点任务失败",
     "IP address": "IP address",

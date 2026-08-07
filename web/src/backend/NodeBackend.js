@@ -32,8 +32,12 @@ export function deleteNode(name) {
   }).then(res => res.json());
 }
 
-export function getWorkerKubeconfig(nodeName) {
-  return fetch(`${Setting.ServerUrl}/api/get-worker-kubeconfig?nodeName=${encodeURIComponent(nodeName)}`, {
+export function getWorkerKubeconfig(nodeName, containerdVersion = "") {
+  const params = new URLSearchParams({nodeName});
+  if (containerdVersion) {
+    params.set("containerdVersion", containerdVersion);
+  }
+  return fetch(`${Setting.ServerUrl}/api/get-worker-kubeconfig?${params.toString()}`, {
     method: "GET",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},
