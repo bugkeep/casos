@@ -332,10 +332,10 @@ func FetchRepoIndex(repoURL string) ([]HelmChartSummary, error) {
 	}
 	charts := make([]HelmChartSummary, 0, len(idx.Entries))
 	for name, versions := range idx.Entries {
-		if len(versions) == 0 {
+		v := preferredHelmChartVersion(versions)
+		if v == nil {
 			continue
 		}
-		v := versions[0]
 		if !isInstallableHelmChartMetadata(v.Metadata) {
 			continue
 		}
@@ -508,15 +508,23 @@ func latestOCISemverTag(tags []string) string {
 	}
 
 	versionedTags := make([]versionedTag, 0, len(tags))
+	stableTags := make([]versionedTag, 0, len(tags))
 	for _, tag := range tags {
 		version, err := semver.NewVersion(tag)
 		if err != nil {
 			continue
 		}
-		versionedTags = append(versionedTags, versionedTag{tag: tag, version: version})
+		candidate := versionedTag{tag: tag, version: version}
+		versionedTags = append(versionedTags, candidate)
+		if version.Prerelease() == "" {
+			stableTags = append(stableTags, candidate)
+		}
 	}
 	if len(versionedTags) == 0 {
 		return ""
+	}
+	if len(stableTags) > 0 {
+		versionedTags = stableTags
 	}
 
 	sort.SliceStable(versionedTags, func(i, j int) bool {
@@ -777,10 +785,14 @@ func loadChartWithContext(parent context.Context, chartName, repoURL, version st
 	}
 
 	var entry *repo.ChartVersion
-	for _, v := range versions {
-		if version == "" || v.Version == version {
-			entry = v
-			break
+	if version == "" {
+		entry = preferredHelmChartVersion(versions)
+	} else {
+		for _, v := range versions {
+			if v != nil && v.Metadata != nil && v.Version == version {
+				entry = v
+				break
+			}
 		}
 	}
 	if entry == nil {
