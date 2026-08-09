@@ -166,7 +166,7 @@ async function createMachineFromUi(page, machineName, createdMachines, options =
   await page.waitForLoadState("networkidle");
   await expect(page).toHaveURL(/\/machines$/);
 
-  await machineTableTitle(page).getByRole("button", {name: "Add"}).click();
+  await machineTableTitle(page).getByRole("button").filter({hasText: /^Add$/}).click();
   const addDialog = page.getByRole("dialog", {name: "Add Machine"});
   await expect(addDialog).toBeVisible();
   await addDialog.getByPlaceholder("my-machine").fill(machineName);
