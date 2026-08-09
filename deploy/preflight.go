@@ -14,6 +14,13 @@ import (
 
 const nodeDeployWSLProbeCommand = "[ -f /proc/sys/fs/binfmt_misc/WSLInterop ] || grep -qi microsoft /proc/version"
 
+const (
+	nodeDeployResolveProbeConnectTimeout   = 3
+	nodeDeployResolveProbeMaxTime          = 5
+	nodeDeployPreflightProbeConnectTimeout = 5
+	nodeDeployPreflightProbeMaxTime        = 10
+)
+
 type nodeDeployCommandRunner interface {
 	RunContext(context.Context, string) (string, error)
 }
@@ -93,10 +100,7 @@ func RunNodeDeployPreflight(ctx context.Context, runner *NodeDeploySSHRunner, ap
 		}
 		trimmedURL := strings.TrimRight(apiserverURL, "/")
 		result.ApiserverURL = trimmedURL
-		// The bootstrap kubeconfig embeds the apiserver CA, but this early
-		// reachability probe runs before those files exist on the target node.
-		encodedURL := base64.StdEncoding.EncodeToString([]byte(trimmedURL))
-		cmd := fmt.Sprintf("apiserver_url=$(printf %%s %s | base64 -d) && curl -ksS --connect-timeout 5 --output /dev/null --write-out %%{http_code} \"$apiserver_url/readyz\"", shellSingleQuote(encodedURL))
+		cmd := nodeDeployApiserverProbeCommand(trimmedURL, nodeDeployPreflightProbeConnectTimeout, nodeDeployPreflightProbeMaxTime)
 		status, err := runner.RunContext(ctx, cmd)
 		if err != nil {
 			return nil, fmt.Errorf("apiserver is not reachable from target: %w", err)
@@ -110,6 +114,16 @@ func RunNodeDeployPreflight(ctx context.Context, runner *NodeDeploySSHRunner, ap
 	return result, nil
 }
 
+// The bootstrap kubeconfig embeds the apiserver CA, but this early
+// reachability probe runs before those files exist on the target node.
+func nodeDeployApiserverProbeCommand(apiserverURL string, connectTimeout, maxTime int) string {
+	encodedURL := base64.StdEncoding.EncodeToString([]byte(apiserverURL))
+	return fmt.Sprintf(
+		"apiserver_url=$(printf %%s %s | base64 -d) && curl --noproxy '*' -ksS --connect-timeout %d --max-time %d --output /dev/null --write-out %%{http_code} \"$apiserver_url/readyz\"",
+		shellSingleQuote(encodedURL), connectTimeout, maxTime,
+	)
+}
+
 func isNodeDeployApiserverProbeStatus(status string) bool {
 	code, err := strconv.Atoi(strings.TrimSpace(status))
 	if err != nil {
@@ -118,7 +132,18 @@ func isNodeDeployApiserverProbeStatus(status string) bool {
 	return (code >= 200 && code < 300) || code == http.StatusUnauthorized || code == http.StatusForbidden
 }
 
+func isNodeDeployApiserverRoutableStatus(status string) bool {
+	code, err := strconv.Atoi(strings.TrimSpace(status))
+	if err != nil {
+		return false
+	}
+	return code >= 100 && code < 600
+}
+
 func ResolveNodeDeployApiserverURL(ctx context.Context, runner *NodeDeploySSHRunner, fallbackURL string) string {
+	if runner == nil {
+		return strings.TrimRight(strings.TrimSpace(fallbackURL), "/")
+	}
 	return resolveNodeDeployApiserverURL(ctx, runner, fallbackURL)
 }
 
@@ -132,7 +157,7 @@ func resolveNodeDeployApiserverURL(ctx context.Context, runner nodeDeployCommand
 	if !isNodeDeployWSL(wslCtx, runner) {
 		return fallbackURL
 	}
-	probeCtx, probeCancel := context.WithTimeout(ctx, 5*time.Second)
+	probeCtx, probeCancel := context.WithTimeout(ctx, (nodeDeployResolveProbeMaxTime+2)*time.Second)
 	defer probeCancel()
 	if probeNodeDeployApiserver(probeCtx, runner, fallbackURL) {
 		return fallbackURL
@@ -169,10 +194,9 @@ func probeNodeDeployApiserver(ctx context.Context, runner nodeDeployCommandRunne
 	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
 		return false
 	}
-	encodedURL := base64.StdEncoding.EncodeToString([]byte(parsed.String()))
-	command := fmt.Sprintf("apiserver_url=$(printf %%s %s | base64 -d) && curl --noproxy '*' -ksS --connect-timeout 3 --max-time 5 --output /dev/null --write-out %%{http_code} \"$apiserver_url/readyz\"", shellSingleQuote(encodedURL))
+	command := nodeDeployApiserverProbeCommand(parsed.String(), nodeDeployResolveProbeConnectTimeout, nodeDeployResolveProbeMaxTime)
 	status, err := runner.RunContext(ctx, command)
-	return err == nil && isNodeDeployApiserverProbeStatus(status)
+	return err == nil && isNodeDeployApiserverRoutableStatus(status)
 }
 
 func isNodeDeployWSL(ctx context.Context, runner nodeDeployCommandRunner) bool {
