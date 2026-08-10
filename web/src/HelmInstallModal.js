@@ -18,8 +18,9 @@ const {Text} = Typography;
 const helmOperationTaskNotFoundCode = "helm_task_not_found";
 const helmInstallStreamIdleTimeout = 30 * 1000;
 
-export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
+export default function HelmInstallModal({open, chart, action = "install", onClose, onInstalled}) {
   const {t} = useTranslation();
+  const isUpgrade = action === "upgrade";
   const [form] = Form.useForm();
   const [namespaces, setNamespaces] = useState([]);
   const [valuesYAML, setValuesYAML] = useState("");
@@ -107,7 +108,7 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
           setError(null);
           const task = res.data;
           if (!task || !task.id || !task.status) {
-            setError(t("helm:Unable to refresh installation status: invalid response"));
+            setError(t("helm:Unable to refresh Helm operation status: invalid response"));
             setInstalling(false);
             setPollingPaused(true);
             submittingRef.current = true;
@@ -116,7 +117,7 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
           const matchesExpectedTask = helmTaskMatchesIdentity(task, taskId, expectedIdentity);
           if (!matchesExpectedTask) {
             forgetTask(storageKey);
-            setError(t("helm:The saved installation task no longer matches this chart and was discarded"));
+            setError(t("helm:The saved Helm operation no longer matches this chart and was discarded"));
             setInstalling(false);
             setPollingPaused(false);
             submittingRef.current = false;
@@ -148,7 +149,7 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
         .catch(e => {
           if (!mountedRef.current || generation !== pollGenerationRef.current) {return;}
           consecutiveFailures += 1;
-          setError(t("helm:Unable to refresh installation status", {error: e.message}));
+          setError(t("helm:Unable to refresh Helm operation status", {error: e.message}));
           if (consecutiveFailures >= 6) {
             setInstalling(false);
             setPollingPaused(true);
@@ -186,14 +187,16 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
     streamAbortRef.current?.abort();
     streamAbortRef.current = null;
 
-    const savedTask = findStoredHelmTask(chart.chartName);
+    const storedTask = findStoredHelmTask(chart.chartName);
+    const savedTask = !isUpgrade || (
+      storedTask?.releaseName === chart.releaseName && storedTask?.namespace === chart.namespace
+    ) ? storedTask : null;
     const initialFields = {
-      releaseName: savedTask?.releaseName || chart.chartName,
+      releaseName: isUpgrade ? chart.releaseName : (savedTask?.releaseName || chart.chartName),
+      namespace: isUpgrade ? chart.namespace : savedTask?.namespace,
+      repoURL: chart.repoURL,
       version: chart.version ?? "",
     };
-    if (savedTask?.namespace) {
-      initialFields.namespace = savedTask.namespace;
-    }
     form.setFieldsValue(initialFields);
     if (savedTask) {
       taskIdRef.current = savedTask.taskId;
@@ -236,7 +239,7 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
           if (isCurrentInitialization()) {setValuesLoading(false);}
         });
     }
-  }, [open, chart, form]);
+  }, [open, chart, form, isUpgrade]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -308,28 +311,35 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
         streamIdleTimerRef.current = setTimeout(fallBackToTaskPolling, helmInstallStreamIdleTimeout);
       };
 
-      HelmBackend.installHelmChartStream(
-        {
-          releaseName: values.releaseName,
-          namespace: values.namespace,
-          chartName: chart.chartName,
-          repoURL: chart.repoURL,
-          version: values.version || chart.version,
-          valuesYAML,
-          valuesBaselineYAML,
-        },
+      const releaseName = isUpgrade ? chart.releaseName : values.releaseName;
+      const namespace = isUpgrade ? chart.namespace : values.namespace;
+      const payload = {
+        releaseName,
+        namespace,
+        chartName: chart.chartName,
+        repoURL: values.repoURL || chart.repoURL,
+        version: values.version || chart.version,
+        valuesYAML,
+        valuesBaselineYAML,
+      };
+      const helmActionStream = isUpgrade
+        ? HelmBackend.upgradeHelmChartStream
+        : HelmBackend.installHelmChartStream;
+
+      helmActionStream(
+        payload,
         line => {
           if (!mountedRef.current || streamAbortRef.current !== streamController) {return;}
           if (line.startsWith("TASK_ID:")) {
             const taskId = line.slice("TASK_ID:".length).trim();
-            const storageKey = helmTaskStorageKey(chart.chartName, values.namespace, values.releaseName);
+            const storageKey = helmTaskStorageKey(chart.chartName, namespace, releaseName);
             taskIdRef.current = taskId;
             setActiveTaskId(taskId);
             taskStorageKeyRef.current = storageKey;
             taskIdentityRef.current = {
               chartName: chart.chartName,
-              namespace: values.namespace,
-              releaseName: values.releaseName,
+              namespace,
+              releaseName,
             };
             try {
               window.localStorage.setItem(storageKey, JSON.stringify({
@@ -337,11 +347,11 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
                 taskId,
                 createdAt: Date.now(),
                 chartName: chart.chartName,
-                namespace: values.namespace,
-                releaseName: values.releaseName,
+                namespace,
+                releaseName,
               }));
             } catch (_) {
-              setStorageWarning(t("helm:This browser cannot save the installation task for later recovery"));
+              setStorageWarning(t("helm:This browser cannot save the Helm operation for later recovery"));
             }
           } else {
             setLogs(prev => [...prev, line]);
@@ -416,7 +426,7 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
     <Modal
       title={
         <span>
-          {t("helm:Install chart")} <Text code>{chart.chartName}</Text>
+          {t(isUpgrade ? "helm:Upgrade" : "helm:Install chart")} <Text code>{chart.chartName}</Text>
           {chart.repoURL && (
             <Text style={{marginLeft: 8, fontSize: 12, color: "rgba(0,0,0,0.45)"}}>
               {chart.repoURL}
@@ -435,7 +445,7 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
           </Button>
           {!done && !pollingPaused && (
             <Button type="primary" loading={installing} onClick={handleOk}>
-              {t("helm:Install")}
+              {t(isUpgrade ? "helm:Upgrade" : "helm:Install")}
             </Button>
           )}
           {pollingPaused && (
@@ -474,7 +484,7 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
       {hasActiveTask && (
         <Alert
           type="info"
-          message={t("helm:Closing this window does not cancel the installation")}
+          message={t("helm:Closing this window does not cancel the Helm operation")}
           showIcon
           style={{marginBottom: 16}}
         />
@@ -492,15 +502,21 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
                 {pattern: /^[a-z0-9][a-z0-9-]*$/, message: t("helm:Release name pattern")},
               ]}
             >
-              <Input />
+              <Input disabled={isUpgrade} />
             </Form.Item>
             <Form.Item style={{flex: 1}} label={t("general:Namespaces")} name="namespace" rules={[{required: true}]}>
-              <Select options={nsOptions} showSearch />
+              <Select options={nsOptions} showSearch disabled={isUpgrade} />
             </Form.Item>
             <Form.Item style={{width: 130}} label={t("helm:Version")} name="version">
               <Input placeholder={chart.version ?? "latest"} />
             </Form.Item>
           </div>
+
+          {isUpgrade && (
+            <Form.Item label={t("helm:Repo URL")} name="repoURL" rules={[{required: true}]}>
+              <Input placeholder="https://example.com/charts" />
+            </Form.Item>
+          )}
 
           <Form.Item label={t("helm:Values (YAML)")}>
             {valuesLoading ? (
@@ -537,7 +553,7 @@ export default function HelmInstallModal({open, chart, onClose, onInstalled}) {
           {logs.length === 0 && (installing || pollingPaused) && (
             <span style={{color: "#888"}}>
               {installing && <Spin size="small" style={{marginRight: 8}} />}
-              {pollingPaused ? t("helm:Status check paused") : `${t("helm:Installing")}...`}
+              {pollingPaused ? t("helm:Status check paused") : `${t(isUpgrade ? "helm:Upgrading" : "helm:Installing")}...`}
             </span>
           )}
           {logs.map((line, i) => (

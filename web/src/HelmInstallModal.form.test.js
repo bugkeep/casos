@@ -5,6 +5,7 @@ import {createRoot} from "react-dom/client";
 import HelmInstallModal from "./HelmInstallModal";
 import * as HelmBackend from "./backend/HelmBackend";
 import * as NamespaceBackend from "./backend/NamespaceBackend";
+import {helmTaskStorageKey} from "./helmTaskStorage";
 
 let mockForm;
 
@@ -44,6 +45,7 @@ describe("HelmInstallModal form initialization", () => {
   beforeEach(() => {
     global.IS_REACT_ACT_ENVIRONMENT = true;
     Element.prototype.scrollIntoView = jest.fn();
+    window.localStorage.clear();
     formValues = {};
     touchedFields = new Set();
     mockForm = {
@@ -90,6 +92,123 @@ describe("HelmInstallModal form initialization", () => {
 
     expect(formValues.releaseName).toBe("e2e-casdoor-12345678");
     expect(formValues.namespace).toBe("default");
+  });
+
+  test("upgrade mode initializes the existing release identity and repository", async() => {
+    NamespaceBackend.getNamespaces.mockResolvedValue({status: "ok", data: [{name: "apps"}, {name: "default"}]});
+
+    await act(async() => {
+      root.render(
+        <HelmInstallModal
+          open
+          action="upgrade"
+          chart={{
+            chartName: "demo",
+            releaseName: "demo-release",
+            namespace: "apps",
+            repoURL: "https://example.test/charts",
+            version: "1.0.0",
+          }}
+          onClose={jest.fn()}
+          onInstalled={jest.fn()}
+        />
+      );
+      await Promise.resolve();
+    });
+
+    expect(formValues).toMatchObject({
+      releaseName: "demo-release",
+      namespace: "apps",
+      repoURL: "https://example.test/charts",
+      version: "1.0.0",
+    });
+  });
+
+  test("upgrade mode submits the upgrade stream with a locked release identity", async() => {
+    NamespaceBackend.getNamespaces.mockResolvedValue({status: "ok", data: [{name: "apps"}]});
+    mockForm.validateFields.mockResolvedValue({
+      releaseName: "other-release",
+      namespace: "other-namespace",
+      repoURL: "https://example.test/charts",
+      version: "1.1.0",
+    });
+    HelmBackend.upgradeHelmChartStream.mockImplementation((_payload, onLine) => {
+      onLine("TASK_ID:84");
+      return new Promise(() => {});
+    });
+
+    await act(async() => {
+      root.render(
+        <HelmInstallModal
+          open
+          action="upgrade"
+          chart={{
+            chartName: "demo",
+            releaseName: "demo-release",
+            namespace: "apps",
+            version: "1.0.0",
+          }}
+          onClose={jest.fn()}
+          onInstalled={jest.fn()}
+        />
+      );
+    });
+    const upgradeButton = [...container.querySelectorAll("button")]
+      .find(button => button.textContent === "helm:Upgrade");
+    expect(upgradeButton).toBeDefined();
+
+    await act(async() => {
+      upgradeButton.click();
+      await Promise.resolve();
+    });
+
+    expect(HelmBackend.installHelmChartStream).not.toHaveBeenCalled();
+    expect(HelmBackend.upgradeHelmChartStream).toHaveBeenCalledWith(
+      expect.objectContaining({
+        releaseName: "demo-release",
+        namespace: "apps",
+        chartName: "demo",
+        repoURL: "https://example.test/charts",
+        version: "1.1.0",
+      }),
+      expect.any(Function),
+      expect.any(AbortSignal)
+    );
+  });
+
+  test("upgrade mode does not resume a task for another release of the same chart", async() => {
+    window.localStorage.setItem(helmTaskStorageKey("demo", "apps", "other-release"), JSON.stringify({
+      schemaVersion: 1,
+      taskId: 91,
+      createdAt: Date.now(),
+      chartName: "demo",
+      namespace: "apps",
+      releaseName: "other-release",
+    }));
+    NamespaceBackend.getNamespaces.mockResolvedValue({status: "ok", data: [{name: "apps"}]});
+    HelmBackend.getHelmOperationTask.mockReturnValue(new Promise(() => {}));
+
+    await act(async() => {
+      root.render(
+        <HelmInstallModal
+          open
+          action="upgrade"
+          chart={{
+            chartName: "demo",
+            releaseName: "demo-release",
+            namespace: "apps",
+            repoURL: "https://example.test/charts",
+            version: "1.0.0",
+          }}
+          onClose={jest.fn()}
+          onInstalled={jest.fn()}
+        />
+      );
+      await Promise.resolve();
+    });
+
+    expect(HelmBackend.getHelmOperationTask).not.toHaveBeenCalled();
+    expect(formValues).toMatchObject({releaseName: "demo-release", namespace: "apps"});
   });
 
   test("a response from the previous chart does not replace the current chart values", async() => {
@@ -174,6 +293,8 @@ describe("HelmInstallModal form initialization", () => {
       await Promise.resolve();
     });
 
+    expect(HelmBackend.installHelmChartStream).toHaveBeenCalled();
+    expect(HelmBackend.upgradeHelmChartStream).not.toHaveBeenCalled();
     expect(HelmBackend.getHelmOperationTask).toHaveBeenCalledWith("42");
   });
 

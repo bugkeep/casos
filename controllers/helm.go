@@ -16,6 +16,7 @@ import (
 	"github.com/casosorg/casos/object"
 	proxypkg "github.com/casosorg/casos/proxy"
 	"github.com/casosorg/casos/store"
+	"k8s.io/client-go/rest"
 )
 
 const helmOperationTaskNotFoundCode = "helm_task_not_found"
@@ -249,9 +250,9 @@ func (c *ApiController) InstallHelmChart() {
 	c.ResponseOk()
 }
 
-// InstallHelmChartStream streams helm install progress as Server-Sent Events.
-// @router /api/install-helm-chart-stream [post]
-func (c *ApiController) InstallHelmChartStream() {
+type helmOperationStreamRunner func(context.Context, store.HelmInstallLifecycle, *rest.Config, helmInstallReq) <-chan store.HelmInstallStreamEvent
+
+func (c *ApiController) streamHelmOperation(operation, actionLabel string, runner helmOperationStreamRunner) {
 	if c.RequireAdmin() {
 		return
 	}
@@ -281,9 +282,9 @@ func (c *ApiController) InstallHelmChartStream() {
 	w.WriteHeader(http.StatusOK)
 
 	ctx := c.Ctx.Request.Context()
-	task, err := object.CreateHelmOperationTask(owner, object.HelmOperationInstall, req.ReleaseName, req.Namespace, req.ChartName, req.Version)
+	task, err := object.CreateHelmOperationTask(owner, operation, req.ReleaseName, req.Namespace, req.ChartName, req.Version)
 	if err != nil {
-		message := "unable to start Helm installation"
+		message := fmt.Sprintf("unable to start Helm %s", actionLabel)
 		if errors.Is(err, object.ErrHelmOperationAlreadyActive) {
 			message = err.Error()
 		} else {
@@ -312,7 +313,7 @@ func (c *ApiController) InstallHelmChartStream() {
 		return
 	}
 	recorder := object.NewHelmOperationRecorder(task.Id)
-	logCh := store.InstallHelmChartStreamWithValuesBaseline(ctx, recorder, cfg, req.ReleaseName, req.Namespace, req.ChartName, req.RepoURL, req.Version, req.ValuesYAML, req.ValuesBaselineYAML)
+	logCh := runner(ctx, recorder, cfg, req)
 	for event := range logCh {
 		if err := writeHelmInstallStreamEvent(w, event); err != nil {
 			break
@@ -324,7 +325,23 @@ func (c *ApiController) InstallHelmChartStream() {
 	c.StopRun()
 }
 
-// GetHelmOperationTask returns a persisted install task and its log history so
+// InstallHelmChartStream streams helm install progress as Server-Sent Events.
+// @router /api/install-helm-chart-stream [post]
+func (c *ApiController) InstallHelmChartStream() {
+	c.streamHelmOperation(object.HelmOperationInstall, "installation", func(ctx context.Context, lifecycle store.HelmInstallLifecycle, cfg *rest.Config, req helmInstallReq) <-chan store.HelmInstallStreamEvent {
+		return store.InstallHelmChartStreamWithValuesBaseline(ctx, lifecycle, cfg, req.ReleaseName, req.Namespace, req.ChartName, req.RepoURL, req.Version, req.ValuesYAML, req.ValuesBaselineYAML)
+	})
+}
+
+// UpgradeHelmReleaseStream streams helm upgrade progress as Server-Sent Events.
+// @router /api/upgrade-helm-release-stream [post]
+func (c *ApiController) UpgradeHelmReleaseStream() {
+	c.streamHelmOperation(object.HelmOperationUpgrade, "upgrade", func(ctx context.Context, lifecycle store.HelmInstallLifecycle, cfg *rest.Config, req helmInstallReq) <-chan store.HelmInstallStreamEvent {
+		return store.UpgradeHelmReleaseStreamWithValuesBaseline(ctx, lifecycle, cfg, req.ReleaseName, req.Namespace, req.ChartName, req.RepoURL, req.Version, req.ValuesYAML, req.ValuesBaselineYAML)
+	})
+}
+
+// GetHelmOperationTask returns a persisted Helm operation task and its log history so
 // an administrator can reconnect after an SSE stream is interrupted.
 // @router /api/get-helm-operation-task [get]
 func (c *ApiController) GetHelmOperationTask() {

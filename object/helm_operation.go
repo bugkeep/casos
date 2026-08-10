@@ -13,6 +13,7 @@ import (
 
 const (
 	HelmOperationInstall = "install"
+	HelmOperationUpgrade = "upgrade"
 
 	HelmOperationStatusPending   = "pending"
 	HelmOperationStatusRunning   = "running"
@@ -31,6 +32,10 @@ const (
 	HelmOperationPersistenceTimeout = 5 * time.Second
 	helmOperationStaleAfter         = 11 * time.Minute
 )
+
+func isSupportedHelmOperation(operation string) bool {
+	return operation == HelmOperationInstall || operation == HelmOperationUpgrade
+}
 
 var (
 	ErrHelmOperationAlreadyActive   = errors.New("Helm operation already active")
@@ -72,7 +77,7 @@ func CreateHelmOperationTask(owner, operation, releaseName, namespace, chartName
 	if owner == "" || operation == "" || releaseName == "" || namespace == "" || chartName == "" {
 		return nil, fmt.Errorf("owner, operation, releaseName, namespace, and chartName are required")
 	}
-	if operation != HelmOperationInstall {
+	if !isSupportedHelmOperation(operation) {
 		return nil, fmt.Errorf("unsupported Helm operation: %s", operation)
 	}
 	activeKey := helmOperationActiveKey(namespace, releaseName)

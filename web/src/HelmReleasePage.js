@@ -23,6 +23,28 @@ function statusBadge(status) {
   return <Badge status={preset} text={status} />;
 }
 
+function parseChartName(chartStr) {
+  const parts = chartStr?.split("-") ?? [];
+  const versionIdx = parts.findIndex(p => /^\d/.test(p));
+  return versionIdx > 0 ? parts.slice(0, versionIdx).join("-") : chartStr;
+}
+
+function parseChartVersion(chartStr) {
+  const parts = chartStr?.split("-") ?? [];
+  const versionIdx = parts.findIndex(p => /^\d/.test(p));
+  return versionIdx > 0 ? parts.slice(versionIdx).join("-") : "";
+}
+
+export function helmReleaseUpgradeTarget(release) {
+  return {
+    releaseName: release.name,
+    namespace: release.namespace,
+    chartName: parseChartName(release.chart),
+    repoURL: release.repoURL,
+    version: parseChartVersion(release.chart),
+  };
+}
+
 export default function HelmReleasePage() {
   const {t} = useTranslation();
   const [namespace, setNamespace] = useState("all");
@@ -87,18 +109,6 @@ export default function HelmReleasePage() {
       });
   };
 
-  const parseChartName = (chartStr) => {
-    const parts = chartStr?.split("-") ?? [];
-    const versionIdx = parts.findIndex(p => /^\d/.test(p));
-    return versionIdx > 0 ? parts.slice(0, versionIdx).join("-") : chartStr;
-  };
-
-  const parseChartVersion = (chartStr) => {
-    const parts = chartStr?.split("-") ?? [];
-    const versionIdx = parts.findIndex(p => /^\d/.test(p));
-    return versionIdx > 0 ? parts.slice(versionIdx).join("-") : "";
-  };
-
   const columns = [
     {
       title: t("helm:Release name"),
@@ -154,14 +164,7 @@ export default function HelmReleasePage() {
               size="small"
               icon={<UpCircleOutlined />}
               onClick={() => {
-                const chartName = parseChartName(rel.chart);
-                setUpgradeTarget({
-                  chartName,
-                  repoURL: "",
-                  version: parseChartVersion(rel.chart),
-                  _releaseName: rel.name,
-                  _namespace: rel.namespace,
-                });
+                setUpgradeTarget(helmReleaseUpgradeTarget(rel));
               }}
             />
           </Tooltip>
@@ -260,6 +263,7 @@ export default function HelmReleasePage() {
 
       <HelmInstallModal
         open={!!upgradeTarget}
+        action="upgrade"
         chart={upgradeTarget}
         onClose={() => setUpgradeTarget(null)}
         onInstalled={() => {setUpgradeTarget(null); fetchReleases();}}

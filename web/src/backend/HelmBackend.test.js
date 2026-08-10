@@ -6,7 +6,7 @@ jest.mock("../Setting", () => ({
 }));
 
 import {TextDecoder} from "util";
-import {installHelmChartStream} from "./HelmBackend";
+import {installHelmChartStream, upgradeHelmChartStream} from "./HelmBackend";
 
 global.TextDecoder = TextDecoder;
 
@@ -82,6 +82,36 @@ describe("installHelmChartStream", () => {
 
     expect(global.fetch.mock.calls[0][1].signal).toBe(signal);
     expect(onLine).toHaveBeenNthCalledWith(1, "TASK_ID:42");
+    expect(onLine).toHaveBeenNthCalledWith(2, "DONE");
+  });
+});
+
+describe("upgradeHelmChartStream", () => {
+  afterEach(() => {
+    jest.resetAllMocks();
+  });
+
+  test("posts to the upgrade stream endpoint and preserves the task stream protocol", async() => {
+    global.fetch = jest.fn().mockResolvedValue(mockStreamResponse([
+      "data: {\"type\":\"log\",\"message\":\"TASK_ID:84\"}\n\n",
+      "data: {\"type\":\"done\"}\n\n",
+    ]));
+    const payload = {releaseName: "demo", repoURL: "https://example.test/charts"};
+    const signal = {aborted: false};
+    const onLine = jest.fn();
+
+    const status = await upgradeHelmChartStream(payload, onLine, signal);
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      "http://localhost:9000/api/upgrade-helm-release-stream",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify(payload),
+        signal,
+      })
+    );
+    expect(status).toBe("DONE");
+    expect(onLine).toHaveBeenNthCalledWith(1, "TASK_ID:84");
     expect(onLine).toHaveBeenNthCalledWith(2, "DONE");
   });
 });
