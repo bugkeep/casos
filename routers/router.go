@@ -151,6 +151,7 @@ func InitAPI() {
 	beego.Router("/api/get-helm-releases", &controllers.ApiController{}, "GET:GetHelmReleases")
 	beego.Router("/api/install-helm-chart", &controllers.ApiController{}, "POST:InstallHelmChart")
 	beego.Router("/api/install-helm-chart-stream", &controllers.ApiController{}, "POST:InstallHelmChartStream")
+	beego.Router("/api/upgrade-helm-release-stream", &controllers.ApiController{}, "POST:UpgradeHelmReleaseStream")
 	beego.Router("/api/get-helm-operation-task", &controllers.ApiController{}, "GET:GetHelmOperationTask")
 	beego.Router("/api/upgrade-helm-release", &controllers.ApiController{}, "POST:UpgradeHelmRelease")
 	beego.Router("/api/rollback-helm-release", &controllers.ApiController{}, "POST:RollbackHelmRelease")
