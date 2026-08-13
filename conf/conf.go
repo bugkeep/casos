@@ -17,12 +17,21 @@ package conf
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/beego/beego"
 	"github.com/beego/beego/logs"
+)
+
+const DefaultDataDir = "./data"
+
+var (
+	dataDirOnce     sync.Once
+	resolvedDataDir string
 )
 
 func init() {
@@ -141,6 +150,45 @@ func GetConfigDataSourceName() string {
 	return dataSourceName
 }
 
+func GetDatabaseDriverName() string {
+	driverName := strings.ToLower(GetConfigStringDefault("driverName", "sqlite"))
+	if driverName == "sqlite3" {
+		return "sqlite"
+	}
+	return driverName
+}
+
+func GetDatabaseDataSourceName() string {
+	return resolveDatabaseDataSourceName(
+		GetDatabaseDriverName(),
+		GetConfigDataSourceName(),
+		GetDataDir(),
+	)
+}
+
+// GetDataDir returns the absolute data directory. A relative dataDir is
+// resolved against the working directory once per process: resolving it on
+// every call would silently move the SQLite databases and the node credential
+// key if anything ever changed the working directory.
+func GetDataDir() string {
+	dataDirOnce.Do(func() {
+		dataDir := GetConfigStringDefault("dataDir", DefaultDataDir)
+		resolvedDataDir = dataDir
+		if absolutePath, err := filepath.Abs(dataDir); err == nil {
+			resolvedDataDir = absolutePath
+		}
+		logs.Info("casos data directory: %s", resolvedDataDir)
+	})
+	return resolvedDataDir
+}
+
+func resolveDatabaseDataSourceName(driverName, dataSourceName, dataDir string) string {
+	if driverName == "sqlite" && strings.TrimSpace(dataSourceName) == "" {
+		return filepath.Join(dataDir, "casos.db")
+	}
+	return dataSourceName
+}
+
 func GetLanguage(language string) string {
 	if language == "" || language == "*" {
 		return "en"
@@ -163,14 +211,4 @@ func GetConfigBatchSize() int {
 		res = 100
 	}
 	return res
-}
-
-func GetConfigRealDataSourceName(driverName string) string {
-	var dataSourceName string
-	if driverName != "mysql" {
-		dataSourceName = GetConfigDataSourceName()
-	} else {
-		dataSourceName = GetConfigDataSourceName() + GetConfigString("dbName")
-	}
-	return dataSourceName
 }

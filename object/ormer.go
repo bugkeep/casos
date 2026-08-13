@@ -22,7 +22,9 @@ import (
 	"strings"
 
 	"github.com/casosorg/casos/conf"
+	"github.com/casosorg/casos/util"
 	_ "github.com/go-sql-driver/mysql" // db = mysql
+	_ "modernc.org/sqlite"             // db = sqlite
 	"xorm.io/xorm"
 	"xorm.io/xorm/names"
 )
@@ -52,14 +54,17 @@ func InitConfig() {
 }
 
 func InitAdapter() {
+	driverName := conf.GetDatabaseDriverName()
+	dataSourceName := conf.GetDatabaseDataSourceName()
+	dbName := conf.GetConfigStringDefault("dbName", "casos")
 	if createDatabase {
-		err := createDatabaseForPostgres(conf.GetConfigString("driverName"), conf.GetConfigDataSourceName(), conf.GetConfigString("dbName"))
+		err := createDatabaseForPostgres(driverName, dataSourceName, dbName)
 		if err != nil {
 			panic(err)
 		}
 	}
 
-	ormer = NewAdapter(conf.GetConfigString("driverName"), conf.GetConfigDataSourceName(), conf.GetConfigString("dbName"))
+	ormer = NewAdapter(driverName, dataSourceName, dbName)
 
 	tableNamePrefix := conf.GetConfigString("tableNamePrefix")
 	tbMapper := names.NewPrefixMapper(names.SnakeMapper{}, tableNamePrefix)
@@ -77,7 +82,7 @@ func CreateTables() {
 	ormer.createTable()
 }
 
-// Ormer represents the MySQL adapter for policy storage.
+// Ormer represents the SQL adapter for policy storage.
 type Ormer struct {
 	driverName     string
 	dataSourceName string
@@ -95,6 +100,9 @@ func finalizer(a *Ormer) {
 
 // NewAdapter is the constructor for Ormer.
 func NewAdapter(driverName string, dataSourceName string, dbName string) *Ormer {
+	if driverName == "sqlite3" {
+		driverName = "sqlite"
+	}
 	a := &Ormer{}
 	a.driverName = driverName
 	a.dataSourceName = dataSourceName
@@ -131,7 +139,7 @@ func createDatabaseForPostgres(driverName string, dataSourceName string, dbName 
 }
 
 func (a *Ormer) CreateDatabase() error {
-	if a.driverName == "postgres" {
+	if a.driverName == "postgres" || isSQLiteDriver(a.driverName) {
 		return nil
 	}
 
@@ -150,13 +158,40 @@ func (a *Ormer) open() {
 	if a.driverName != "mysql" {
 		dataSourceName = a.dataSourceName
 	}
+	if isSQLiteDriver(a.driverName) {
+		if err := util.EnsureSQLiteDirectory(dataSourceName); err != nil {
+			panic(err)
+		}
+		dataSourceName = sqliteDataSourceName(dataSourceName)
+	}
 
 	engine, err := xorm.NewEngine(a.driverName, dataSourceName)
 	if err != nil {
 		panic(err)
 	}
+	if isSQLiteDriver(a.driverName) {
+		// A single connection, combined with the immediate transactions set up
+		// in sqliteDataSourceName, serialises writers across the process. Do
+		// not raise this limit: xorm's SQLite dialect silently drops the
+		// "FOR UPDATE" clause used by the deploy and Helm task transactions, so
+		// this pool size is what keeps their row locking effective.
+		engine.SetMaxOpenConns(1)
+		engine.SetMaxIdleConns(1)
+	}
 
 	a.Engine = engine
+}
+
+func isSQLiteDriver(driverName string) bool {
+	return driverName == "sqlite"
+}
+
+func sqliteDataSourceName(dataSourceName string) string {
+	separator := "?"
+	if strings.Contains(dataSourceName, "?") {
+		separator = "&"
+	}
+	return dataSourceName + separator + "_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_txlock=immediate"
 }
 
 func PingDatabase() error {
