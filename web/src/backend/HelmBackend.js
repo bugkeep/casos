@@ -31,10 +31,10 @@ export function getRepoCharts(url) {
   }).then(r => r.json());
 }
 
-export function getHelmChartValues(chart, repo, version) {
+export function getHelmChartValues(chart, repo, version, signal) {
   return fetch(
     `${Setting.ServerUrl}/api/get-helm-chart-values?chart=${encodeURIComponent(chart)}&repo=${encodeURIComponent(repo)}&version=${encodeURIComponent(version ?? "")}`,
-    {credentials: "include", headers: lang()}
+    {credentials: "include", headers: lang(), signal}
   ).then(r => r.json());
 }
 
@@ -56,11 +56,9 @@ export function installHelmChart(payload) {
   }).then(r => r.json());
 }
 
-// installHelmChartStream posts the payload then reads structured SSE events.
-// onLine(line) is called for each displayable message; returns "DONE" on completion.
-// Closing the browser stream does not cancel a submitted install.
-export async function installHelmChartStream(payload, onLine, signal) {
-  const resp = await fetch(`${Setting.ServerUrl}/api/install-helm-chart-stream`, {
+// onLine(line) is called for each displayable SSE message; returns "DONE" on completion.
+async function helmChartStream(endpoint, action, payload, onLine, signal) {
+  const resp = await fetch(`${Setting.ServerUrl}${endpoint}`, {
     method: "POST", credentials: "include", headers: jsonHeaders(), body: JSON.stringify(payload), signal,
   });
   const reader = resp.body.getReader();
@@ -80,10 +78,10 @@ export async function installHelmChartStream(payload, onLine, signal) {
         onLine(event.type === "warning" ? `WARNING: ${event.message}` : event.message);
       }
       if (event.type === "error") {
-        const installError = new Error(event.message || "Helm install failed");
-        installError.code = event.error?.code;
-        installError.gvk = event.error?.gvk;
-        throw installError;
+        const actionError = new Error(event.message || `Helm ${action} failed`);
+        actionError.code = event.error?.code;
+        actionError.gvk = event.error?.gvk;
+        throw actionError;
       }
       if (event.type === "done") {
         onLine("DONE");
@@ -91,7 +89,16 @@ export async function installHelmChartStream(payload, onLine, signal) {
       }
     }
   }
-  throw new Error("helm install stream ended before completion");
+  throw new Error(`helm ${action} stream ended before completion`);
+}
+
+// Closing the browser stream does not cancel a submitted Helm operation.
+export function installHelmChartStream(payload, onLine, signal) {
+  return helmChartStream("/api/install-helm-chart-stream", "install", payload, onLine, signal);
+}
+
+export function upgradeHelmChartStream(payload, onLine, signal) {
+  return helmChartStream("/api/upgrade-helm-release-stream", "upgrade", payload, onLine, signal);
 }
 
 export function upgradeHelmRelease(payload) {

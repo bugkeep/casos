@@ -6,9 +6,20 @@ jest.mock("../Setting", () => ({
 }));
 
 import {TextDecoder} from "util";
-import {installHelmChartStream} from "./HelmBackend";
+import {getHelmChartValues, installHelmChartStream} from "./HelmBackend";
 
 global.TextDecoder = TextDecoder;
+
+test("getHelmChartValues forwards the abort signal", async() => {
+  global.fetch = jest.fn().mockResolvedValue({
+    json: jest.fn().mockResolvedValue({status: "ok", data: "replicas: 1"}),
+  });
+  const controller = new AbortController();
+
+  await getHelmChartValues("demo", "https://example.test/charts", "1.0.0", controller.signal);
+
+  expect(global.fetch.mock.calls[0][1].signal).toBe(controller.signal);
+});
 
 function makeChunk(text) {
   return Uint8Array.from(Buffer.from(text, "utf8"));
