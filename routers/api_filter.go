@@ -13,7 +13,8 @@ func ApiFilter(ctx *context.Context) {
 
 func isAllowedInDemoMode(method, urlPath string) bool {
 	if method == "POST" {
-		return urlPath == "/api/signin" || urlPath == "/api/signout"
+		return urlPath == "/api/signin" || urlPath == "/api/signout" ||
+			urlPath == "/api/auth/login" || urlPath == "/api/auth/logout"
 	}
 	return true
 }

@@ -1,12 +1,14 @@
 package routers
 
 import (
+	"net/http"
+
 	"github.com/beego/beego/context"
 	"github.com/casosorg/casos/controllers"
 )
 
-func responseError(ctx *context.Context, error string, data ...interface{}) {
-	resp := controllers.Response{Status: "error", Msg: error}
+func responseErrorStatus(ctx *context.Context, status int, message string, data ...interface{}) {
+	resp := controllers.Response{Status: "error", Msg: message}
 	switch len(data) {
 	case 2:
 		resp.Data2 = data[1]
@@ -15,6 +17,7 @@ func responseError(ctx *context.Context, error string, data ...interface{}) {
 		resp.Data = data[0]
 	}
 
+	ctx.Output.SetStatus(status)
 	err := ctx.Output.JSON(resp, true, false)
 	if err != nil {
 		panic(err)
@@ -22,5 +25,5 @@ func responseError(ctx *context.Context, error string, data ...interface{}) {
 }
 
 func denyRequest(ctx *context.Context) {
-	responseError(ctx, "Unauthorized operation")
+	responseErrorStatus(ctx, http.StatusForbidden, "Unauthorized operation")
 }

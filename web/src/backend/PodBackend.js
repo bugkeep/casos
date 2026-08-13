@@ -1,7 +1,7 @@
-import * as Setting from "../Setting";
+﻿import * as Setting from "../Setting";
 
 export function getPods(namespace = "") {
-  return fetch(`${Setting.ServerUrl}/api/get-pods?namespace=${encodeURIComponent(namespace)}`, {
+  return Setting.apiFetch(`/api/get-pods?namespace=${encodeURIComponent(namespace)}`, {
     method: "GET",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},
@@ -9,7 +9,7 @@ export function getPods(namespace = "") {
 }
 
 export function addPod(pod) {
-  return fetch(`${Setting.ServerUrl}/api/add-pod`, {
+  return Setting.apiFetch("/api/add-pod", {
     method: "POST",
     credentials: "include",
     headers: {
@@ -21,7 +21,7 @@ export function addPod(pod) {
 }
 
 export function updatePod(pod) {
-  return fetch(`${Setting.ServerUrl}/api/update-pod`, {
+  return Setting.apiFetch("/api/update-pod", {
     method: "POST",
     credentials: "include",
     headers: {
@@ -33,7 +33,7 @@ export function updatePod(pod) {
 }
 
 export function getPodEvents(namespace, name) {
-  return fetch(`${Setting.ServerUrl}/api/get-pod-events?namespace=${encodeURIComponent(namespace)}&name=${encodeURIComponent(name)}`, {
+  return Setting.apiFetch(`/api/get-pod-events?namespace=${encodeURIComponent(namespace)}&name=${encodeURIComponent(name)}`, {
     method: "GET",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},
@@ -43,7 +43,7 @@ export function getPodEvents(namespace, name) {
 export function getPodLogs(namespace, name, container = "", tailLines = 500) {
   const params = new URLSearchParams({namespace, name, tailLines});
   if (container) {params.set("container", container);}
-  return fetch(`${Setting.ServerUrl}/api/get-pod-logs?${params}`, {
+  return Setting.apiFetch(`/api/get-pod-logs?${params}`, {
     method: "GET",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},
@@ -51,7 +51,7 @@ export function getPodLogs(namespace, name, container = "", tailLines = 500) {
 }
 
 export function searchDockerHubImages(q) {
-  return fetch(`${Setting.ServerUrl}/api/search-docker-hub-images?q=${encodeURIComponent(q)}`, {
+  return Setting.apiFetch(`/api/search-docker-hub-images?q=${encodeURIComponent(q)}`, {
     method: "GET",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},
@@ -59,7 +59,7 @@ export function searchDockerHubImages(q) {
 }
 
 export function getDockerHubImageTags(image) {
-  return fetch(`${Setting.ServerUrl}/api/get-docker-hub-image-tags?image=${encodeURIComponent(image)}`, {
+  return Setting.apiFetch(`/api/get-docker-hub-image-tags?image=${encodeURIComponent(image)}`, {
     method: "GET",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},
@@ -68,7 +68,7 @@ export function getDockerHubImageTags(image) {
 
 export function listPodFiles(namespace, name, container, dirPath) {
   const params = new URLSearchParams({namespace, name, container, path: dirPath});
-  return fetch(`${Setting.ServerUrl}/api/pod-file-list?${params}`, {
+  return Setting.apiFetch(`/api/pod-file-list?${params}`, {
     method: "GET",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},
@@ -77,7 +77,7 @@ export function listPodFiles(namespace, name, container, dirPath) {
 
 export function downloadPodFile(namespace, name, container, filePath) {
   const params = new URLSearchParams({namespace, name, container, path: filePath});
-  return fetch(`${Setting.ServerUrl}/api/pod-file-download?${params}`, {
+  return Setting.apiFetch(`/api/pod-file-download?${params}`, {
     method: "GET",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},
@@ -91,7 +91,7 @@ export function uploadPodFile(namespace, name, container, destDir, file) {
   form.append("container", container);
   form.append("destDir", destDir);
   form.append("file", file);
-  return fetch(`${Setting.ServerUrl}/api/pod-file-upload`, {
+  return Setting.apiFetch("/api/pod-file-upload", {
     method: "POST",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},
@@ -100,7 +100,7 @@ export function uploadPodFile(namespace, name, container, destDir, file) {
 }
 
 export function deletePod(namespace, name) {
-  return fetch(`${Setting.ServerUrl}/api/delete-pod`, {
+  return Setting.apiFetch("/api/delete-pod", {
     method: "POST",
     credentials: "include",
     headers: {

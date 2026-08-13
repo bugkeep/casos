@@ -1,7 +1,7 @@
-import * as Setting from "../Setting";
+﻿import * as Setting from "../Setting";
 
 export function requestLECert(payload) {
-  return fetch(`${Setting.ServerUrl}/api/request-le-cert`, {
+  return Setting.apiFetch("/api/request-le-cert", {
     method: "POST",
     credentials: "include",
     headers: {
@@ -13,7 +13,7 @@ export function requestLECert(payload) {
 }
 
 export function uploadCert(payload) {
-  return fetch(`${Setting.ServerUrl}/api/upload-cert`, {
+  return Setting.apiFetch("/api/upload-cert", {
     method: "POST",
     credentials: "include",
     headers: {
@@ -25,8 +25,8 @@ export function uploadCert(payload) {
 }
 
 export function getCertStatus(namespace, ingressName) {
-  return fetch(
-    `${Setting.ServerUrl}/api/get-cert-status?namespace=${encodeURIComponent(namespace)}&ingressName=${encodeURIComponent(ingressName)}`,
+  return Setting.apiFetch(
+    `/api/get-cert-status?namespace=${encodeURIComponent(namespace)}&ingressName=${encodeURIComponent(ingressName)}`,
     {
       method: "GET",
       credentials: "include",

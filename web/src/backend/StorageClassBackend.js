@@ -1,7 +1,7 @@
-import * as Setting from "../Setting";
+﻿import * as Setting from "../Setting";
 
 export function getStorageClasses() {
-  return fetch(`${Setting.ServerUrl}/api/get-storageclasses`, {
+  return Setting.apiFetch("/api/get-storageclasses", {
     method: "GET",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},
@@ -9,7 +9,7 @@ export function getStorageClasses() {
 }
 
 export function addStorageClass(storageClass) {
-  return fetch(`${Setting.ServerUrl}/api/add-storageclass`, {
+  return Setting.apiFetch("/api/add-storageclass", {
     method: "POST",
     credentials: "include",
     headers: {
@@ -21,7 +21,7 @@ export function addStorageClass(storageClass) {
 }
 
 export function updateStorageClass(storageClass) {
-  return fetch(`${Setting.ServerUrl}/api/update-storageclass`, {
+  return Setting.apiFetch("/api/update-storageclass", {
     method: "POST",
     credentials: "include",
     headers: {
@@ -33,7 +33,7 @@ export function updateStorageClass(storageClass) {
 }
 
 export function deleteStorageClass(name) {
-  return fetch(`${Setting.ServerUrl}/api/delete-storageclass`, {
+  return Setting.apiFetch("/api/delete-storageclass", {
     method: "POST",
     credentials: "include",
     headers: {

@@ -1,7 +1,7 @@
-import * as Setting from "../Setting";
+﻿import * as Setting from "../Setting";
 
 export function getServiceAccounts(namespace = "") {
-  return fetch(`${Setting.ServerUrl}/api/get-serviceaccounts?namespace=${encodeURIComponent(namespace)}`, {
+  return Setting.apiFetch(`/api/get-serviceaccounts?namespace=${encodeURIComponent(namespace)}`, {
     method: "GET",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},
@@ -9,7 +9,7 @@ export function getServiceAccounts(namespace = "") {
 }
 
 export function addServiceAccount(sa) {
-  return fetch(`${Setting.ServerUrl}/api/add-serviceaccount`, {
+  return Setting.apiFetch("/api/add-serviceaccount", {
     method: "POST",
     credentials: "include",
     headers: {
@@ -21,7 +21,7 @@ export function addServiceAccount(sa) {
 }
 
 export function updateServiceAccount(sa) {
-  return fetch(`${Setting.ServerUrl}/api/update-serviceaccount`, {
+  return Setting.apiFetch("/api/update-serviceaccount", {
     method: "POST",
     credentials: "include",
     headers: {
@@ -33,7 +33,7 @@ export function updateServiceAccount(sa) {
 }
 
 export function deleteServiceAccount(namespace, name) {
-  return fetch(`${Setting.ServerUrl}/api/delete-serviceaccount`, {
+  return Setting.apiFetch("/api/delete-serviceaccount", {
     method: "POST",
     credentials: "include",
     headers: {

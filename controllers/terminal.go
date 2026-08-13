@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 
+	"github.com/casosorg/casos/security"
 	"github.com/gorilla/websocket"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
@@ -21,7 +23,10 @@ const (
 )
 
 var wsUpgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true },
+	CheckOrigin: func(r *http.Request) bool {
+		origin := strings.TrimSpace(r.Header.Get("Origin"))
+		return origin != "" && security.IsAllowedOrigin(origin, r)
+	},
 }
 
 type termResizeMsg struct {

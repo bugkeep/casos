@@ -1,7 +1,7 @@
-import * as Setting from "../Setting";
+﻿import * as Setting from "../Setting";
 
 export function getDeployments(namespace = "") {
-  return fetch(`${Setting.ServerUrl}/api/get-deployments?namespace=${encodeURIComponent(namespace)}`, {
+  return Setting.apiFetch(`/api/get-deployments?namespace=${encodeURIComponent(namespace)}`, {
     method: "GET",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},
@@ -9,7 +9,7 @@ export function getDeployments(namespace = "") {
 }
 
 export function addDeployment(deployment) {
-  return fetch(`${Setting.ServerUrl}/api/add-deployment`, {
+  return Setting.apiFetch("/api/add-deployment", {
     method: "POST",
     credentials: "include",
     headers: {
@@ -21,7 +21,7 @@ export function addDeployment(deployment) {
 }
 
 export function updateDeployment(deployment) {
-  return fetch(`${Setting.ServerUrl}/api/update-deployment`, {
+  return Setting.apiFetch("/api/update-deployment", {
     method: "POST",
     credentials: "include",
     headers: {
@@ -33,7 +33,7 @@ export function updateDeployment(deployment) {
 }
 
 export function restartDeployment(namespace, name) {
-  return fetch(`${Setting.ServerUrl}/api/restart-deployment`, {
+  return Setting.apiFetch("/api/restart-deployment", {
     method: "POST",
     credentials: "include",
     headers: {
@@ -45,7 +45,7 @@ export function restartDeployment(namespace, name) {
 }
 
 export function deleteDeployment(namespace, name) {
-  return fetch(`${Setting.ServerUrl}/api/delete-deployment`, {
+  return Setting.apiFetch("/api/delete-deployment", {
     method: "POST",
     credentials: "include",
     headers: {

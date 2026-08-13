@@ -1,7 +1,7 @@
-import * as Setting from "../Setting";
+﻿import * as Setting from "../Setting";
 
 export function getIngresses(namespace = "") {
-  return fetch(`${Setting.ServerUrl}/api/get-ingresses?namespace=${encodeURIComponent(namespace)}`, {
+  return Setting.apiFetch(`/api/get-ingresses?namespace=${encodeURIComponent(namespace)}`, {
     method: "GET",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},
@@ -9,7 +9,7 @@ export function getIngresses(namespace = "") {
 }
 
 export function addIngress(ingress) {
-  return fetch(`${Setting.ServerUrl}/api/add-ingress`, {
+  return Setting.apiFetch("/api/add-ingress", {
     method: "POST",
     credentials: "include",
     headers: {
@@ -21,7 +21,7 @@ export function addIngress(ingress) {
 }
 
 export function updateIngress(ingress) {
-  return fetch(`${Setting.ServerUrl}/api/update-ingress`, {
+  return Setting.apiFetch("/api/update-ingress", {
     method: "POST",
     credentials: "include",
     headers: {
@@ -33,7 +33,7 @@ export function updateIngress(ingress) {
 }
 
 export function deleteIngress(namespace, name) {
-  return fetch(`${Setting.ServerUrl}/api/delete-ingress`, {
+  return Setting.apiFetch("/api/delete-ingress", {
     method: "POST",
     credentials: "include",
     headers: {
@@ -42,15 +42,4 @@ export function deleteIngress(namespace, name) {
     },
     body: JSON.stringify({namespace, name}),
   }).then(res => res.json());
-}
-
-export function getIngressCertStatus(namespace, name) {
-  return fetch(
-    `${Setting.ServerUrl}/api/get-ingress-cert-status?namespace=${encodeURIComponent(namespace)}&name=${encodeURIComponent(name)}`,
-    {
-      method: "GET",
-      credentials: "include",
-      headers: {"Accept-Language": Setting.getAcceptLanguage()},
-    }
-  ).then(res => res.json());
 }

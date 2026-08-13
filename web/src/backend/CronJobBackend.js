@@ -1,7 +1,7 @@
-import * as Setting from "../Setting";
+﻿import * as Setting from "../Setting";
 
 export function getCronJobs(namespace = "") {
-  return fetch(`${Setting.ServerUrl}/api/get-cronjobs?namespace=${encodeURIComponent(namespace)}`, {
+  return Setting.apiFetch(`/api/get-cronjobs?namespace=${encodeURIComponent(namespace)}`, {
     method: "GET",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},
@@ -9,7 +9,7 @@ export function getCronJobs(namespace = "") {
 }
 
 export function addCronJob(cronjob) {
-  return fetch(`${Setting.ServerUrl}/api/add-cronjob`, {
+  return Setting.apiFetch("/api/add-cronjob", {
     method: "POST",
     credentials: "include",
     headers: {
@@ -21,7 +21,7 @@ export function addCronJob(cronjob) {
 }
 
 export function updateCronJob(cronjob) {
-  return fetch(`${Setting.ServerUrl}/api/update-cronjob`, {
+  return Setting.apiFetch("/api/update-cronjob", {
     method: "POST",
     credentials: "include",
     headers: {
@@ -33,7 +33,7 @@ export function updateCronJob(cronjob) {
 }
 
 export function getCronJobJobs(namespace, name) {
-  return fetch(`${Setting.ServerUrl}/api/get-cronjob-jobs?namespace=${encodeURIComponent(namespace)}&name=${encodeURIComponent(name)}`, {
+  return Setting.apiFetch(`/api/get-cronjob-jobs?namespace=${encodeURIComponent(namespace)}&name=${encodeURIComponent(name)}`, {
     method: "GET",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},
@@ -41,7 +41,7 @@ export function getCronJobJobs(namespace, name) {
 }
 
 export function triggerCronJob(namespace, name) {
-  return fetch(`${Setting.ServerUrl}/api/trigger-cronjob`, {
+  return Setting.apiFetch("/api/trigger-cronjob", {
     method: "POST",
     credentials: "include",
     headers: {
@@ -53,7 +53,7 @@ export function triggerCronJob(namespace, name) {
 }
 
 export function deleteCronJob(namespace, name) {
-  return fetch(`${Setting.ServerUrl}/api/delete-cronjob`, {
+  return Setting.apiFetch("/api/delete-cronjob", {
     method: "POST",
     credentials: "include",
     headers: {

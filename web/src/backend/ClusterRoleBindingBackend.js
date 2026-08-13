@@ -1,7 +1,7 @@
-import * as Setting from "../Setting";
+﻿import * as Setting from "../Setting";
 
 export function getClusterRoleBindings() {
-  return fetch(`${Setting.ServerUrl}/api/get-clusterrolebindings`, {
+  return Setting.apiFetch("/api/get-clusterrolebindings", {
     method: "GET",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},
@@ -9,7 +9,7 @@ export function getClusterRoleBindings() {
 }
 
 export function addClusterRoleBinding(crb) {
-  return fetch(`${Setting.ServerUrl}/api/add-clusterrolebinding`, {
+  return Setting.apiFetch("/api/add-clusterrolebinding", {
     method: "POST",
     credentials: "include",
     headers: {
@@ -21,7 +21,7 @@ export function addClusterRoleBinding(crb) {
 }
 
 export function updateClusterRoleBinding(crb) {
-  return fetch(`${Setting.ServerUrl}/api/update-clusterrolebinding`, {
+  return Setting.apiFetch("/api/update-clusterrolebinding", {
     method: "POST",
     credentials: "include",
     headers: {
@@ -33,7 +33,7 @@ export function updateClusterRoleBinding(crb) {
 }
 
 export function deleteClusterRoleBinding(name) {
-  return fetch(`${Setting.ServerUrl}/api/delete-clusterrolebinding`, {
+  return Setting.apiFetch("/api/delete-clusterrolebinding", {
     method: "POST",
     credentials: "include",
     headers: {

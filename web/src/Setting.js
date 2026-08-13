@@ -3,6 +3,9 @@ import {QuestionCircleOutlined} from "@ant-design/icons";
 import React from "react";
 import Sdk from "casdoor-js-sdk";
 import i18next from "i18next";
+import {apiFetch, setAuthStatus, setServerUrl} from "./Api";
+
+export {apiFetch, setAuthStatus};
 
 export let ServerUrl = "";
 export let CasdoorSdk;
@@ -12,6 +15,7 @@ export function initServerUrl() {
   if (fullServerUrl === "http://localhost:8001") {
     ServerUrl = "http://localhost:9000";
   }
+  setServerUrl(ServerUrl);
 }
 
 export function initCasdoorSdk(config) {
@@ -32,14 +36,6 @@ export function getWebSocketUrl(path, params = {}) {
 
 export function getSigninUrl() {
   return CasdoorSdk.getSigninUrl();
-}
-
-export function getSignupUrl() {
-  return CasdoorSdk.getSignupUrl();
-}
-
-export function getUserProfileUrl(userName, account) {
-  return CasdoorSdk.getUserProfileUrl(userName, account);
 }
 
 export function getMyProfileUrl(account) {
@@ -140,9 +136,9 @@ export function getAlgorithm(themeAlgorithmNames) {
 }
 
 export function getLogo(themes, storeLogoUrl) {
-  const defaultLogoUrl = "https://cdn.casvisor.com/casdoor/resource/built-in/admin/casos-logo_2000x500.png";
+  const defaultLogoUrl = "/casos-logo.png";
   const logoUrl = storeLogoUrl || defaultLogoUrl;
-  if (Array.isArray(themes) && themes.includes("dark")) {
+  if (storeLogoUrl && Array.isArray(themes) && themes.includes("dark")) {
     return logoUrl.replace(/\.png$/, "_white.png");
   }
   return logoUrl;
@@ -152,16 +148,16 @@ export function getFooterHtml(themes, storeFooterHtml, site) {
   const logoUrl = getLogo([], site?.logoUrl);
   const defaultFooterHtml = `<a target="_blank" href="https://github.com/casosorg/casos" rel="noreferrer"><img style="padding-bottom: 3px;" height="30" alt="CasOS" src="${logoUrl}" /></a>`;
   const footerHtml = storeFooterHtml || defaultFooterHtml;
-  if (Array.isArray(themes) && themes.includes("dark")) {
+  if (storeFooterHtml && Array.isArray(themes) && themes.includes("dark")) {
     return footerHtml.replace(/(\.png)/g, "_white$1");
   }
   return footerHtml;
 }
 
 export function getFaviconUrl(themes, storeFaviconUrl) {
-  const defaultFaviconUrl = "https://cdn.casvisor.com/casdoor/resource/built-in/admin/casos-logo.png";
+  const defaultFaviconUrl = "/casos-logo.png";
   const faviconUrl = storeFaviconUrl || defaultFaviconUrl;
-  if (Array.isArray(themes) && themes.includes("dark")) {
+  if (storeFaviconUrl && Array.isArray(themes) && themes.includes("dark")) {
     return faviconUrl.replace(/\.png$/, "_white.png");
   }
   return faviconUrl;

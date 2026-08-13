@@ -1,7 +1,7 @@
-import * as Setting from "../Setting";
+﻿import * as Setting from "../Setting";
 
 export function getJobs(namespace = "") {
-  return fetch(`${Setting.ServerUrl}/api/get-jobs?namespace=${encodeURIComponent(namespace)}`, {
+  return Setting.apiFetch(`/api/get-jobs?namespace=${encodeURIComponent(namespace)}`, {
     method: "GET",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},
@@ -9,7 +9,7 @@ export function getJobs(namespace = "") {
 }
 
 export function addJob(job) {
-  return fetch(`${Setting.ServerUrl}/api/add-job`, {
+  return Setting.apiFetch("/api/add-job", {
     method: "POST",
     credentials: "include",
     headers: {
@@ -21,7 +21,7 @@ export function addJob(job) {
 }
 
 export function updateJob(job) {
-  return fetch(`${Setting.ServerUrl}/api/update-job`, {
+  return Setting.apiFetch("/api/update-job", {
     method: "POST",
     credentials: "include",
     headers: {
@@ -33,7 +33,7 @@ export function updateJob(job) {
 }
 
 export function deleteJob(namespace, name) {
-  return fetch(`${Setting.ServerUrl}/api/delete-job`, {
+  return Setting.apiFetch("/api/delete-job", {
     method: "POST",
     credentials: "include",
     headers: {

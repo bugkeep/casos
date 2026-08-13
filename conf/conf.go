@@ -15,6 +15,7 @@
 package conf
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -28,6 +29,15 @@ import (
 )
 
 const DefaultDataDir = "./data"
+
+var builtInDefaults = map[string]string{
+	"appname":       "casos",
+	"httpaddr":      "127.0.0.1",
+	"httpport":      "9000",
+	"runmode":       "prod",
+	"driverName":    "sqlite",
+	"apiserverBind": "127.0.0.1",
+}
 
 var (
 	dataDirOnce     sync.Once
@@ -47,6 +57,27 @@ func init() {
 	}
 }
 
+// Initialize loads an explicitly selected configuration file. Beego already
+// loads the compatible ./conf/app.conf path when it exists; CASOS_CONFIG is
+// applied afterwards so it has the documented higher priority.
+func Initialize() error {
+	configPath := strings.TrimSpace(os.Getenv("CASOS_CONFIG"))
+	if configPath == "" {
+		return nil
+	}
+	info, err := os.Stat(configPath)
+	if err != nil {
+		return fmt.Errorf("read CASOS_CONFIG %q: %w", configPath, err)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("CASOS_CONFIG %q is a directory", configPath)
+	}
+	if err = beego.LoadAppConfig("ini", configPath); err != nil {
+		return fmt.Errorf("load CASOS_CONFIG %q: %w", configPath, err)
+	}
+	return nil
+}
+
 func GetConfigString(key string) string {
 	if value, ok := os.LookupEnv(key); ok {
 		return value
@@ -55,10 +86,12 @@ func GetConfigString(key string) string {
 	// the only place in the codebase that reads beego's app.conf directly
 	res := beego.AppConfig.String(key)
 	if res == "" {
-		if key == "staticBaseUrl" {
+		if value, ok := builtInDefaults[key]; ok {
+			res = value
+		} else if key == "staticBaseUrl" {
 			res = "https://cdn.casbin.org"
 		} else if key == "logConfig" {
-			res = fmt.Sprintf("{\"filename\": \"logs/%s.log\", \"maxdays\":99999, \"perm\":\"0770\"}", GetConfigString("appname"))
+			res = fmt.Sprintf("{\"filename\": %q, \"maxdays\":99999, \"perm\":\"0600\"}", filepath.Join(GetDataDir(), "logs", GetConfigString("appname")+".log"))
 		}
 	}
 
@@ -73,6 +106,21 @@ func GetConfigStringDefault(key string, defaultValue string) string {
 		return defaultValue
 	}
 	return value
+}
+
+// GetHTTPAddr preserves the historical all-interface binding for existing
+// config-file deployments while keeping a zero-config first run loopback-only.
+func GetHTTPAddr(authProvider string) string {
+	if value, ok := os.LookupEnv("httpaddr"); ok {
+		return strings.TrimSpace(value)
+	}
+	if value := strings.TrimSpace(beego.AppConfig.String("httpaddr")); value != "" {
+		return value
+	}
+	if authProvider == "casdoor" {
+		return ""
+	}
+	return builtInDefaults["httpaddr"]
 }
 
 func GetConfigBool(key string) bool {
@@ -172,7 +220,13 @@ func GetDatabaseDataSourceName() string {
 // key if anything ever changed the working directory.
 func GetDataDir() string {
 	dataDirOnce.Do(func() {
-		dataDir := GetConfigStringDefault("dataDir", DefaultDataDir)
+		dataDir := strings.TrimSpace(os.Getenv("CASOS_DATA_DIR"))
+		if dataDir == "" {
+			dataDir = strings.TrimSpace(GetConfigString("dataDir"))
+		}
+		if dataDir == "" {
+			dataDir = defaultUserDataDir()
+		}
 		resolvedDataDir = dataDir
 		if absolutePath, err := filepath.Abs(dataDir); err == nil {
 			resolvedDataDir = absolutePath
@@ -180,6 +234,86 @@ func GetDataDir() string {
 		logs.Info("casos data directory: %s", resolvedDataDir)
 	})
 	return resolvedDataDir
+}
+
+func defaultUserDataDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = ""
+	}
+	return defaultDataDir(runtime.GOOS, home, os.Getenv("XDG_DATA_HOME"), os.Getenv("LOCALAPPDATA"))
+}
+
+func defaultDataDir(goos, home, xdgDataHome, localAppData string) string {
+	switch goos {
+	case "windows":
+		if localAppData != "" {
+			return filepath.Join(localAppData, "CasOS")
+		}
+	case "darwin":
+		if home != "" {
+			return filepath.Join(home, "Library", "Application Support", "CasOS")
+		}
+	default:
+		if xdgDataHome != "" {
+			return filepath.Join(xdgDataHome, "casos")
+		}
+		if home != "" {
+			return filepath.Join(home, ".local", "share", "casos")
+		}
+	}
+	return DefaultDataDir
+}
+
+// EnsureDataDir creates the private root used by all standalone state.
+func EnsureDataDir() error {
+	if err := os.MkdirAll(GetDataDir(), 0o700); err != nil {
+		return fmt.Errorf("create data directory: %w", err)
+	}
+	if err := os.Chmod(GetDataDir(), 0o700); err != nil {
+		return fmt.Errorf("secure data directory: %w", err)
+	}
+	logsDir := filepath.Join(GetDataDir(), "logs")
+	if err := os.MkdirAll(logsDir, 0o700); err != nil {
+		return fmt.Errorf("create logs directory: %w", err)
+	}
+	if err := os.Chmod(logsDir, 0o700); err != nil {
+		return fmt.Errorf("secure logs directory: %w", err)
+	}
+	return nil
+}
+
+func GetAuthProvider() (string, error) {
+	values := map[string]string{}
+	for _, key := range []string{"casdoorEndpoint", "clientId", "clientSecret", "casdoorOrganization", "casdoorApplication"} {
+		values[key] = GetConfigString(key)
+	}
+	return resolveAuthProvider(GetConfigString("authProvider"), values)
+}
+
+func resolveAuthProvider(explicit string, casdoorValues map[string]string) (string, error) {
+	provider := strings.ToLower(strings.TrimSpace(explicit))
+	completeCasdoor := true
+	for _, key := range []string{"casdoorEndpoint", "clientId", "clientSecret", "casdoorOrganization", "casdoorApplication"} {
+		if strings.TrimSpace(casdoorValues[key]) == "" {
+			completeCasdoor = false
+			break
+		}
+	}
+
+	if provider == "" {
+		if completeCasdoor {
+			return "casdoor", nil
+		}
+		return "local", nil
+	}
+	if provider != "local" && provider != "casdoor" {
+		return "", fmt.Errorf("unsupported authProvider %q", explicit)
+	}
+	if provider == "casdoor" && !completeCasdoor {
+		return "", errors.New("authProvider casdoor requires casdoorEndpoint, clientId, clientSecret, casdoorOrganization, and casdoorApplication")
+	}
+	return provider, nil
 }
 
 func resolveDatabaseDataSourceName(driverName, dataSourceName, dataDir string) string {

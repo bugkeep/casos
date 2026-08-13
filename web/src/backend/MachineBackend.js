@@ -1,7 +1,7 @@
-import * as Setting from "../Setting";
+﻿import * as Setting from "../Setting";
 
 export function getGlobalMachines() {
-  return fetch(`${Setting.ServerUrl}/api/get-global-machines`, {
+  return Setting.apiFetch("/api/get-global-machines", {
     method: "GET",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},
@@ -9,7 +9,7 @@ export function getGlobalMachines() {
 }
 
 export function getMachine(owner, name) {
-  return fetch(`${Setting.ServerUrl}/api/get-machine?id=${owner}/${encodeURIComponent(name)}`, {
+  return Setting.apiFetch(`/api/get-machine?id=${owner}/${encodeURIComponent(name)}`, {
     method: "GET",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},
@@ -18,7 +18,7 @@ export function getMachine(owner, name) {
 
 export function updateMachine(owner, name, machine) {
   const newMachine = Setting.deepCopy(machine);
-  return fetch(`${Setting.ServerUrl}/api/update-machine?id=${owner}/${encodeURIComponent(name)}`, {
+  return Setting.apiFetch(`/api/update-machine?id=${owner}/${encodeURIComponent(name)}`, {
     method: "POST",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},
@@ -27,7 +27,7 @@ export function updateMachine(owner, name, machine) {
 }
 
 export function addMachine(machine) {
-  return fetch(`${Setting.ServerUrl}/api/add-machine`, {
+  return Setting.apiFetch("/api/add-machine", {
     method: "POST",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},
@@ -36,7 +36,7 @@ export function addMachine(machine) {
 }
 
 export function addLocalWSLMachine() {
-  return fetch(`${Setting.ServerUrl}/api/add-local-wsl-machine`, {
+  return Setting.apiFetch("/api/add-local-wsl-machine", {
     method: "POST",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},
@@ -44,7 +44,7 @@ export function addLocalWSLMachine() {
 }
 
 export function deleteMachine(machine) {
-  return fetch(`${Setting.ServerUrl}/api/delete-machine`, {
+  return Setting.apiFetch("/api/delete-machine", {
     method: "POST",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},

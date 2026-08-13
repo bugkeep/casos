@@ -1,7 +1,7 @@
-import * as Setting from "../Setting";
+﻿import * as Setting from "../Setting";
 
 export function getHPAs(namespace = "") {
-  return fetch(`${Setting.ServerUrl}/api/get-hpas?namespace=${encodeURIComponent(namespace)}`, {
+  return Setting.apiFetch(`/api/get-hpas?namespace=${encodeURIComponent(namespace)}`, {
     method: "GET",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},
@@ -9,7 +9,7 @@ export function getHPAs(namespace = "") {
 }
 
 export function addHPA(hpa) {
-  return fetch(`${Setting.ServerUrl}/api/add-hpa`, {
+  return Setting.apiFetch("/api/add-hpa", {
     method: "POST",
     credentials: "include",
     headers: {
@@ -21,7 +21,7 @@ export function addHPA(hpa) {
 }
 
 export function updateHPA(hpa) {
-  return fetch(`${Setting.ServerUrl}/api/update-hpa`, {
+  return Setting.apiFetch("/api/update-hpa", {
     method: "POST",
     credentials: "include",
     headers: {
@@ -33,7 +33,7 @@ export function updateHPA(hpa) {
 }
 
 export function deleteHPA(namespace, name) {
-  return fetch(`${Setting.ServerUrl}/api/delete-hpa`, {
+  return Setting.apiFetch("/api/delete-hpa", {
     method: "POST",
     credentials: "include",
     headers: {

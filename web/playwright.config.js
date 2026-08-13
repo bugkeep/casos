@@ -5,7 +5,8 @@ const {defineConfig, devices} = require("@playwright/test");
 
 const backendPort = Number(process.env.E2E_BACKEND_PORT || 9000);
 const frontendPort = Number(process.env.E2E_FRONTEND_PORT || 8001);
-const baseURL = `http://127.0.0.1:${frontendPort}`;
+const standaloneURL = process.env.E2E_STANDALONE_URL;
+const baseURL = standaloneURL || `http://127.0.0.1:${frontendPort}`;
 const backendURL = `http://127.0.0.1:${backendPort}`;
 const e2eToken = process.env.E2E_TEST_TOKEN || randomUUID();
 const e2eDataDir = process.env.E2E_DATA_DIR || path.join(os.tmpdir(), `casos-e2e-${process.pid}`);
@@ -40,7 +41,7 @@ module.exports = defineConfig({
       },
     },
   ],
-  webServer: [
+  webServer: standaloneURL ? undefined : [
     {
       command: `cd "${backendDir}" && go run main.go -createDatabase=true`,
       url: `${backendURL}/api/get-built-in-site`,
@@ -50,6 +51,7 @@ module.exports = defineConfig({
         ...process.env,
         httpport: String(backendPort),
         dataDir: e2eDataDir,
+        authProvider: "local",
         apiserverPort: process.env.E2E_APISERVER_PORT || "16443",
         webhookPort: process.env.E2E_WEBHOOK_PORT || "19443",
         socks5Proxy: process.env.socks5Proxy || "",

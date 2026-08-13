@@ -1,7 +1,7 @@
-import * as Setting from "../Setting";
+﻿import * as Setting from "../Setting";
 
 export function getDaemonSets(namespace = "") {
-  return fetch(`${Setting.ServerUrl}/api/get-daemonsets?namespace=${encodeURIComponent(namespace)}`, {
+  return Setting.apiFetch(`/api/get-daemonsets?namespace=${encodeURIComponent(namespace)}`, {
     method: "GET",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},
@@ -9,7 +9,7 @@ export function getDaemonSets(namespace = "") {
 }
 
 export function addDaemonSet(daemonset) {
-  return fetch(`${Setting.ServerUrl}/api/add-daemonset`, {
+  return Setting.apiFetch("/api/add-daemonset", {
     method: "POST",
     credentials: "include",
     headers: {
@@ -21,7 +21,7 @@ export function addDaemonSet(daemonset) {
 }
 
 export function updateDaemonSet(daemonset) {
-  return fetch(`${Setting.ServerUrl}/api/update-daemonset`, {
+  return Setting.apiFetch("/api/update-daemonset", {
     method: "POST",
     credentials: "include",
     headers: {
@@ -33,7 +33,7 @@ export function updateDaemonSet(daemonset) {
 }
 
 export function deleteDaemonSet(namespace, name) {
-  return fetch(`${Setting.ServerUrl}/api/delete-daemonset`, {
+  return Setting.apiFetch("/api/delete-daemonset", {
     method: "POST",
     credentials: "include",
     headers: {

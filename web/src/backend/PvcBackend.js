@@ -1,7 +1,7 @@
-import * as Setting from "../Setting";
+﻿import * as Setting from "../Setting";
 
 export function getPvcs(namespace = "") {
-  return fetch(`${Setting.ServerUrl}/api/get-pvcs?namespace=${encodeURIComponent(namespace)}`, {
+  return Setting.apiFetch(`/api/get-pvcs?namespace=${encodeURIComponent(namespace)}`, {
     method: "GET",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},
@@ -9,7 +9,7 @@ export function getPvcs(namespace = "") {
 }
 
 export function addPvc(pvc) {
-  return fetch(`${Setting.ServerUrl}/api/add-pvc`, {
+  return Setting.apiFetch("/api/add-pvc", {
     method: "POST",
     credentials: "include",
     headers: {
@@ -21,7 +21,7 @@ export function addPvc(pvc) {
 }
 
 export function deletePvc(namespace, name) {
-  return fetch(`${Setting.ServerUrl}/api/delete-pvc`, {
+  return Setting.apiFetch("/api/delete-pvc", {
     method: "POST",
     credentials: "include",
     headers: {

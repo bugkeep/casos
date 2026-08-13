@@ -1,7 +1,7 @@
-import * as Setting from "../Setting";
+﻿import * as Setting from "../Setting";
 
 export function getMetrics() {
-  return fetch(`${Setting.ServerUrl}/api/get-metrics`, {
+  return Setting.apiFetch("/api/get-metrics", {
     method: "GET",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},

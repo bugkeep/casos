@@ -1,7 +1,7 @@
-import * as Setting from "../Setting";
+﻿import * as Setting from "../Setting";
 
 export function getNetworkPolicies(namespace = "") {
-  return fetch(`${Setting.ServerUrl}/api/get-networkpolicies?namespace=${encodeURIComponent(namespace)}`, {
+  return Setting.apiFetch(`/api/get-networkpolicies?namespace=${encodeURIComponent(namespace)}`, {
     method: "GET",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},
@@ -9,7 +9,7 @@ export function getNetworkPolicies(namespace = "") {
 }
 
 export function addNetworkPolicy(networkpolicy) {
-  return fetch(`${Setting.ServerUrl}/api/add-networkpolicy`, {
+  return Setting.apiFetch("/api/add-networkpolicy", {
     method: "POST",
     credentials: "include",
     headers: {
@@ -21,7 +21,7 @@ export function addNetworkPolicy(networkpolicy) {
 }
 
 export function updateNetworkPolicy(networkpolicy) {
-  return fetch(`${Setting.ServerUrl}/api/update-networkpolicy`, {
+  return Setting.apiFetch("/api/update-networkpolicy", {
     method: "POST",
     credentials: "include",
     headers: {
@@ -33,7 +33,7 @@ export function updateNetworkPolicy(networkpolicy) {
 }
 
 export function deleteNetworkPolicy(namespace, name) {
-  return fetch(`${Setting.ServerUrl}/api/delete-networkpolicy`, {
+  return Setting.apiFetch("/api/delete-networkpolicy", {
     method: "POST",
     credentials: "include",
     headers: {

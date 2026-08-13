@@ -1,7 +1,7 @@
-import * as Setting from "../Setting";
+﻿import * as Setting from "../Setting";
 
 export function getTrivyScanResults() {
-  return fetch(`${Setting.ServerUrl}/api/get-trivy-scan-results`, {
+  return Setting.apiFetch("/api/get-trivy-scan-results", {
     method: "GET",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},
@@ -9,7 +9,7 @@ export function getTrivyScanResults() {
 }
 
 export function triggerTrivyScan(image) {
-  return fetch(`${Setting.ServerUrl}/api/trigger-trivy-scan`, {
+  return Setting.apiFetch("/api/trigger-trivy-scan", {
     method: "POST",
     credentials: "include",
     headers: {"Content-Type": "application/json", "Accept-Language": Setting.getAcceptLanguage()},
@@ -18,7 +18,7 @@ export function triggerTrivyScan(image) {
 }
 
 export function deleteTrivyScanResult(id) {
-  return fetch(`${Setting.ServerUrl}/api/delete-trivy-scan-result`, {
+  return Setting.apiFetch("/api/delete-trivy-scan-result", {
     method: "POST",
     credentials: "include",
     headers: {"Content-Type": "application/json", "Accept-Language": Setting.getAcceptLanguage()},

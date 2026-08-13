@@ -24,15 +24,27 @@ async function expectHelmCleanup(response) {
   return body;
 }
 
+async function getCsrfToken(page) {
+  const authStatus = await page.context().request.get("/api/auth/status");
+  const authData = await expectOkJson(authStatus);
+  expect(authData.data.csrfToken).toEqual(expect.any(String));
+  return authData.data.csrfToken;
+}
+
 const installedReleasesFixture = async({page}, use) => {
   const installedReleases = [];
   await use(installedReleases);
 
+  if (installedReleases.length === 0) {
+    return;
+  }
+  const csrfToken = await getCsrfToken(page);
   const cleanupErrors = [];
   for (const release of [...installedReleases].reverse()) {
     try {
       const uninstall = await page.context().request.post(API_UNINSTALL_HELM_RELEASE, {
         data: {releaseName: release.name, namespace: release.namespace},
+        headers: {"X-CSRF-Token": csrfToken},
       });
       await expectHelmCleanup(uninstall);
     } catch (error) {
@@ -49,10 +61,16 @@ const addedHelmReposFixture = async({page}, use) => {
   const addedHelmRepos = [];
   await use(addedHelmRepos);
 
+  if (addedHelmRepos.length === 0) {
+    return;
+  }
+  const csrfToken = await getCsrfToken(page);
   const cleanupErrors = [];
   for (const repo of [...addedHelmRepos].reverse()) {
     try {
-      const deleteRepo = await page.context().request.post(`${API_DELETE_HELM_REPO}?id=${repo.id}`);
+      const deleteRepo = await page.context().request.post(`${API_DELETE_HELM_REPO}?id=${repo.id}`, {
+        headers: {"X-CSRF-Token": csrfToken},
+      });
       await expectOkJson(deleteRepo);
     } catch (error) {
       cleanupErrors.push(`${repo.name}: ${error.message}`);

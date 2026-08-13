@@ -1,5 +1,7 @@
 package controllers
 
+import "net/http"
+
 type Response struct {
 	Status string      `json:"status"`
 	Msg    string      `json:"msg"`
@@ -21,7 +23,11 @@ func (c *ApiController) ResponseOk(data ...interface{}) {
 }
 
 func (c *ApiController) ResponseError(error string, data ...interface{}) {
-	resp := Response{Status: "error", Msg: error}
+	c.ResponseErrorStatus(http.StatusBadRequest, error, data...)
+}
+
+func (c *ApiController) ResponseErrorStatus(status int, message string, data ...interface{}) {
+	resp := Response{Status: "error", Msg: message}
 	switch len(data) {
 	case 2:
 		resp.Data2 = data[1]
@@ -30,12 +36,13 @@ func (c *ApiController) ResponseError(error string, data ...interface{}) {
 		resp.Data = data[0]
 	}
 	c.Data["json"] = resp
+	c.Ctx.Output.SetStatus(status)
 	c.ServeJSON()
 }
 
 func (c *ApiController) RequireSignedIn() bool {
 	if c.GetSessionUser() == nil {
-		c.ResponseError("please sign in first")
+		c.ResponseErrorStatus(http.StatusUnauthorized, "please sign in first")
 		return true
 	}
 

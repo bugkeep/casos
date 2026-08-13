@@ -33,6 +33,12 @@ expectSelection(
 );
 
 expectSelection(
+  "authentication UI changes rely on fixed smoke coverage",
+  ["web/src/App.js", "web/src/SigninPage.js", "web/src/backend/AccountBackend.js"],
+  []
+);
+
+expectSelection(
   "site list and backend changes select site regression",
   ["web/src/SiteListPage.js", "web/src/backend/SiteBackend.js", "object/site.go"],
   ["tests/ui/site-e2e.spec.js"]

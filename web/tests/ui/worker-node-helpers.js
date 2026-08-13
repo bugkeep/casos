@@ -16,10 +16,17 @@ const createdMachinesFixture = async({page}, use) => {
   await use(createdMachines);
 
   const cleanupErrors = [];
+  if (createdMachines.length === 0) {
+    return;
+  }
+  const authStatus = await page.context().request.get("/api/auth/status");
+  const authData = await expectOkJson(authStatus);
+  expect(authData.data.csrfToken).toEqual(expect.any(String));
   for (const machine of [...createdMachines].reverse()) {
     try {
       const deleteMachine = await page.context().request.post(API_DELETE_MACHINE, {
         data: machine,
+        headers: {"X-CSRF-Token": authData.data.csrfToken},
       });
       await expectOkJson(deleteMachine);
     } catch (error) {
@@ -163,7 +170,7 @@ async function expectWorkerNodeLogVisible(page, machineName, message) {
 
 async function createMachineFromUi(page, machineName, createdMachines, options = {}) {
   await page.goto("/machines");
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
   await expect(page).toHaveURL(/\/machines$/);
 
   await machineTableTitle(page).getByRole("button").filter({hasText: /^Add$/}).click();

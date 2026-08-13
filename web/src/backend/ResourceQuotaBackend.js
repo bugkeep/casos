@@ -1,7 +1,7 @@
-import * as Setting from "../Setting";
+﻿import * as Setting from "../Setting";
 
 export function getResourceQuotas(namespace = "") {
-  return fetch(`${Setting.ServerUrl}/api/get-resourcequotas?namespace=${encodeURIComponent(namespace)}`, {
+  return Setting.apiFetch(`/api/get-resourcequotas?namespace=${encodeURIComponent(namespace)}`, {
     method: "GET",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},
@@ -9,7 +9,7 @@ export function getResourceQuotas(namespace = "") {
 }
 
 export function addResourceQuota(resourcequota) {
-  return fetch(`${Setting.ServerUrl}/api/add-resourcequota`, {
+  return Setting.apiFetch("/api/add-resourcequota", {
     method: "POST",
     credentials: "include",
     headers: {
@@ -21,7 +21,7 @@ export function addResourceQuota(resourcequota) {
 }
 
 export function updateResourceQuota(resourcequota) {
-  return fetch(`${Setting.ServerUrl}/api/update-resourcequota`, {
+  return Setting.apiFetch("/api/update-resourcequota", {
     method: "POST",
     credentials: "include",
     headers: {
@@ -33,7 +33,7 @@ export function updateResourceQuota(resourcequota) {
 }
 
 export function deleteResourceQuota(namespace, name) {
-  return fetch(`${Setting.ServerUrl}/api/delete-resourcequota`, {
+  return Setting.apiFetch("/api/delete-resourcequota", {
     method: "POST",
     credentials: "include",
     headers: {

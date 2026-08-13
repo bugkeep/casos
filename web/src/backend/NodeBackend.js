@@ -1,7 +1,7 @@
-import * as Setting from "../Setting";
+﻿import * as Setting from "../Setting";
 
 export function getNodes() {
-  return fetch(`${Setting.ServerUrl}/api/get-nodes`, {
+  return Setting.apiFetch("/api/get-nodes", {
     method: "GET",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},
@@ -9,7 +9,7 @@ export function getNodes() {
 }
 
 export function updateNode(node) {
-  return fetch(`${Setting.ServerUrl}/api/update-node`, {
+  return Setting.apiFetch("/api/update-node", {
     method: "POST",
     credentials: "include",
     headers: {
@@ -21,7 +21,7 @@ export function updateNode(node) {
 }
 
 export function deleteNode(name) {
-  return fetch(`${Setting.ServerUrl}/api/delete-node`, {
+  return Setting.apiFetch("/api/delete-node", {
     method: "POST",
     credentials: "include",
     headers: {
@@ -33,7 +33,7 @@ export function deleteNode(name) {
 }
 
 export function getWorkerKubeconfig(nodeName) {
-  return fetch(`${Setting.ServerUrl}/api/get-worker-kubeconfig?nodeName=${encodeURIComponent(nodeName)}`, {
+  return Setting.apiFetch(`/api/get-worker-kubeconfig?nodeName=${encodeURIComponent(nodeName)}`, {
     method: "GET",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},

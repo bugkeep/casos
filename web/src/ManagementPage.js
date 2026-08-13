@@ -57,6 +57,7 @@ import LogSearchPage from "./LogSearchPage";
 import TopologyPage from "./TopologyPage";
 import MonitorPage from "./MonitorPage";
 import i18next from "i18next";
+import ChangePasswordModal from "./ChangePasswordModal";
 
 const {Header, Footer, Content, Sider} = Layout;
 
@@ -99,7 +100,9 @@ function persistMenuOpenKeys(keys) {
 
 function ManagementPage(props) {
   useTranslation();
-  const [siderCollapsed, setSiderCollapsed] = useState(() => localStorage.getItem("siderCollapsed") === "true");
+  const isMobile = Setting.isMobile();
+  const [siderCollapsed, setSiderCollapsed] = useState(() => isMobile || localStorage.getItem("siderCollapsed") === "true");
+  const [passwordModalOpen, setPasswordModalOpen] = useState(false);
   const siderWasCollapsedRef = useRef(false);
   const [menuOpenKeys, setMenuOpenKeys] = useState(() => {
     if (localStorage.getItem("siderCollapsed") === "true") {return [];}
@@ -136,7 +139,7 @@ function ManagementPage(props) {
     if (!siderCollapsed) {persistMenuOpenKeys(menuOpenKeys);}
   }, [menuOpenKeys, siderCollapsed]);
 
-  const {account, site, themeAlgorithm, logo, uri, onSignout, onUpdateSite, setLogoAndThemeAlgorithm} = props;
+  const {account, site, themeAlgorithm, logo, uri, onSignout, onUpdateSite, setLogoAndThemeAlgorithm, authProvider, onAuthChanged} = props;
   const isDark = Array.isArray(themeAlgorithm) && themeAlgorithm.includes("dark");
   // eslint-disable-next-line no-restricted-globals
   const currentUri = uri || location.pathname;
@@ -180,23 +183,31 @@ function ManagementPage(props) {
 
   function renderAccountDropdown() {
     if (!account) {return null;}
-    const items = [
-      {
+    const items = [];
+    if (authProvider === "casdoor") {
+      items.push({
         key: "account",
         icon: <UserOutlined />,
         label: i18next.t("account:My Account"),
         onClick: () => window.open(Setting.getMyProfileUrl(account), "_blank"),
-      },
-      {
-        key: "signout",
-        icon: <LogoutOutlined />,
-        label: i18next.t("account:Sign Out"),
-        onClick: onSignout,
-      },
-    ];
+      });
+    } else {
+      items.push({
+        key: "password",
+        icon: <LockOutlined />,
+        label: "Change password",
+        onClick: () => setPasswordModalOpen(true),
+      });
+    }
+    items.push({
+      key: "signout",
+      icon: <LogoutOutlined />,
+      label: i18next.t("account:Sign Out"),
+      onClick: onSignout,
+    });
     return (
       <Dropdown key="/rightDropDown" menu={{items}} placement="bottomRight">
-        <div className="rightDropDown" style={{cursor: "pointer", userSelect: "none"}}>
+        <div className="rightDropDown" aria-label={`Account menu for ${account.displayName || account.name}`} style={{cursor: "pointer", userSelect: "none"}}>
           {renderUserInfo()}
         </div>
       </Dropdown>
@@ -298,10 +309,11 @@ function ManagementPage(props) {
   }
 
   const siderWidth = 256;
-  const siderCollapsedWidth = 80;
+  const siderCollapsedWidth = isMobile ? 0 : 80;
 
   return (
     <React.Fragment>
+      <ChangePasswordModal open={passwordModalOpen} onClose={() => setPasswordModalOpen(false)} onChanged={onAuthChanged} />
       <Sider
         collapsed={siderCollapsed}
         collapsedWidth={siderCollapsedWidth}
@@ -360,7 +372,7 @@ function ManagementPage(props) {
         </div>
       </Sider>
 
-      <div style={{marginLeft: siderCollapsed ? siderCollapsedWidth : siderWidth, flex: 1, minWidth: 0, transition: "margin-left 0.2s", display: "flex", flexDirection: "column", minHeight: "100vh"}}>
+      <div style={{marginLeft: isMobile ? 0 : siderCollapsed ? siderCollapsedWidth : siderWidth, flex: 1, minWidth: 0, transition: "margin-left 0.2s", display: "flex", flexDirection: "column", minHeight: "100vh"}}>
         <Header style={{display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0 8px 0 0", marginBottom: "0", backgroundColor: isDark ? "#141414" : "#ffffff", position: "sticky", top: 0, zIndex: 99, borderBottom: isDark ? "1px solid rgba(255,255,255,0.07)" : "1px solid #f0f0f0", boxShadow: "none", height: "52px", lineHeight: "52px"}}>
           <div style={{display: "flex", alignItems: "center"}}>
             <Button

@@ -1,7 +1,7 @@
-import * as Setting from "../Setting";
+﻿import * as Setting from "../Setting";
 
 export function getConfigMaps(namespace = "") {
-  return fetch(`${Setting.ServerUrl}/api/get-configmaps?namespace=${encodeURIComponent(namespace)}`, {
+  return Setting.apiFetch(`/api/get-configmaps?namespace=${encodeURIComponent(namespace)}`, {
     method: "GET",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},
@@ -9,7 +9,7 @@ export function getConfigMaps(namespace = "") {
 }
 
 export function addConfigMap(configmap) {
-  return fetch(`${Setting.ServerUrl}/api/add-configmap`, {
+  return Setting.apiFetch("/api/add-configmap", {
     method: "POST",
     credentials: "include",
     headers: {
@@ -21,7 +21,7 @@ export function addConfigMap(configmap) {
 }
 
 export function updateConfigMap(configmap) {
-  return fetch(`${Setting.ServerUrl}/api/update-configmap`, {
+  return Setting.apiFetch("/api/update-configmap", {
     method: "POST",
     credentials: "include",
     headers: {
@@ -33,7 +33,7 @@ export function updateConfigMap(configmap) {
 }
 
 export function deleteConfigMap(namespace, name) {
-  return fetch(`${Setting.ServerUrl}/api/delete-configmap`, {
+  return Setting.apiFetch("/api/delete-configmap", {
     method: "POST",
     credentials: "include",
     headers: {

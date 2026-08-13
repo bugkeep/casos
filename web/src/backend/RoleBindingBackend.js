@@ -1,8 +1,8 @@
-import * as Setting from "../Setting";
+﻿import * as Setting from "../Setting";
 
 export function getRoleBindings(namespace = "") {
   const ns = namespace ? `?namespace=${encodeURIComponent(namespace)}` : "";
-  return fetch(`${Setting.ServerUrl}/api/get-rolebindings${ns}`, {
+  return Setting.apiFetch(`/api/get-rolebindings${ns}`, {
     method: "GET",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},
@@ -10,7 +10,7 @@ export function getRoleBindings(namespace = "") {
 }
 
 export function addRoleBinding(rb) {
-  return fetch(`${Setting.ServerUrl}/api/add-rolebinding`, {
+  return Setting.apiFetch("/api/add-rolebinding", {
     method: "POST",
     credentials: "include",
     headers: {
@@ -22,7 +22,7 @@ export function addRoleBinding(rb) {
 }
 
 export function updateRoleBinding(rb) {
-  return fetch(`${Setting.ServerUrl}/api/update-rolebinding`, {
+  return Setting.apiFetch("/api/update-rolebinding", {
     method: "POST",
     credentials: "include",
     headers: {
@@ -34,7 +34,7 @@ export function updateRoleBinding(rb) {
 }
 
 export function deleteRoleBinding(namespace, name) {
-  return fetch(`${Setting.ServerUrl}/api/delete-rolebinding`, {
+  return Setting.apiFetch("/api/delete-rolebinding", {
     method: "POST",
     credentials: "include",
     headers: {

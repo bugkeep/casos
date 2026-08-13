@@ -1,7 +1,7 @@
-import * as Setting from "../Setting";
+﻿import * as Setting from "../Setting";
 
 export function getSecrets(namespace = "") {
-  return fetch(`${Setting.ServerUrl}/api/get-secrets?namespace=${encodeURIComponent(namespace)}`, {
+  return Setting.apiFetch(`/api/get-secrets?namespace=${encodeURIComponent(namespace)}`, {
     method: "GET",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},
@@ -9,7 +9,7 @@ export function getSecrets(namespace = "") {
 }
 
 export function addSecret(secret) {
-  return fetch(`${Setting.ServerUrl}/api/add-secret`, {
+  return Setting.apiFetch("/api/add-secret", {
     method: "POST",
     credentials: "include",
     headers: {
@@ -21,7 +21,7 @@ export function addSecret(secret) {
 }
 
 export function updateSecret(secret) {
-  return fetch(`${Setting.ServerUrl}/api/update-secret`, {
+  return Setting.apiFetch("/api/update-secret", {
     method: "POST",
     credentials: "include",
     headers: {
@@ -33,7 +33,7 @@ export function updateSecret(secret) {
 }
 
 export function deleteSecret(namespace, name) {
-  return fetch(`${Setting.ServerUrl}/api/delete-secret`, {
+  return Setting.apiFetch("/api/delete-secret", {
     method: "POST",
     credentials: "include",
     headers: {

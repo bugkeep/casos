@@ -2,6 +2,7 @@
 
 jest.mock("../Setting", () => ({
   ServerUrl: "http://localhost:9000",
+  apiFetch: (...args) => fetch(...args),
   getAcceptLanguage: () => "en",
 }));
 

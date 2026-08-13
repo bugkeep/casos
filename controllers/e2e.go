@@ -2,8 +2,8 @@ package controllers
 
 import (
 	"github.com/beego/beego/logs"
-	"github.com/casdoor/casdoor-go-sdk/casdoorsdk"
 
+	"github.com/casosorg/casos/auth"
 	"github.com/casosorg/casos/conf"
 )
 
@@ -25,16 +25,20 @@ func (c *ApiController) E2ESignin() {
 		return
 	}
 
-	claims := &casdoorsdk.Claims{
-		User: casdoorsdk.User{
+	identity := &auth.SessionIdentity{
+		User: auth.User{
 			Owner:       "built-in",
 			Name:        "ci-user",
 			DisplayName: "CI User",
 			IsAdmin:     true,
+			Provider:    "e2e",
 		},
 	}
-	c.SetSessionClaims(claims)
-	logs.Info("E2E test sign-in used for user %s", claims.Name)
+	if err := c.establishSession(identity); err != nil {
+		c.ResponseError("could not establish session")
+		return
+	}
+	logs.Info("E2E test sign-in used for user %s", identity.User.Name)
 
-	c.ResponseOk(claims.User)
+	c.ResponseOk(identity.User)
 }

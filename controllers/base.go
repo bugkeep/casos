@@ -1,44 +1,42 @@
 package controllers
 
 import (
-	"encoding/gob"
-
 	"github.com/beego/beego"
-	"github.com/casdoor/casdoor-go-sdk/casdoorsdk"
+	"github.com/casosorg/casos/auth"
+	"github.com/casosorg/casos/object"
 )
 
 type ApiController struct {
 	beego.Controller
 }
 
-func init() {
-	gob.Register(casdoorsdk.Claims{})
-}
-
-func (c *ApiController) GetSessionClaims() *casdoorsdk.Claims {
-	s := c.GetSession("user")
-	if s == nil {
+func (c *ApiController) GetSessionIdentity() *auth.SessionIdentity {
+	identity, legacy := auth.NormalizeSession(c.GetSession("user"))
+	if identity == nil {
 		return nil
 	}
-
-	claims := s.(casdoorsdk.Claims)
-	return &claims
+	if identity.User.Provider == "local" && !object.IsLocalSessionCurrent(identity.SessionVersion) {
+		c.DelSession("user")
+		return nil
+	}
+	if legacy {
+		c.SetSession("user", *identity)
+	}
+	return identity
 }
 
-func (c *ApiController) SetSessionClaims(claims *casdoorsdk.Claims) {
-	if claims == nil {
+func (c *ApiController) SetSessionIdentity(identity *auth.SessionIdentity) {
+	if identity == nil {
 		c.DelSession("user")
 		return
 	}
-
-	c.SetSession("user", *claims)
+	c.SetSession("user", *identity)
 }
 
-func (c *ApiController) GetSessionUser() *casdoorsdk.User {
-	claims := c.GetSessionClaims()
-	if claims == nil {
+func (c *ApiController) GetSessionUser() *auth.User {
+	identity := c.GetSessionIdentity()
+	if identity == nil {
 		return nil
 	}
-
-	return &claims.User
+	return &identity.User
 }

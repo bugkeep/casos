@@ -20,7 +20,7 @@ function LogModal({namespace, podName, open, onClose}) {
   useEffect(() => {
     if (!open || !podName) {return;}
     setLoading(true);
-    fetch(`/api/get-pod-logs?namespace=${encodeURIComponent(namespace)}&name=${encodeURIComponent(podName)}&tailLines=500`, {
+    Setting.apiFetch(`/api/get-pod-logs?namespace=${encodeURIComponent(namespace)}&name=${encodeURIComponent(podName)}&tailLines=500`, {
       credentials: "include",
     })
       .then(r => r.json())

@@ -92,6 +92,9 @@ type Ormer struct {
 
 // finalizer is the destructor for Ormer.
 func finalizer(a *Ormer) {
+	if a == nil || a.Engine == nil {
+		return
+	}
 	err := a.Engine.Close()
 	if err != nil {
 		panic(err)
@@ -220,6 +223,7 @@ func (a *Ormer) createTable() {
 		new(CasbinRule),
 		new(TrivyScanResult),
 		new(HelmRepo),
+		new(LocalAdmin),
 	); err != nil {
 		panic(fmt.Errorf("sync database schema: %w", err))
 	}

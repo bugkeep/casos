@@ -1,7 +1,7 @@
-import * as Setting from "../Setting";
+﻿import * as Setting from "../Setting";
 
 export function getCasbinRules(scope) {
-  return fetch(`${Setting.ServerUrl}/api/get-casbin-rules?scope=${encodeURIComponent(scope)}`, {
+  return Setting.apiFetch(`/api/get-casbin-rules?scope=${encodeURIComponent(scope)}`, {
     method: "GET",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},
@@ -9,7 +9,7 @@ export function getCasbinRules(scope) {
 }
 
 export function addCasbinRule(rule) {
-  return fetch(`${Setting.ServerUrl}/api/add-casbin-rule`, {
+  return Setting.apiFetch("/api/add-casbin-rule", {
     method: "POST",
     credentials: "include",
     headers: {"Content-Type": "application/json", "Accept-Language": Setting.getAcceptLanguage()},
@@ -18,7 +18,7 @@ export function addCasbinRule(rule) {
 }
 
 export function deleteCasbinRule(id, scope) {
-  return fetch(`${Setting.ServerUrl}/api/delete-casbin-rule`, {
+  return Setting.apiFetch("/api/delete-casbin-rule", {
     method: "POST",
     credentials: "include",
     headers: {"Content-Type": "application/json", "Accept-Language": Setting.getAcceptLanguage()},
@@ -27,7 +27,7 @@ export function deleteCasbinRule(id, scope) {
 }
 
 export function reloadCasbinEnforcer(scope) {
-  return fetch(`${Setting.ServerUrl}/api/reload-casbin-enforcer`, {
+  return Setting.apiFetch("/api/reload-casbin-enforcer", {
     method: "POST",
     credentials: "include",
     headers: {"Content-Type": "application/json", "Accept-Language": Setting.getAcceptLanguage()},

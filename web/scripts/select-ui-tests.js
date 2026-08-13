@@ -28,6 +28,10 @@ const PLATFORM_READINESS_PATTERNS = [
 
 const SMOKE_COVERED_PATTERNS = [
   /^web\/src\/SiteEditPage\.js$/,
+  /^web\/src\/(Api|App|SigninPage|ChangePasswordModal)\.js$/,
+  /^web\/src\/AuthPage\.less$/,
+  /^web\/src\/backend\/AccountBackend\.js$/,
+  /^web\/tests\/ui\/auth\.spec\.js$/,
 ];
 
 const SITE_PATTERNS = [

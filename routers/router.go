@@ -6,6 +6,12 @@ import (
 )
 
 func InitAPI() {
+	beego.Router("/api/auth/status", &controllers.ApiController{}, "GET:AuthStatus")
+	beego.Router("/api/auth/setup", &controllers.ApiController{}, "POST:AuthSetup")
+	beego.Router("/api/auth/login", &controllers.ApiController{}, "POST:AuthLogin")
+	beego.Router("/api/auth/logout", &controllers.ApiController{}, "POST:AuthLogout")
+	beego.Router("/api/auth/password", &controllers.ApiController{}, "POST:AuthPassword")
+	beego.Router("/api/auth/recover", &controllers.ApiController{}, "POST:AuthRecover")
 	beego.Router("/api/signin", &controllers.ApiController{}, "POST:Signin")
 	beego.Router("/api/signout", &controllers.ApiController{}, "POST:Signout")
 	beego.Router("/api/get-account", &controllers.ApiController{}, "GET:GetAccount")

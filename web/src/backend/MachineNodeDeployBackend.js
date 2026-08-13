@@ -1,7 +1,7 @@
-import * as Setting from "../Setting";
+﻿import * as Setting from "../Setting";
 
 export function preflightMachineNode(request) {
-  return fetch(`${Setting.ServerUrl}/api/preflight-machine-node`, {
+  return Setting.apiFetch("/api/preflight-machine-node", {
     method: "POST",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},
@@ -10,7 +10,7 @@ export function preflightMachineNode(request) {
 }
 
 export function deployMachineNode(request) {
-  return fetch(`${Setting.ServerUrl}/api/deploy-machine-node`, {
+  return Setting.apiFetch("/api/deploy-machine-node", {
     method: "POST",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},
@@ -19,7 +19,7 @@ export function deployMachineNode(request) {
 }
 
 export function repairMachineNode(request) {
-  return fetch(`${Setting.ServerUrl}/api/repair-machine-node`, {
+  return Setting.apiFetch("/api/repair-machine-node", {
     method: "POST",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},
@@ -28,7 +28,7 @@ export function repairMachineNode(request) {
 }
 
 export function getMachineNodeTasks(owner, machineName) {
-  return fetch(`${Setting.ServerUrl}/api/get-machine-node-tasks?owner=${encodeURIComponent(owner)}&machineName=${encodeURIComponent(machineName)}`, {
+  return Setting.apiFetch(`/api/get-machine-node-tasks?owner=${encodeURIComponent(owner)}&machineName=${encodeURIComponent(machineName)}`, {
     method: "GET",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},
@@ -36,7 +36,7 @@ export function getMachineNodeTasks(owner, machineName) {
 }
 
 export function getMachineNodeLogs(taskId) {
-  return fetch(`${Setting.ServerUrl}/api/get-machine-node-logs?taskId=${encodeURIComponent(taskId)}`, {
+  return Setting.apiFetch(`/api/get-machine-node-logs?taskId=${encodeURIComponent(taskId)}`, {
     method: "GET",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},

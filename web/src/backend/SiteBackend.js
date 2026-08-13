@@ -1,7 +1,7 @@
-import * as Setting from "../Setting";
+﻿import * as Setting from "../Setting";
 
 export function getGlobalSites() {
-  return fetch(`${Setting.ServerUrl}/api/get-global-sites`, {
+  return Setting.apiFetch("/api/get-global-sites", {
     method: "GET",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},
@@ -9,7 +9,7 @@ export function getGlobalSites() {
 }
 
 export function getSite(owner, name) {
-  return fetch(`${Setting.ServerUrl}/api/get-site?id=${owner}/${encodeURIComponent(name)}`, {
+  return Setting.apiFetch(`/api/get-site?id=${owner}/${encodeURIComponent(name)}`, {
     method: "GET",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},
@@ -17,7 +17,7 @@ export function getSite(owner, name) {
 }
 
 export function getBuiltInSite() {
-  return fetch(`${Setting.ServerUrl}/api/get-built-in-site`, {
+  return Setting.apiFetch("/api/get-built-in-site", {
     method: "GET",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},
@@ -26,7 +26,7 @@ export function getBuiltInSite() {
 
 export function updateSite(owner, name, site) {
   const newSite = Setting.deepCopy(site);
-  return fetch(`${Setting.ServerUrl}/api/update-site?id=${owner}/${encodeURIComponent(name)}`, {
+  return Setting.apiFetch(`/api/update-site?id=${owner}/${encodeURIComponent(name)}`, {
     method: "POST",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},
@@ -34,17 +34,8 @@ export function updateSite(owner, name, site) {
   }).then(res => Setting.handleFetchResponse(res));
 }
 
-export function addSite(site) {
-  return fetch(`${Setting.ServerUrl}/api/add-site`, {
-    method: "POST",
-    credentials: "include",
-    headers: {"Accept-Language": Setting.getAcceptLanguage()},
-    body: JSON.stringify(site),
-  }).then(res => Setting.handleFetchResponse(res));
-}
-
 export function deleteSite(site) {
-  return fetch(`${Setting.ServerUrl}/api/delete-site`, {
+  return Setting.apiFetch("/api/delete-site", {
     method: "POST",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},

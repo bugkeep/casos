@@ -1,7 +1,7 @@
-import * as Setting from "../Setting";
+﻿import * as Setting from "../Setting";
 
 export function getStatefulSets(namespace = "") {
-  return fetch(`${Setting.ServerUrl}/api/get-statefulsets?namespace=${encodeURIComponent(namespace)}`, {
+  return Setting.apiFetch(`/api/get-statefulsets?namespace=${encodeURIComponent(namespace)}`, {
     method: "GET",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},
@@ -9,7 +9,7 @@ export function getStatefulSets(namespace = "") {
 }
 
 export function addStatefulSet(statefulset) {
-  return fetch(`${Setting.ServerUrl}/api/add-statefulset`, {
+  return Setting.apiFetch("/api/add-statefulset", {
     method: "POST",
     credentials: "include",
     headers: {
@@ -21,7 +21,7 @@ export function addStatefulSet(statefulset) {
 }
 
 export function updateStatefulSet(statefulset) {
-  return fetch(`${Setting.ServerUrl}/api/update-statefulset`, {
+  return Setting.apiFetch("/api/update-statefulset", {
     method: "POST",
     credentials: "include",
     headers: {
@@ -33,7 +33,7 @@ export function updateStatefulSet(statefulset) {
 }
 
 export function deleteStatefulSet(namespace, name) {
-  return fetch(`${Setting.ServerUrl}/api/delete-statefulset`, {
+  return Setting.apiFetch("/api/delete-statefulset", {
     method: "POST",
     credentials: "include",
     headers: {
