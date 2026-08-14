@@ -29,6 +29,16 @@ import (
 
 const DefaultDataDir = "./data"
 
+var builtInDefaults = map[string]string{
+	"appname":             "casos",
+	"driverName":          "sqlite",
+	"casdoorEndpoint":     "https://door.casdoor.com",
+	"clientId":            "af6b5aa958822fb9dc33",
+	"clientSecret":        "8bc3010c1c951c8d876b1f311a901ff8deeb93bc",
+	"casdoorOrganization": "casbin",
+	"casdoorApplication":  "app-casibase",
+}
+
 var (
 	dataDirOnce     sync.Once
 	resolvedDataDir string
@@ -55,10 +65,12 @@ func GetConfigString(key string) string {
 	// the only place in the codebase that reads beego's app.conf directly
 	res := beego.AppConfig.String(key)
 	if res == "" {
-		if key == "staticBaseUrl" {
+		if value, ok := builtInDefaults[key]; ok {
+			res = value
+		} else if key == "staticBaseUrl" {
 			res = "https://cdn.casbin.org"
 		} else if key == "logConfig" {
-			res = fmt.Sprintf("{\"filename\": \"logs/%s.log\", \"maxdays\":99999, \"perm\":\"0770\"}", GetConfigString("appname"))
+			res = fmt.Sprintf("{\"filename\": %q, \"maxdays\":99999, \"perm\":\"0600\"}", filepath.Join(GetDataDir(), "logs", GetConfigString("appname")+".log"))
 		}
 	}
 
@@ -172,7 +184,13 @@ func GetDatabaseDataSourceName() string {
 // key if anything ever changed the working directory.
 func GetDataDir() string {
 	dataDirOnce.Do(func() {
-		dataDir := GetConfigStringDefault("dataDir", DefaultDataDir)
+		dataDir := strings.TrimSpace(os.Getenv("CASOS_DATA_DIR"))
+		if dataDir == "" {
+			dataDir = strings.TrimSpace(GetConfigString("dataDir"))
+		}
+		if dataDir == "" {
+			dataDir = defaultUserDataDir()
+		}
 		resolvedDataDir = dataDir
 		if absolutePath, err := filepath.Abs(dataDir); err == nil {
 			resolvedDataDir = absolutePath
@@ -180,6 +198,56 @@ func GetDataDir() string {
 		logs.Info("casos data directory: %s", resolvedDataDir)
 	})
 	return resolvedDataDir
+}
+
+func defaultUserDataDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = ""
+	}
+	return defaultDataDir(runtime.GOOS, home, os.Getenv("XDG_DATA_HOME"), os.Getenv("LOCALAPPDATA"))
+}
+
+func defaultDataDir(goos, home, xdgDataHome, localAppData string) string {
+	switch goos {
+	case "windows":
+		if localAppData != "" {
+			return filepath.Join(localAppData, "CasOS")
+		}
+	case "darwin":
+		if home != "" {
+			return filepath.Join(home, "Library", "Application Support", "CasOS")
+		}
+	default:
+		if xdgDataHome != "" {
+			return filepath.Join(xdgDataHome, "casos")
+		}
+		if home != "" {
+			return filepath.Join(home, ".local", "share", "casos")
+		}
+	}
+	return DefaultDataDir
+}
+
+func EnsureDataDir() error {
+	dataDir := GetDataDir()
+	for _, dir := range []string{dataDir, filepath.Join(dataDir, "logs"), GetSessionDir()} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return fmt.Errorf("create data directory %q: %w", dir, err)
+		}
+	}
+	return nil
+}
+
+func GetSessionDir() string {
+	return resolveSessionDir(os.Getenv("CASOS_DATA_DIR"), GetConfigString("dataDir"), GetDataDir())
+}
+
+func resolveSessionDir(casosDataDir, configuredDataDir, dataDir string) string {
+	if strings.TrimSpace(casosDataDir) == "" && strings.TrimSpace(configuredDataDir) != "" {
+		return "./tmp"
+	}
+	return filepath.Join(dataDir, "sessions")
 }
 
 func resolveDatabaseDataSourceName(driverName, dataSourceName, dataDir string) string {
