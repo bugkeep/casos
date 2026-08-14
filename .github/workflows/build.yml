@@ -9,6 +9,10 @@ on:
       - master
   pull_request:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
 
   go-tests:
@@ -37,11 +41,140 @@ jobs:
       - run: yarn install && CI=false yarn run build
         working-directory: ./web
       - name: Upload build artifacts
-        if: github.repository == 'casosorg/casos' && github.event_name == 'push'
         uses: actions/upload-artifact@v4
         with:
           name: frontend-build-${{ github.run_id }}
           path: ./web/build
+
+  standalone:
+    name: Standalone ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    needs: [ frontend ]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            output: casos_linux_amd64
+            smoke: true
+          - goos: linux
+            goarch: arm64
+            output: casos_linux_arm64
+            smoke: false
+          - goos: windows
+            goarch: amd64
+            output: casos_windows_amd64.exe
+            smoke: false
+          - goos: windows
+            goarch: arm64
+            output: casos_windows_arm64.exe
+            smoke: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: ./go.mod
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-build-${{ github.run_id }}
+          path: ./web/build
+      - name: Build standalone release binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          CGO_ENABLED=0 GOOS="${{ matrix.goos }}" GOARCH="${{ matrix.goarch }}" \
+            go build -trimpath -tags embed -o "dist/${{ matrix.output }}" .
+      - name: Upload standalone release binaries
+        if: github.repository == 'casosorg/casos' && github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: standalone-${{ matrix.goos }}-${{ matrix.goarch }}-${{ github.run_id }}
+          path: ./dist/${{ matrix.output }}
+          retention-days: 1
+      - name: Smoke embedded Linux binary
+        if: matrix.smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          probe_dir="$(mktemp -d)"
+          pid=""
+          cleanup() {
+            if [[ -n "$pid" ]]; then
+              kill "$pid" 2>/dev/null || true
+              wait "$pid" 2>/dev/null || true
+            fi
+            rm -rf "$probe_dir"
+          }
+          trap cleanup EXIT
+
+          mkdir -p "$probe_dir/home" "$probe_dir/cwd"
+          (
+            cd "$probe_dir/cwd"
+            exec env HOME="$probe_dir/home" \
+              httpport=9000 \
+              "$GITHUB_WORKSPACE/dist/casos_linux_amd64" >"$probe_dir/casos.log" 2>&1
+          ) &
+          pid=$!
+
+          ready=false
+          for _ in $(seq 1 120); do
+            if curl --noproxy '*' -fsS http://127.0.0.1:9000/ >"$probe_dir/index.html" 2>/dev/null; then
+              ready=true
+              break
+            fi
+            if ! kill -0 "$pid" 2>/dev/null; then
+              cat "$probe_dir/casos.log" >&2
+              exit 1
+            fi
+            sleep 1
+          done
+          if [[ "$ready" != true ]]; then
+            cat "$probe_dir/casos.log" >&2
+            exit 1
+          fi
+
+          asset_path="$(grep -oE '/static/js/[^" ]+\.js' "$probe_dir/index.html" | head -n 1)"
+          [[ -n "$asset_path" ]]
+          curl --noproxy '*' -fsS "http://127.0.0.1:9000$asset_path" >/dev/null
+
+          curl --noproxy '*' -fsS -D "$probe_dir/dev.headers" -o /dev/null \
+            -H 'Origin: http://localhost:8001' http://localhost:9000/
+          grep -qi '^Access-Control-Allow-Origin: http://localhost:8001' "$probe_dir/dev.headers"
+
+          cross_status="$(curl --noproxy '*' -sS -o /dev/null -w '%{http_code}' \
+            -H 'Origin: https://attacker.example' http://127.0.0.1:9000/api/get-account)"
+          [[ "$cross_status" == 403 ]]
+
+          data_dir="$probe_dir/home/.local/share/casos"
+          [[ -f "$data_dir/casos.db" ]]
+          [[ -d "$data_dir/kine" ]]
+          [[ -d "$data_dir/tls" ]]
+          [[ -d "$data_dir/sessions" ]]
+          [[ "$(stat -c '%a' "$data_dir")" == 700 ]]
+
+  standalone-bundle:
+    name: Bundle standalone release binaries
+    if: github.repository == 'casosorg/casos' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    needs: [ standalone ]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: standalone-*-${{ github.run_id }}
+          path: ./dist
+          merge-multiple: true
+      - name: Generate release checksums
+        shell: bash
+        run: (cd dist && sha256sum casos_* > SHA256SUMS)
+      - name: Upload standalone release bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: standalone-binaries-${{ github.run_id }}
+          path: ./dist
+          retention-days: 1
 
   ui-tests:
     name: UI tests
@@ -414,7 +547,7 @@ jobs:
       contents: write
       issues: write
     if: github.repository == 'casosorg/casos' && github.event_name == 'push'
-    needs: [ frontend, ui-tests, backend, linter ]
+    needs: [ frontend, standalone-bundle, ui-tests, backend, linter ]
     outputs:
       new-release-published: ${{ steps.semantic.outputs.new_release_published }}
       new-release-version: ${{ steps.semantic.outputs.new_release_version }}
@@ -437,7 +570,14 @@ jobs:
     if: github.repository == 'casosorg/casos' && github.event_name == 'push' && needs.tag-release.outputs.new-release-published == 'true'
     needs: [ tag-release ]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: standalone-binaries-${{ github.run_id }}
+          path: ./dist
+      - name: Upload standalone binaries
+        run: gh release upload "v${{ needs.tag-release.outputs.new-release-version }}" ./dist/* --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Publish release
         run: gh release edit "v${{ needs.tag-release.outputs.new-release-version }}" --draft=false
         env:

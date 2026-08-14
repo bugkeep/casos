@@ -37,11 +37,10 @@ type localPathNodePathMap struct {
 }
 
 func ensureDefaultStorageProvisioner(ctx context.Context, client kubernetes.Interface, cfg Config) error {
-	if !path.IsAbs(cfg.DataDir) {
-		return fmt.Errorf("dataDir must be absolute to enable local-path storage: %s", cfg.DataDir)
+	if !path.IsAbs(cfg.LocalPathRoot) {
+		return fmt.Errorf("localPathRoot must be an absolute POSIX path to enable local-path storage: %s", cfg.LocalPathRoot)
 	}
-	rootDir := path.Join(cfg.DataDir, "local-path-provisioner")
-	configData, err := localPathConfigData(rootDir, cfg.LocalPathHelperImage)
+	configData, err := localPathConfigData(cfg.LocalPathRoot, cfg.LocalPathHelperImage)
 	if err != nil {
 		return err
 	}

@@ -8,7 +8,7 @@
 [![Release](https://img.shields.io/github/v/release/casosorg/casos?style=flat-square&color=4f46e5)](https://github.com/casosorg/casos/releases/latest)
 [![Go Report](https://goreportcard.com/badge/github.com/casosorg/casos?style=flat-square)](https://goreportcard.com/report/github.com/casosorg/casos)
 [![License](https://img.shields.io/github/license/casosorg/casos?style=flat-square&color=22c55e)](https://github.com/casosorg/casos/blob/master/LICENSE)
-[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-blue?style=flat-square)](https://github.com/casosorg/casos/releases/latest)
+[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows-blue?style=flat-square)](https://github.com/casosorg/casos/releases/latest)
 [![Discord](https://img.shields.io/discord/1022748306096537660?logo=discord&label=discord&color=5865F2&style=flat-square)](https://discord.gg/6ma4BAmV7P)
 
 **Official Website: [https://www.casos.net](https://www.casos.net)**
@@ -71,7 +71,49 @@ casos/
 - **Frontend**: [Node.js](https://nodejs.org/) 20+ and [Yarn](https://classic.yarnpkg.com/) 1.x
 - A [Casdoor](https://casdoor.org) instance (for authentication)
 
-Supported platforms: **Linux**, **macOS**, **Windows**
+Standalone releases are currently supported on **Linux** and **Windows** for
+amd64 and arm64.
+
+## Install
+
+Linux:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/casosorg/casos/master/scripts/install.sh | bash
+```
+
+Windows PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/casosorg/casos/master/scripts/install.ps1 | iex
+```
+
+The installers select the release binary for the current OS and architecture,
+verify it against the published `SHA256SUMS`, install it for the current user,
+and start CasOS at `http://127.0.0.1:9000`. On Linux, the default binary
+location is `~/.local/bin/casos`, separate from the data directory.
+On Windows, exit a running CasOS process before rerunning the installer to
+upgrade it; the installer refuses to replace an executable that is in use.
+
+Set `CASOS_VERSION` to an explicit release tag to select the downloaded binary
+version. The installer script itself still comes from the branch or commit in
+the script URL, so pin that URL as well when a fully reproducible historical
+installation is required. `SHA256SUMS` detects download corruption; it is not a
+substitute for release signing, provenance, or artifact attestation.
+
+A standalone installation without `conf/app.conf` stores its persistent data in
+the platform user-data directory:
+
+| Platform | Default data directory |
+|----------|------------------------|
+| Linux | `$XDG_DATA_HOME/casos`, or `~/.local/share/casos` when `XDG_DATA_HOME` is unset |
+| Windows | `%LOCALAPPDATA%\CasOS` |
+
+Set `CASOS_DATA_DIR` before starting CasOS to use a different standalone data
+directory. Keep that value stable across restarts so CasOS continues to use the
+same database, Kubernetes state, TLS material, and sessions. A newly created
+standalone data root and its managed subdirectories use mode `0700` on Unix;
+existing explicitly managed directory permissions are preserved.
 
 ## Configuration
 
@@ -80,6 +122,7 @@ Edit `conf/app.conf` with your values:
 ```ini
 appname       = casos
 httpport      = 9000
+httpBind      =
 runmode       = dev
 
 ; Database
@@ -104,15 +147,36 @@ socks5Proxy =
 apiserverPort = 6443
 apiserverBind = 127.0.0.1
 dataDir       = ./data
+storageProvisionerEnabled = true
+localPathRoot =
 ```
 
-SQLite is the default and stores CasOS business data in `data/casos.db` and
-Kubernetes state in `data/kine/state.db`. The `data` directory is ignored by
-Git and is writable when running the development command from the repository
-root.
+Source and configured builds keep the historical empty `httpBind` default and
+listen on all interfaces. Standalone binaries built with `-tags embed` default
+to `127.0.0.1`. Set `httpBind` explicitly to override the default for either
+build type. The supported frontend development origin
+`http://localhost:8001` may access the backend at `http://localhost:9000`;
+other browser origins must match the effective backend origin.
+
+When running from the repository, the checked-in `conf/app.conf` explicitly
+sets `dataDir=./data`. SQLite therefore stores CasOS business data in
+`data/casos.db` and Kubernetes state in `data/kine/state.db`. The `data`
+directory is ignored by Git and is writable when running the development
+command from the repository root. This configured development behavior is
+separate from the standalone defaults documented above.
+
+The built-in local-path provisioner defaults to disabled on Windows standalone
+binaries because `%LOCALAPPDATA%\CasOS` is a Windows control-plane path, not a
+valid storage root on Linux worker nodes. To enable it explicitly, set
+`storageProvisionerEnabled=true` and set `localPathRoot` to an absolute POSIX
+path available on the Linux workers, for example
+`/var/lib/casos/local-path-provisioner`. Linux and configured/source builds keep
+the existing enabled default; when `localPathRoot` is blank, they derive it from
+`dataDir` as before.
 
 > **Breaking change:** `dataDir` used to default to `/var/lib/casos`. It now
-> defaults to `./data`, which is resolved against the working directory of the
+> defaults to `./data` for deployments that use `conf/app.conf`. That relative
+> path is resolved against the working directory of the
 > CasOS process, so starting CasOS from a different directory points it at a
 > different — and most likely empty — data directory. Besides the two SQLite
 > databases, `dataDir` also holds the control-plane TLS material and the key

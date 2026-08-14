@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/casosorg/casos/conf"
@@ -23,6 +24,7 @@ type Config struct {
 	CoreDNSImage              string             // CoreDNS image used by the built-in DNS bootstrap
 	LocalPathProvisionerImage string             // local-path-provisioner controller image
 	LocalPathHelperImage      string             // helper pod image used by local-path-provisioner
+	LocalPathRoot             string             // POSIX path on Linux worker nodes used for local volumes
 	FlannelImage              string             // Flannel daemon image used by the built-in network bootstrap
 	FlannelCNIPluginImage     string             // Flannel CNI plugin image installed on worker hosts
 	IngressControllerImage    string             // Traefik image used by the built-in Ingress controller
@@ -36,7 +38,11 @@ type Config struct {
 // ConfigFromAppConf reads server config from the beego app.conf.
 func ConfigFromAppConf() (Config, error) {
 	dataDir := conf.GetDataDir()
-	bind := conf.GetConfigStringDefault("apiserverBind", outboundIP())
+	standalone := conf.IsStandaloneBuild()
+	bind := strings.TrimSpace(conf.GetConfigString("apiserverBind"))
+	if bind == "" {
+		bind = outboundIP()
+	}
 	port := conf.GetConfigIntDefault("apiserverPort", 6443)
 	driverName := conf.GetDatabaseDriverName()
 	dataSourceName := conf.GetDatabaseDataSourceName()
@@ -61,7 +67,9 @@ func ConfigFromAppConf() (Config, error) {
 
 	sandboxImage := conf.GetConfigStringDefault("sandboxImage", "registry.k8s.io/pause:3.10.1")
 
-	storageProvisionerEnabled := conf.GetConfigBoolDefault("storageProvisionerEnabled", true)
+	defaultStorageEnabled, defaultLocalPathRoot := storageProvisionerDefaults(runtime.GOOS, standalone, dataDir)
+	storageProvisionerEnabled := conf.GetConfigBoolDefault("storageProvisionerEnabled", defaultStorageEnabled)
+	localPathRoot := conf.GetConfigStringDefault("localPathRoot", defaultLocalPathRoot)
 	coreDNSImage := conf.GetConfigStringDefault("coreDNSImage", "docker.io/coredns/coredns:1.12.4")
 	localPathProvisionerImage := conf.GetConfigStringDefault("localPathProvisionerImage", "docker.io/rancher/local-path-provisioner:v0.0.32")
 	localPathHelperImage := conf.GetConfigStringDefault("localPathHelperImage", "docker.io/library/busybox:1.37.0")
@@ -86,6 +94,7 @@ func ConfigFromAppConf() (Config, error) {
 		CoreDNSImage:              coreDNSImage,
 		LocalPathProvisionerImage: localPathProvisionerImage,
 		LocalPathHelperImage:      localPathHelperImage,
+		LocalPathRoot:             localPathRoot,
 		FlannelImage:              flannelImage,
 		FlannelCNIPluginImage:     flannelCNIPluginImage,
 		IngressControllerImage:    ingressControllerImage,
@@ -97,6 +106,13 @@ func ConfigFromAppConf() (Config, error) {
 	}
 	normalizeApplicationAccessConfig(&config)
 	return config, nil
+}
+
+func storageProvisionerDefaults(goos string, standalone bool, dataDir string) (bool, string) {
+	if goos == "windows" && standalone {
+		return false, ""
+	}
+	return true, filepath.ToSlash(filepath.Join(dataDir, "local-path-provisioner"))
 }
 
 func resolveDatastoreEndpoint(driverName, dataSourceName, dbName, dataDir, configuredEndpoint string) (string, error) {

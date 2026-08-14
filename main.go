@@ -24,6 +24,9 @@ func main() {
 	// Allow multiple in-process Kubernetes components to reinitialise the global
 	// logging singleton without killing the process.
 	logsapi.ReapplyHandling = logsapi.ReapplyHandlingIgnoreUnchanged
+	if err := conf.EnsureDataDir(); err != nil {
+		panic(err)
+	}
 
 	object.InitFlag()
 	object.InitAdapter()
@@ -95,10 +98,11 @@ func main() {
 	beego.BConfig.CopyRequestBody = true
 	beego.BConfig.WebConfig.Session.SessionOn = true
 	beego.BConfig.WebConfig.Session.SessionProvider = "file"
-	beego.BConfig.WebConfig.Session.SessionProviderConfig = "./tmp"
+	beego.BConfig.WebConfig.Session.SessionProviderConfig = conf.GetSessionDir()
 	beego.BConfig.WebConfig.Session.SessionGCMaxLifetime = 3600 * 24 * 365
 
 	port := conf.GetConfigIntDefault("httpport", 9000)
-	logs.Info("casos listening on :%d", port)
-	beego.Run(fmt.Sprintf(":%v", port))
+	listenAddress := conf.GetHTTPListenAddress(port)
+	logs.Info("casos listening on %s", listenAddress)
+	beego.Run(listenAddress)
 }
