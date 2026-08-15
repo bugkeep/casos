@@ -186,6 +186,20 @@ yarn build
 
 Serve the `web/build/` directory with any static file server, or let the Go backend serve it directly.
 
+### Standalone binary
+
+Building with `-tags embed` compiles `web/build/` into the backend, producing a
+single file that serves the UI without needing the directory beside it. Run
+`yarn build` first — the build tag requires `web/build/` to exist.
+
+```bash
+cd web && GENERATE_SOURCEMAP=false yarn build && cd ..
+CGO_ENABLED=0 go build -trimpath -tags embed -o casos .
+```
+
+`GENERATE_SOURCEMAP=false` keeps the `.map` files out of the binary; without it
+they are embedded as well and add tens of megabytes.
+
 ### Lint
 
 ```bash
