@@ -109,7 +109,10 @@ dataDir       = ./data
 SQLite is the default and stores CasOS business data in `data/casos.db` and
 Kubernetes state in `data/kine/state.db`. The `data` directory is ignored by
 Git and is writable when running the development command from the repository
-root.
+root. A binary that runs without `conf/app.conf` and without a `dataDir`
+environment variable falls back to the per-user data directory
+(`~/.local/share/casos`, `~/Library/Application Support/CasOS`, or
+`%LOCALAPPDATA%\CasOS`) instead of a working-directory-relative path.
 
 > **Breaking change:** `dataDir` used to default to `/var/lib/casos`. It now
 > defaults to `./data`, which is resolved against the working directory of the

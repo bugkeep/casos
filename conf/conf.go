@@ -172,7 +172,7 @@ func GetDatabaseDataSourceName() string {
 // key if anything ever changed the working directory.
 func GetDataDir() string {
 	dataDirOnce.Do(func() {
-		dataDir := GetConfigStringDefault("dataDir", DefaultDataDir)
+		dataDir := GetConfigStringDefault("dataDir", defaultDataDir())
 		resolvedDataDir = dataDir
 		if absolutePath, err := filepath.Abs(dataDir); err == nil {
 			resolvedDataDir = absolutePath
@@ -180,6 +180,33 @@ func GetDataDir() string {
 		logs.Info("casos data directory: %s", resolvedDataDir)
 	})
 	return resolvedDataDir
+}
+
+// defaultDataDir applies when neither conf/app.conf nor the environment sets
+// dataDir, which is the case for a binary running without a config file. The
+// per-user directory keeps such a binary on the same state whatever directory
+// it was started from; DefaultDataDir is only reached when no per-user
+// location can be determined.
+func defaultDataDir() string {
+	switch runtime.GOOS {
+	case "windows":
+		if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
+			return filepath.Join(localAppData, "CasOS")
+		}
+	case "darwin":
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, "Library", "Application Support", "CasOS")
+		}
+	default:
+		// The XDG base directory specification ignores a relative XDG_DATA_HOME.
+		if xdgDataHome := os.Getenv("XDG_DATA_HOME"); strings.HasPrefix(xdgDataHome, "/") {
+			return filepath.Join(xdgDataHome, "casos")
+		}
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, ".local", "share", "casos")
+		}
+	}
+	return DefaultDataDir
 }
 
 func resolveDatabaseDataSourceName(driverName, dataSourceName, dataDir string) string {
