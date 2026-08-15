@@ -454,14 +454,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # Hold the release back until its binaries are attached, so watchers are
-      # never notified about a release that has nothing to download.
-      - name: Convert release to draft
-        if: steps.semantic.outputs.new_release_published == 'true'
-        run: gh release edit "v${{ steps.semantic.outputs.new_release_version }}" --draft=true
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
   github-release:
     name: GitHub Release
     runs-on: ubuntu-latest

@@ -53,9 +53,12 @@ upx:
     lzma: true
 
 release:
-  # semantic-release owns the tag, the release and its notes. GoReleaser only
-  # attaches artifacts, so it must not rewrite what is already there.
-  mode: append
+  # semantic-release owns the draft, tag, and notes. GoReleaser reuses that
+  # draft and leaves publication to the final workflow step after all uploads.
+  use_existing_draft: true
+  replace_existing_artifacts: true
+  draft: true
+  mode: keep-existing
 
 changelog:
   # Release notes come from semantic-release.
