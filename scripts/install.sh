@@ -147,7 +147,7 @@ if [[ "$OS_NAME" == "darwin" && "$ARCH_NAME" == "x86_64" ]] &&
 	ARCH_NAME="arm64"
 fi
 
-FILENAME="casos_${OS_NAME}_${ARCH_NAME}"
+FILENAME="casos_${OS_NAME}_${ARCH_NAME}.tar.gz"
 TEMP_DIR="$(mktemp -d)"
 PENDING=""
 cleanup() {
@@ -171,12 +171,19 @@ else
 fi
 [[ "$ACTUAL" == "$EXPECTED" ]] || die "download checksum verification failed"
 
+# The release ships the executable compressed, which cuts the download to about
+# a third. The archive holds that one file and nothing else.
+need_cmd tar
+tar -xzf "$TEMP_DIR/$FILENAME" -C "$TEMP_DIR" casos ||
+	die "could not extract casos from $FILENAME"
+[[ -f "$TEMP_DIR/casos" ]] || die "$FILENAME did not contain the casos executable"
+
 mkdir -p "$INSTALL_DIR"
 INSTALL_DIR="$(cd "$INSTALL_DIR" && pwd -P)"
 [[ -w "$INSTALL_DIR" ]] || die "installation directory is not writable: $INSTALL_DIR"
 
 PENDING="$INSTALL_DIR/.casos.new.$$"
-cp "$TEMP_DIR/$FILENAME" "$PENDING"
+cp "$TEMP_DIR/casos" "$PENDING"
 chmod 755 "$PENDING"
 mv -f "$PENDING" "$INSTALL_DIR/casos"
 PENDING=""

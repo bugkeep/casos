@@ -112,16 +112,16 @@ $ArchName = switch ($Architecture) {
     default { throw "Unsupported architecture: $Architecture" }
 }
 
-$Filename = "casos_windows_${ArchName}.exe"
+$Filename = "casos_windows_${ArchName}.zip"
 $TempDir = Join-Path $env:TEMP "casos_install_$([guid]::NewGuid().ToString('N'))"
 $PendingExe = $null
 New-Item -ItemType Directory -Path $TempDir | Out-Null
 
 try {
-    $ExePath = Join-Path $TempDir $Filename
+    $ArchivePath = Join-Path $TempDir $Filename
     $ChecksumsPath = Join-Path $TempDir 'SHA256SUMS'
     Write-Host "Downloading CasOS $Version..."
-    Invoke-WebRequest -Uri "$ReleaseUrl/$Filename" -OutFile $ExePath -UseBasicParsing
+    Invoke-WebRequest -Uri "$ReleaseUrl/$Filename" -OutFile $ArchivePath -UseBasicParsing
     Invoke-WebRequest -Uri "$ReleaseUrl/SHA256SUMS" -OutFile $ChecksumsPath -UseBasicParsing
 
     $ChecksumLine = Get-Content $ChecksumsPath |
@@ -129,8 +129,15 @@ try {
         Select-Object -First 1
     if (-not $ChecksumLine) { throw "Release checksum for $Filename was not found." }
     $Expected = ($ChecksumLine -split '\s+')[0].ToLowerInvariant()
-    $Actual = (Get-FileHash -Algorithm SHA256 -Path $ExePath).Hash.ToLowerInvariant()
+    $Actual = (Get-FileHash -Algorithm SHA256 -Path $ArchivePath).Hash.ToLowerInvariant()
     if ($Actual -ne $Expected) { throw 'Download checksum verification failed.' }
+
+    # The release ships the executable compressed, which cuts the download to
+    # about a third. The archive holds that one file and nothing else.
+    $ExtractDir = Join-Path $TempDir 'extracted'
+    Expand-Archive -Path $ArchivePath -DestinationPath $ExtractDir -Force
+    $ExePath = Join-Path $ExtractDir 'casos.exe'
+    if (-not (Test-Path $ExePath)) { throw "$Filename did not contain casos.exe." }
 
     New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
     $InstallDir = [System.IO.Path]::GetFullPath($InstallDir)

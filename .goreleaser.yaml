@@ -23,10 +23,20 @@ builds:
       - amd64
       - arm64
 
-# Release bare executables: the embed build tag compiles web/build into the
-# binary, so there is nothing to unpack beside it.
+# An in-process Kubernetes control plane links to roughly 150 MB of machine
+# code, and the embed build tag adds the frontend on top of that. Gzip and
+# deflate take that to about a third, so the release ships archives rather than
+# bare executables: the download shrinks by two thirds while what lands on disk
+# is still an ordinary, unpacked binary that antivirus and Gatekeeper accept.
 archives:
-  - formats: [ binary ]
+  - formats: [ tar.gz ]
+    format_overrides:
+      - goos: windows
+        formats: [ zip ]
+    # Each archive holds the executable and nothing else, so the installers can
+    # unpack and move a single known file.
+    files:
+      - none*
     # GOARCH spells the 64-bit Intel target "amd64", which reads like an
     # AMD-only build to anyone who does not package software for a living.
     # Publish it under the vendor-neutral "x86_64"; the installers in scripts/
@@ -35,22 +45,9 @@ archives:
       {{ .ProjectName }}_{{ .Os }}_
       {{- if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
 
+# Covers the archives, which is what the installers download and verify.
 checksum:
   name_template: SHA256SUMS
-
-# UPX roughly halves a binary that carries a Kubernetes control plane, which is
-# the difference between a quick download and a slow one. Windows is left
-# uncompressed on purpose: packed executables are a routine antivirus false
-# positive, and a blocked download is worse than a large one. macOS is left
-# uncompressed because packing rewrites the Mach-O and destroys the ad-hoc
-# signature the Go linker emits, which Apple Silicon requires to execute a
-# binary at all.
-upx:
-  - goos: [ linux ]
-    goarch: [ amd64, arm64 ]
-    enabled: true
-    compress: "9"
-    lzma: true
 
 release:
   # semantic-release owns the draft, tag, and notes. GoReleaser reuses that

@@ -32,6 +32,9 @@ tmp/
 # Local build output
 /casos
 
+# GoReleaser output, written by a local `goreleaser release --snapshot`
+/dist/
+
 # Local runtime data (certs, kine storage, etc.)
 /data/
 
