@@ -1,0 +1,49 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+
+version: 2
+
+project_name: casos
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    flags:
+      - -tags=embed
+      - -trimpath
+    ldflags:
+      - -s -w
+    goos:
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+# Release bare executables: the embed build tag compiles web/build into the
+# binary, so there is nothing to unpack beside it.
+archives:
+  - formats: [ binary ]
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: SHA256SUMS
+
+# UPX roughly halves a binary that carries a Kubernetes control plane, which is
+# the difference between a quick download and a slow one. Windows is left
+# uncompressed on purpose: packed executables are a routine antivirus false
+# positive, and a blocked download is worse than a large one.
+upx:
+  - goos: [ linux ]
+    goarch: [ amd64, arm64 ]
+    enabled: true
+    compress: "9"
+    lzma: true
+
+release:
+  # semantic-release owns the tag, the release and its notes. GoReleaser only
+  # attaches artifacts, so it must not rewrite what is already there.
+  mode: append
+
+changelog:
+  # Release notes come from semantic-release.
+  disable: true

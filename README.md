@@ -200,6 +200,10 @@ CGO_ENABLED=0 go build -trimpath -tags embed -o casos .
 `GENERATE_SOURCEMAP=false` keeps the `.map` files out of the binary; without it
 they are embedded as well and add tens of megabytes.
 
+Every release publishes these binaries for Linux and Windows on amd64 and
+arm64, alongside a `SHA256SUMS` file, on the
+[releases page](https://github.com/casosorg/casos/releases/latest).
+
 ### Lint
 
 ```bash

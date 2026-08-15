@@ -36,12 +36,38 @@ jobs:
           cache-dependency-path: ./web/yarn.lock
       - run: yarn install && CI=false yarn run build
         working-directory: ./web
+      # Consumed within the same run by the standalone and release jobs, so it
+      # is uploaded everywhere and expires immediately.
       - name: Upload build artifacts
-        if: github.repository == 'casosorg/casos' && github.event_name == 'push'
         uses: actions/upload-artifact@v4
         with:
           name: frontend-build-${{ github.run_id }}
           path: ./web/build
+          retention-days: 1
+
+  standalone:
+    name: Standalone build
+    runs-on: ubuntu-latest
+    needs: [ frontend ]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: ./go.mod
+      - name: Download frontend build
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-build-${{ github.run_id }}
+          path: ./web/build
+      # Exercises the release configuration on every pull request, so a broken
+      # embed build or GoReleaser config fails here instead of at release time.
+      - name: Build release binary
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          args: build --snapshot --clean --single-target
 
   ui-tests:
     name: UI tests
@@ -414,7 +440,7 @@ jobs:
       contents: write
       issues: write
     if: github.repository == 'casosorg/casos' && github.event_name == 'push'
-    needs: [ frontend, ui-tests, backend, linter ]
+    needs: [ frontend, standalone, ui-tests, backend, linter ]
     outputs:
       new-release-published: ${{ steps.semantic.outputs.new_release_published }}
       new-release-version: ${{ steps.semantic.outputs.new_release_version }}
@@ -428,6 +454,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # Hold the release back until its binaries are attached, so watchers are
+      # never notified about a release that has nothing to download.
+      - name: Convert release to draft
+        if: steps.semantic.outputs.new_release_published == 'true'
+        run: gh release edit "v${{ steps.semantic.outputs.new_release_version }}" --draft=true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   github-release:
     name: GitHub Release
     runs-on: ubuntu-latest
@@ -438,6 +472,33 @@ jobs:
     needs: [ tag-release ]
     steps:
       - uses: actions/checkout@v4
+        with:
+          # GoReleaser reads the version from the tag semantic-release pushed.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: ./go.mod
+
+      - name: Download frontend build
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-build-${{ github.run_id }}
+          path: ./web/build
+
+      - name: Install UPX
+        run: sudo apt-get install -y upx-ucl
+
+      - name: Attach release binaries
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Publish release
         run: gh release edit "v${{ needs.tag-release.outputs.new-release-version }}" --draft=false
         env:
