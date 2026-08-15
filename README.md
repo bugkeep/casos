@@ -75,13 +75,13 @@ Supported platforms: **Linux**, **macOS**, **Windows**
 
 ## Install
 
-Linux and macOS (amd64 or arm64):
+Linux and macOS (x86_64 or arm64):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/casosorg/casos/master/scripts/install.sh | bash
 ```
 
-Windows PowerShell (x64 or arm64):
+Windows PowerShell (x86_64 or arm64):
 
 ```powershell
 irm https://raw.githubusercontent.com/casosorg/casos/master/scripts/install.ps1 | iex
@@ -292,7 +292,7 @@ CGO_ENABLED=0 go build -trimpath -tags embed -o casos .
 `GENERATE_SOURCEMAP=false` keeps the `.map` files out of the binary; without it
 they are embedded as well and add tens of megabytes.
 
-Every release publishes these binaries for Linux and Windows on amd64 and
+Every release publishes these binaries for Linux and Windows on x86_64 and
 arm64, alongside a `SHA256SUMS` file, on the
 [releases page](https://github.com/casosorg/casos/releases/latest).
 

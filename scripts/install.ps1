@@ -107,7 +107,7 @@ if ($Version -eq 'latest') {
 
 $Architecture = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
 $ArchName = switch ($Architecture) {
-    'AMD64' { 'amd64' }
+    'AMD64' { 'x86_64' }
     'ARM64' { 'arm64' }
     default { throw "Unsupported architecture: $Architecture" }
 }

@@ -27,7 +27,13 @@ builds:
 # binary, so there is nothing to unpack beside it.
 archives:
   - formats: [ binary ]
-    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    # GOARCH spells the 64-bit Intel target "amd64", which reads like an
+    # AMD-only build to anyone who does not package software for a living.
+    # Publish it under the vendor-neutral "x86_64"; the installers in scripts/
+    # ask for the same name.
+    name_template: >-
+      {{ .ProjectName }}_{{ .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
 
 checksum:
   name_template: SHA256SUMS

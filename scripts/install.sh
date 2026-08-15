@@ -135,14 +135,14 @@ case "$(uname -s)" in
 esac
 
 case "$(uname -m)" in
-	x86_64|amd64) ARCH_NAME="amd64" ;;
+	x86_64|amd64) ARCH_NAME="x86_64" ;;
 	aarch64|arm64) ARCH_NAME="arm64" ;;
 	*) die "unsupported architecture; download manually from https://github.com/${REPO}/releases" ;;
 esac
 
 # Under Rosetta 2 `uname -m` describes the emulated x86_64 shell rather than the
 # Apple Silicon host, so install the native arm64 build instead of an emulated one.
-if [[ "$OS_NAME" == "darwin" && "$ARCH_NAME" == "amd64" ]] &&
+if [[ "$OS_NAME" == "darwin" && "$ARCH_NAME" == "x86_64" ]] &&
 	[[ "$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)" == "1" ]]; then
 	ARCH_NAME="arm64"
 fi
