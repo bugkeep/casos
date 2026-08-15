@@ -14,6 +14,7 @@ builds:
       - -s -w
     goos:
       - linux
+      - darwin
       - windows
     goarch:
       - amd64
@@ -31,7 +32,10 @@ checksum:
 # UPX roughly halves a binary that carries a Kubernetes control plane, which is
 # the difference between a quick download and a slow one. Windows is left
 # uncompressed on purpose: packed executables are a routine antivirus false
-# positive, and a blocked download is worse than a large one.
+# positive, and a blocked download is worse than a large one. macOS is left
+# uncompressed because packing rewrites the Mach-O and destroys the ad-hoc
+# signature the Go linker emits, which Apple Silicon requires to execute a
+# binary at all.
 upx:
   - goos: [ linux ]
     goarch: [ amd64, arm64 ]
