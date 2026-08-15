@@ -35,6 +35,10 @@ var (
 )
 
 func init() {
+	// Must run first: a standalone build replaces beego's config wholesale,
+	// which would otherwise discard the presets applied below.
+	loadEmbeddedConfig()
+
 	// this array contains the beego configuration items that may be modified via env
 	presetConfigItems := []string{"httpport", "appname"}
 	for _, key := range presetConfigItems {
@@ -173,6 +177,12 @@ func GetDatabaseDataSourceName() string {
 func GetDataDir() string {
 	dataDirOnce.Do(func() {
 		dataDir := GetConfigStringDefault("dataDir", defaultDataDir())
+		// The compiled-in conf/app.conf carries the repository's dataDir=./data,
+		// which describes a source checkout rather than an installed binary. An
+		// explicit environment override still wins.
+		if IsEmbeddedConfig() && os.Getenv("dataDir") == "" {
+			dataDir = defaultDataDir()
+		}
 		resolvedDataDir = dataDir
 		if absolutePath, err := filepath.Abs(dataDir); err == nil {
 			resolvedDataDir = absolutePath
