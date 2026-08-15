@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"os/signal"
+	"runtime"
 	"syscall"
 
 	"github.com/beego/beego"
@@ -20,12 +22,37 @@ import (
 	"github.com/casosorg/casos/server"
 )
 
+// Build metadata, set through -ldflags "-X main.version=..." when GoReleaser
+// builds a release. A binary built any other way reports the fallbacks, which
+// is how a development build tells itself apart from a released one.
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
+func versionString() string {
+	return fmt.Sprintf("casos %s (commit %s, built %s, %s %s/%s)",
+		version, commit, date, runtime.Version(), runtime.GOOS, runtime.GOARCH)
+}
+
 func main() {
 	// Allow multiple in-process Kubernetes components to reinitialise the global
 	// logging singleton without killing the process.
 	logsapi.ReapplyHandling = logsapi.ReapplyHandlingIgnoreUnchanged
 
+	// Registered before InitFlag, which is what parses the command line.
+	showVersion := flag.Bool("version", false, "print the CasOS version and exit")
+
 	object.InitFlag()
+
+	// Answered before any subsystem starts, so the flag works on a machine with
+	// no database, no config file and no writable data directory.
+	if *showVersion {
+		fmt.Println(versionString())
+		return
+	}
+
 	object.InitAdapter()
 	object.CreateTables()
 	object.InitSite()

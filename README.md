@@ -127,6 +127,15 @@ window, so clear the ones you no longer want:
 Remove-Item Env:\CASOS_VERSION
 ```
 
+Check what you ended up with, which is also what to quote in a bug report:
+
+```bash
+casos --version
+```
+
+A released binary prints its tag, commit and build date; a binary you built
+yourself reports `dev`.
+
 ### Uninstall
 
 The uninstaller removes the binary and the `PATH` entry the installer added.
