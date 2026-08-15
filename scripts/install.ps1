@@ -1,13 +1,31 @@
 # CasOS one-step installer, adapted from OpenAgent's Apache-2.0 installer.
 # Usage:
 #   irm https://raw.githubusercontent.com/casosorg/casos/master/scripts/install.ps1 | iex
+#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/casosorg/casos/master/scripts/install.ps1))) -Uninstall
 #
 # Optional environment variables:
 #   CASOS_VERSION  release tag such as v1.32.0 (default: latest)
 #   CASOS_REPOSITORY GitHub release repository (default: casosorg/casos)
 #   INSTALL_DIR    binary directory (default: $env:LOCALAPPDATA\CasOS\bin)
 
+# ValueFromRemainingArguments catches the "--uninstall" spelling that anyone
+# arriving from the Bash installer will reach for first; PowerShell would
+# otherwise reject it as an unexpected positional argument.
+param(
+    [switch] $Uninstall,
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]] $ExtraArgs
+)
+
 $ErrorActionPreference = 'Stop'
+
+foreach ($arg in @($ExtraArgs)) {
+    switch -Regex ($arg) {
+        '^--?uninstall$' { $Uninstall = $true }
+        '^$'             { }
+        default          { throw "Unknown option: $arg" }
+    }
+}
 
 # Windows PowerShell 5.1 on .NET Framework 4.6 and earlier defaults to SSL 3.0 /
 # TLS 1.0, which github.com refuses, so the download fails before it starts. Add
@@ -28,6 +46,54 @@ $InstallDir = if ($env:INSTALL_DIR) {
     [System.IO.Path]::GetFullPath($env:INSTALL_DIR)
 } else {
     Join-Path $env:LOCALAPPDATA 'CasOS\bin'
+}
+
+if ($Uninstall) {
+    $InstalledExe = Join-Path $InstallDir 'casos.exe'
+    $Found = $false
+
+    if (Test-Path $InstalledExe) {
+        $RunningCasOS = Get-CimInstance Win32_Process -Filter "Name = 'casos.exe'" -ErrorAction SilentlyContinue |
+            Where-Object { $_.ExecutablePath -and ([System.IO.Path]::GetFullPath($_.ExecutablePath) -eq $InstalledExe) }
+        if ($RunningCasOS) {
+            throw 'CasOS is currently running. Exit CasOS, then run the uninstaller again.'
+        }
+        Remove-Item -Path $InstalledExe -Force
+        Write-Host "Removed $InstalledExe"
+        $Found = $true
+    } else {
+        Write-Host "No CasOS binary at $InstalledExe"
+    }
+
+    # Drop only the install directory itself. Under the default layout its
+    # parent is %LOCALAPPDATA%\CasOS, which is the data directory.
+    if ((Test-Path $InstallDir) -and -not (Get-ChildItem -Force -Path $InstallDir)) {
+        Remove-Item -Path $InstallDir -Force
+    }
+
+    $UserPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
+    $PathEntries = @($UserPath -split ';' | Where-Object { $_ })
+    $KeptEntries = @($PathEntries | Where-Object { $_.TrimEnd('\') -ne $InstallDir.TrimEnd('\') })
+    if ($KeptEntries.Count -ne $PathEntries.Count) {
+        [Environment]::SetEnvironmentVariable('PATH', ($KeptEntries -join ';'), 'User')
+        Write-Host "Removed $InstallDir from your user PATH."
+        $Found = $true
+    }
+    $env:PATH = (@($env:PATH -split ';' | Where-Object { $_ -and $_.TrimEnd('\') -ne $InstallDir.TrimEnd('\') }) -join ';')
+
+    if (-not $Found) { Write-Host 'Nothing to uninstall.' }
+
+    $DataDir = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'CasOS' } else { $null }
+    if ($DataDir -and (Test-Path $DataDir)) {
+        Write-Host ''
+        Write-Host 'Your CasOS data was left in place at:'
+        Write-Host "  $DataDir"
+        Write-Host 'It holds the SQLite databases, the control-plane TLS material and the'
+        Write-Host 'key that decrypts stored SSH credentials. Delete it only if you are'
+        Write-Host 'certain you want that state gone:'
+        Write-Host "  Remove-Item -Recurse -Force '$DataDir'"
+    }
+    return
 }
 
 if ($Repo -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') { throw "Invalid GitHub repository: $Repo" }

@@ -2,6 +2,7 @@
 # CasOS one-step installer, adapted from OpenAgent's Apache-2.0 installer.
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/casosorg/casos/master/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/casosorg/casos/master/scripts/install.sh | bash -s -- --uninstall
 #
 # Optional environment variables:
 #   CASOS_VERSION  release tag such as v1.32.0 (default: latest)
@@ -17,15 +18,108 @@ INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 info() { printf '%s\n' "$*"; }
 die() { printf '[casos] %s\n' "$*" >&2; exit 1; }
 
-[[ "$REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || die "invalid GitHub repository: $REPO"
+usage() {
+	cat <<'EOF'
+CasOS installer.
+
+  --uninstall   remove the CasOS binary and its PATH entry
+  --help        show this message
+
+Piping the script to bash needs "-s --" before the option:
+  curl -fsSL .../install.sh | bash -s -- --uninstall
+EOF
+}
+
+ACTION="install"
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+		--uninstall) ACTION="uninstall" ;;
+		-h|--help) usage; exit 0 ;;
+		*) die "unknown option: $1 (try --help)" ;;
+	esac
+	shift
+done
 
 need_cmd() {
 	command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
 }
 
-need_cmd curl
-
 [[ "$INSTALL_DIR" != *:* ]] || die "INSTALL_DIR must not contain a PATH separator (:)"
+
+# The line install adds to the shell rc file, and the file it goes in. Both
+# steps have to agree exactly so that uninstall can find and drop the line.
+shell_rc_path() {
+	local login_shell="${SHELL:-}" detected
+	if command -v getent >/dev/null 2>&1; then
+		detected="$(getent passwd "$(id -un)" | cut -d: -f7 || true)"
+		[[ -z "$detected" ]] || login_shell="$detected"
+	fi
+	case "$login_shell" in
+		*/zsh) printf '%s\n' "$HOME/.zshrc" ;;
+		*/bash) printf '%s\n' "$HOME/.bashrc" ;;
+	esac
+}
+
+path_line_for() { printf 'export PATH=%q:"$PATH"' "$1"; }
+
+# Mirrors conf.defaultDataDir so uninstall can report where state was left.
+data_dir() {
+	case "$(uname -s)" in
+		Darwin) printf '%s\n' "$HOME/Library/Application Support/CasOS" ;;
+		*)
+			if [[ "${XDG_DATA_HOME:-}" == /* ]]; then
+				printf '%s\n' "$XDG_DATA_HOME/casos"
+			else
+				printf '%s\n' "$HOME/.local/share/casos"
+			fi
+			;;
+	esac
+}
+
+if [[ "$ACTION" == "uninstall" ]]; then
+	# Resolve without creating anything: uninstall must not make directories.
+	[[ ! -d "$INSTALL_DIR" ]] || INSTALL_DIR="$(cd "$INSTALL_DIR" && pwd -P)"
+	FOUND=0
+
+	if [[ -e "$INSTALL_DIR/casos" ]]; then
+		rm -f "$INSTALL_DIR/casos" || die "could not remove $INSTALL_DIR/casos"
+		info "Removed $INSTALL_DIR/casos"
+		FOUND=1
+	else
+		info "No CasOS binary at $INSTALL_DIR/casos"
+	fi
+
+	SHELL_RC="$(shell_rc_path)"
+	PATH_LINE="$(path_line_for "$INSTALL_DIR")"
+	if [[ -n "$SHELL_RC" ]] && [[ -f "$SHELL_RC" ]] && grep -Fxq "$PATH_LINE" "$SHELL_RC"; then
+		RC_TEMP="$(mktemp)"
+		grep -Fxv "$PATH_LINE" "$SHELL_RC" > "$RC_TEMP" || true
+		# Write through the original file so its permissions, ownership and any
+		# symlink pointing at it survive the edit.
+		cat "$RC_TEMP" > "$SHELL_RC"
+		rm -f "$RC_TEMP"
+		info "Removed the CasOS PATH entry from $SHELL_RC"
+		FOUND=1
+	fi
+
+	[[ "$FOUND" -eq 1 ]] || info "Nothing to uninstall."
+
+	DATA_DIR="$(data_dir)"
+	if [[ -d "$DATA_DIR" ]]; then
+		info ""
+		info "Your CasOS data was left in place at:"
+		info "  $DATA_DIR"
+		info "It holds the SQLite databases, the control-plane TLS material and the"
+		info "key that decrypts stored SSH credentials. Delete it only if you are"
+		info "certain you want that state gone:"
+		info "  rm -rf $(printf '%q' "$DATA_DIR")"
+	fi
+	exit 0
+fi
+
+[[ "$REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || die "invalid GitHub repository: $REPO"
+
+need_cmd curl
 
 if [[ "$CASOS_VERSION" == "latest" ]]; then
 	RELEASE_URL="https://github.com/${REPO}/releases/latest/download"
@@ -87,17 +181,8 @@ chmod 755 "$PENDING"
 mv -f "$PENDING" "$INSTALL_DIR/casos"
 PENDING=""
 
-SHELL_RC=""
-LOGIN_SHELL="${SHELL:-}"
-if command -v getent >/dev/null 2>&1; then
-	DETECTED_LOGIN_SHELL="$(getent passwd "$(id -un)" | cut -d: -f7 || true)"
-	[[ -z "$DETECTED_LOGIN_SHELL" ]] || LOGIN_SHELL="$DETECTED_LOGIN_SHELL"
-fi
-case "$LOGIN_SHELL" in
-	*/zsh) SHELL_RC="$HOME/.zshrc" ;;
-	*/bash) SHELL_RC="$HOME/.bashrc" ;;
-esac
-PATH_LINE="$(printf 'export PATH=%q:"$PATH"' "$INSTALL_DIR")"
+SHELL_RC="$(shell_rc_path)"
+PATH_LINE="$(path_line_for "$INSTALL_DIR")"
 if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]] && [[ -n "$SHELL_RC" ]] && \
 	! grep -Fq "$PATH_LINE" "$SHELL_RC" 2>/dev/null; then
 	printf '\n%s\n' "$PATH_LINE" >> "$SHELL_RC"

@@ -127,6 +127,26 @@ window, so clear the ones you no longer want:
 Remove-Item Env:\CASOS_VERSION
 ```
 
+### Uninstall
+
+The uninstaller removes the binary and the `PATH` entry the installer added.
+Pass the same `INSTALL_DIR` you installed with, if it was not the default.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/casosorg/casos/master/scripts/install.sh | bash -s -- --uninstall
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/casosorg/casos/master/scripts/install.ps1))) -Uninstall
+```
+
+Your data directory is **not** deleted. It holds the SQLite databases, the
+control-plane TLS material and the key that decrypts stored SSH credentials, so
+removing it is a separate, deliberate step. The uninstaller prints the path and
+the exact command for it.
+
+### Notes
+
 The macOS binaries are not notarized. The installer is unaffected because
 `curl` does not mark downloads with `com.apple.quarantine`, but a build fetched
 manually through a browser is quarantined and Gatekeeper refuses to run it.
