@@ -96,11 +96,35 @@ immediately. On an Apple Silicon Mac the installer picks the native `arm64`
 build even when it runs from a Rosetta shell. Open
 `http://localhost:9000` after starting CasOS. Rerun the command to upgrade. Set
 `CASOS_VERSION` to a release tag such as `v1.32.0` to install that version.
+Both installers read the same settings:
+
+| Variable            | Default                                    | Purpose                          |
+|---------------------|--------------------------------------------|----------------------------------|
+| `CASOS_VERSION`     | `latest`                                   | Release tag, such as `v1.32.0`   |
+| `INSTALL_DIR`       | `$HOME/.local/bin`, `%LOCALAPPDATA%\CasOS\bin` | Directory to install into    |
+| `CASOS_REPOSITORY`  | `casosorg/casos`                           | Release repository to pull from  |
+
 For a piped Linux or macOS install, pass installer variables to `bash`, not to
 `curl`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/casosorg/casos/master/scripts/install.sh | CASOS_VERSION=v1.32.0 INSTALL_DIR="$HOME/.local/bin" bash
+```
+
+PowerShell has no equivalent prefix syntax. `iex` runs the installer inside the
+current session, so set the variables as `$env:` entries on their own lines
+first:
+
+```powershell
+$env:CASOS_VERSION = 'v1.32.0'
+irm https://raw.githubusercontent.com/casosorg/casos/master/scripts/install.ps1 | iex
+```
+
+Those entries outlive the install and would pin any later run in the same
+window, so clear the ones you no longer want:
+
+```powershell
+Remove-Item Env:\CASOS_VERSION
 ```
 
 The macOS binaries are not notarized. The installer is unaffected because
