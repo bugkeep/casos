@@ -9,6 +9,16 @@
 
 $ErrorActionPreference = 'Stop'
 
+# Windows PowerShell 5.1 on .NET Framework 4.6 and earlier defaults to SSL 3.0 /
+# TLS 1.0, which github.com refuses, so the download fails before it starts. Add
+# TLS 1.2 only when the process carries an explicit protocol list that lacks it.
+# SystemDefault (0) means the OS picks the protocol and already prefers TLS
+# 1.2/1.3; overwriting it would disable TLS 1.3 rather than fix anything.
+$TlsProtocol = [Net.ServicePointManager]::SecurityProtocol
+if ($TlsProtocol -ne 0 -and -not ($TlsProtocol -band [Net.SecurityProtocolType]::Tls12)) {
+    [Net.ServicePointManager]::SecurityProtocol = $TlsProtocol -bor [Net.SecurityProtocolType]::Tls12
+}
+
 $Repo = if ($env:CASOS_REPOSITORY) { $env:CASOS_REPOSITORY } else { 'casosorg/casos' }
 $Version = if ($env:CASOS_VERSION) { $env:CASOS_VERSION } else { 'latest' }
 $InstallDir = if ($env:INSTALL_DIR) {
