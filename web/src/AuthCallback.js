@@ -2,6 +2,7 @@ import React from "react";
 import {Button, Result, Spin} from "antd";
 import {withRouter} from "react-router-dom";
 import * as Setting from "./Setting";
+import {resolveSigninRedirect} from "./SigninPage";
 
 class AuthCallback extends React.Component {
   constructor(props) {
@@ -12,31 +13,42 @@ class AuthCallback extends React.Component {
     };
   }
 
-  UNSAFE_componentWillMount() {
+  componentDidMount() {
+    this.mounted = true;
     this.login();
+  }
+
+  componentWillUnmount() {
+    this.mounted = false;
   }
 
   getFromLink() {
     const from = sessionStorage.getItem("from");
+    sessionStorage.removeItem("from");
     if (from === null) {
       return "/";
     }
-    return from;
+    return resolveSigninRedirect(from);
   }
 
-  login() {
-    Setting.signin().then((res) => {
+  async login() {
+    try {
+      const res = await Setting.signin();
       if (res.status === "ok") {
         Setting.showMessage("success", "Logged in successfully");
 
         const link = this.getFromLink();
         Setting.goToLink(link);
-      } else {
+      } else if (this.mounted) {
         this.setState({
           msg: res.msg,
         });
       }
-    });
+    } catch {
+      if (this.mounted) {
+        this.setState({msg: "Sign-in failed. Please try again."});
+      }
+    }
   }
 
   render() {

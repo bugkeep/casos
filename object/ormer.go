@@ -220,6 +220,7 @@ func (a *Ormer) createTable() {
 		new(CasbinRule),
 		new(TrivyScanResult),
 		new(HelmRepo),
+		new(LocalUser),
 	); err != nil {
 		panic(fmt.Errorf("sync database schema: %w", err))
 	}

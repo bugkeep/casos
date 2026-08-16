@@ -5,7 +5,6 @@ import {ConfigProvider, FloatButton, Layout} from "antd";
 import * as Setting from "./Setting";
 import * as AccountBackend from "./backend/AccountBackend";
 import * as SiteBackend from "./backend/SiteBackend";
-import * as Conf from "./Conf";
 import {getShadcnThemeComponents, getShadcnThemeToken} from "./shadcnTheme";
 import ManagementPage from "./ManagementPage";
 import AuthCallback from "./AuthCallback";
@@ -15,7 +14,6 @@ class App extends Component {
   constructor(props) {
     super(props);
     Setting.initServerUrl();
-    Setting.initCasdoorSdk(Conf.AuthConfig);
 
     let storageThemeAlgorithm = ["default"];
     try {
@@ -32,12 +30,34 @@ class App extends Component {
       themeAlgorithm: storageThemeAlgorithm,
       site: undefined,
       logo: null,
+      signinOptions: undefined,
     };
   }
 
-  UNSAFE_componentWillMount() {
-    this.getAccount();
+  componentDidMount() {
+    this.initializeAuth();
     this.loadSite();
+  }
+
+  async initializeAuth() {
+    try {
+      const res = await AccountBackend.getSigninOptions();
+      if (res.status !== "ok") {
+        throw new Error(res.msg || "Failed to load sign-in options");
+      }
+      const signinOptions = res.data || {};
+      if (signinOptions.casdoorConfigured && signinOptions.authConfig) {
+        Setting.initCasdoorSdk(signinOptions.authConfig);
+      }
+      this.setState({signinOptions});
+      await this.getAccount();
+    } catch (error) {
+      Setting.showMessage("error", error.message || "Failed to initialize sign-in");
+      this.setState({
+        signinOptions: {localSigninAvailable: false, casdoorConfigured: false},
+      });
+      await this.getAccount();
+    }
   }
 
   componentDidUpdate() {
@@ -72,11 +92,13 @@ class App extends Component {
     link.href = url;
   }
 
-  getAccount() {
-    AccountBackend.getAccount().then((res) => {
-      const account = res.data;
-      this.setState({account: account});
-    });
+  async getAccount() {
+    try {
+      const res = await AccountBackend.getAccount();
+      this.setState({account: res.status === "ok" ? res.data : null});
+    } catch {
+      this.setState({account: null});
+    }
   }
 
   signout() {
@@ -123,11 +145,14 @@ class App extends Component {
   }
 
   renderContent() {
+    if (this.state.signinOptions === undefined) {
+      return null;
+    }
     return (
       <Layout id="parent-area">
         <Switch>
-          <Route exact path="/callback" component={AuthCallback} />
-          <Route exact path="/signin" render={(props) => this.renderHomeIfSignedIn(<SigninPage {...props} />)} />
+          <Route exact path="/callback" render={(props) => this.state.signinOptions.casdoorConfigured ? <AuthCallback {...props} /> : <Redirect to="/signin" />} />
+          <Route exact path="/signin" render={(props) => this.renderHomeIfSignedIn(<SigninPage options={this.state.signinOptions} {...props} />)} />
           <Route path="/" render={(props) => this.renderSigninIfNotSignedIn(
             <ManagementPage
               account={this.state.account}

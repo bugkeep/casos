@@ -14,7 +14,6 @@ import (
 	"github.com/spf13/cobra"
 	logsapi "k8s.io/component-base/logs/api/v1"
 
-	"github.com/casosorg/casos/casdoor"
 	"github.com/casosorg/casos/conf"
 	"github.com/casosorg/casos/controllers"
 	"github.com/casosorg/casos/deploy"
@@ -81,7 +80,6 @@ func main() {
 	if err := object.ReloadAllEnforcers(); err != nil {
 		logs.Warning("casbin enforcer init: %v", err)
 	}
-	casdoor.InitCasdoorConfig()
 	proxy.InitHttpClient()
 
 	srvCfg, err := server.ConfigFromAppConf()
