@@ -97,6 +97,9 @@ type NodeDeployMachine struct {
 	Username   string
 	Password   string
 	PrivateKey string
+	// Local marks the CasOS host itself, which is deployed through a local
+	// shell instead of SSH and therefore needs no credential.
+	Local bool
 }
 
 type NodeDeployResult struct {

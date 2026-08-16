@@ -124,17 +124,23 @@ func (d *NodeDeployer) Deploy(ctx context.Context, opts NodeDeployOptions) (*Nod
 	} else {
 		d.logStep(nodeDeployPhaseWaiting, "Node is already Ready")
 	}
-	d.logStep(nodeDeployPhaseConfiguring, "Writing CasOS managed SSH key")
-	keyPair, err := GenerateNodeDeployKeyPair()
-	if err != nil {
-		return nil, err
-	}
-	if err = runner.AppendAuthorizedKeyContext(ctx, keyPair.PublicKey); err != nil {
-		return nil, err
+	// The CasOS host is deployed through a local shell rather than a login, so
+	// there is no session to keep working and no key to leave behind.
+	result := &NodeDeployResult{}
+	if !opts.Machine.Local {
+		d.logStep(nodeDeployPhaseConfiguring, "Writing CasOS managed SSH key")
+		keyPair, err := GenerateNodeDeployKeyPair()
+		if err != nil {
+			return nil, err
+		}
+		if err = runner.AppendAuthorizedKeyContext(ctx, keyPair.PublicKey); err != nil {
+			return nil, err
+		}
+		result.ManagedPrivateKey = keyPair.PrivateKey
 	}
 
 	d.logStep(nodeDeployPhaseReady, "Node registered and Ready")
-	return &NodeDeployResult{ManagedPrivateKey: keyPair.PrivateKey}, nil
+	return result, nil
 }
 
 func (d *NodeDeployer) waitForFlannelReady(ctx context.Context, nodeName string) error {
@@ -278,7 +284,10 @@ func flannelPodReadinessReason(pod *corev1.Pod) string {
 	return "Flannel Pod is not Ready"
 }
 
-func newRunnerForMachine(machine NodeDeployMachine) (*NodeDeploySSHRunner, error) {
+func newRunnerForMachine(machine NodeDeployMachine) (NodeDeployRunner, error) {
+	if machine.Local {
+		return NewNodeDeployLocalRunner()
+	}
 	return NewNodeDeploySSHRunner(NodeDeploySSHConfig{
 		Host:       machine.Host,
 		Port:       machine.Port,

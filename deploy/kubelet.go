@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-func (d *NodeDeployer) startKubelet(ctx context.Context, runner *NodeDeploySSHRunner) error {
+func (d *NodeDeployer) startKubelet(ctx context.Context, runner NodeDeployRunner) error {
 	d.logStep(nodeDeployPhaseStarting, "Starting kubelet")
 	if _, err := runner.RunRootContext(ctx, "systemctl daemon-reload && systemctl enable kubelet && systemctl restart kubelet"); err != nil {
 		return fmt.Errorf("start kubelet: %w", err)

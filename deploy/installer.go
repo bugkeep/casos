@@ -26,7 +26,7 @@ type registryMirrorSelection struct {
 	k8s       bool
 }
 
-func (d *NodeDeployer) installNodeBinaries(ctx context.Context, runner *NodeDeploySSHRunner, arch, k8sVersion string) error {
+func (d *NodeDeployer) installNodeBinaries(ctx context.Context, runner NodeDeployRunner, arch, k8sVersion string) error {
 	version := k8sVersion
 	cniVersion := defaultNodeDeployCNIVersion
 
@@ -286,7 +286,7 @@ printf unmanaged`, shellSingleQuote(path), shellSingleQuote(generatedRegistryHos
 	}
 }
 
-func (d *NodeDeployer) writeNodeFiles(ctx context.Context, runner *NodeDeploySSHRunner, nodeName, kubeconfig string) error {
+func (d *NodeDeployer) writeNodeFiles(ctx context.Context, runner NodeDeployRunner, nodeName, kubeconfig string) error {
 	ca, err := extractCertificateAuthority(kubeconfig)
 	if err != nil {
 		return err

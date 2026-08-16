@@ -8,6 +8,10 @@ const (
 	MachineStatusDeploying = "Deploying"
 	MachineStatusDeployed  = "Deployed"
 	MachineStatusFailed    = "Failed"
+
+	// MachineAuthTypeLocal marks the CasOS host itself. It is reached through a
+	// local shell instead of SSH, so it carries no credential at all.
+	MachineAuthTypeLocal = "local"
 )
 
 type Machine struct {

@@ -201,20 +201,7 @@ func checkLocalWSLLogin(ctx context.Context, host string, port int, username, pr
 // localWSLMachineName turns a distro name such as "Ubuntu-22.04" into a machine
 // name that passes the same validation as manually added machines.
 func localWSLMachineName(distro string) string {
-	var b strings.Builder
-	for _, r := range strings.ToLower(strings.TrimSpace(distro)) {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
-			b.WriteRune(r)
-		default:
-			b.WriteRune('-')
-		}
-	}
-	name := strings.Trim(collapseDashes(b.String()), "-")
-	if name == "" {
-		name = "default"
-	}
-	name = localWSLMachineNamePrefix + name
+	name := localWSLMachineNamePrefix + sanitizeMachineName(distro, "default")
 	if len(name) > 100 {
 		name = strings.TrimRight(name[:100], "-")
 	}

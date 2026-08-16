@@ -335,6 +335,9 @@ func cleanupMachineNodeDeployPanic(taskId int64, owner, machineName, message str
 }
 
 func toNodeDeployMachine(machine *object.Machine) (NodeDeployMachine, error) {
+	if machine.AuthType == object.MachineAuthTypeLocal {
+		return NodeDeployMachine{Host: machine.Ip, Username: machine.Username, Local: true}, nil
+	}
 	deployMachine := NodeDeployMachine{
 		Host:       machine.Ip,
 		Port:       machine.Port,
@@ -366,6 +369,9 @@ func getMachineForNodeDeploy(owner, machineName string) (*object.Machine, error)
 	if machine == nil {
 		return nil, fmt.Errorf("machine not found")
 	}
+	if machine.AuthType == object.MachineAuthTypeLocal {
+		return machine, nil
+	}
 	if machine.Ip == "" || machine.Username == "" {
 		return nil, fmt.Errorf("machine ip and username are required")
 	}
@@ -385,13 +391,7 @@ func getMachineForNodeDeploy(owner, machineName string) (*object.Machine, error)
 func resolveMachineNodeApiserverURL(machine NodeDeployMachine, fallbackURL string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	runner, err := NewNodeDeploySSHRunner(NodeDeploySSHConfig{
-		Host:       machine.Host,
-		Port:       machine.Port,
-		Username:   machine.Username,
-		Password:   machine.Password,
-		PrivateKey: machine.PrivateKey,
-	})
+	runner, err := newRunnerForMachine(machine)
 	if err != nil {
 		return "", err
 	}

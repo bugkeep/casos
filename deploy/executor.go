@@ -31,6 +31,18 @@ func (c NodeDeploySSHConfig) String() string {
 		c.Host, c.Port, c.Username, c.Timeout, c.CommandTimeout)
 }
 
+// NodeDeployRunner is everything a worker node deployment needs from its
+// target: run a command, run one as root, write a file and authorize an SSH
+// key. A remote machine is reached over SSH; the CasOS host deploys a node onto
+// itself through a local runner, which needs no sshd and no credential.
+type NodeDeployRunner interface {
+	RunContext(ctx context.Context, command string) (string, error)
+	RunRootContext(ctx context.Context, command string) (string, error)
+	WriteFileContext(ctx context.Context, path, content, mode string) error
+	AppendAuthorizedKeyContext(ctx context.Context, publicKey string) error
+	Close() error
+}
+
 // NodeDeploySSHRunner executes remote shell commands over SSH.
 type NodeDeploySSHRunner struct {
 	client         *ssh.Client
@@ -225,14 +237,8 @@ func (r *NodeDeploySSHRunner) WriteFile(path, content string, mode string) error
 }
 
 func (r *NodeDeploySSHRunner) WriteFileContext(ctx context.Context, path, content string, mode string) error {
-	if !isAllowedNodeDeployPath(path) {
-		return fmt.Errorf("unsupported node deployment path: %s", path)
-	}
-	if len(mode) != 4 || mode[0] != '0' {
-		return fmt.Errorf("invalid file mode: %q", mode)
-	}
-	if _, err := strconv.ParseUint(mode, 8, 16); err != nil {
-		return fmt.Errorf("invalid file mode: %q", mode)
+	if err := validateNodeDeployFile(path, mode); err != nil {
+		return err
 	}
 	if err := contextErr(ctx); err != nil {
 		return err
@@ -330,6 +336,21 @@ func (r *NodeDeploySSHRunner) startSessionWithContext(ctx context.Context, sessi
 		}
 	}()
 	return resultCh, nil
+}
+
+// validateNodeDeployFile rejects any file a node deployment has no business
+// writing, whichever runner is about to write it.
+func validateNodeDeployFile(path, mode string) error {
+	if !isAllowedNodeDeployPath(path) {
+		return fmt.Errorf("unsupported node deployment path: %s", path)
+	}
+	if len(mode) != 4 || mode[0] != '0' {
+		return fmt.Errorf("invalid file mode: %q", mode)
+	}
+	if _, err := strconv.ParseUint(mode, 8, 16); err != nil {
+		return fmt.Errorf("invalid file mode: %q", mode)
+	}
+	return nil
 }
 
 func isAllowedNodeDeployPath(path string) bool {

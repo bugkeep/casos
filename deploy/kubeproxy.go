@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-func (d *NodeDeployer) startKubeProxy(ctx context.Context, runner *NodeDeploySSHRunner) error {
+func (d *NodeDeployer) startKubeProxy(ctx context.Context, runner NodeDeployRunner) error {
 	d.logStep(nodeDeployPhaseStarting, "Starting kube-proxy")
 	if _, err := runner.RunRootContext(ctx, "systemctl daemon-reload && systemctl enable kube-proxy && systemctl restart kube-proxy"); err != nil {
 		return fmt.Errorf("start kube-proxy: %w", err)

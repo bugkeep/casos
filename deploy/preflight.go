@@ -36,7 +36,7 @@ type NodeDeployPreflightResult struct {
 	WSL          bool   `json:"wsl"`
 }
 
-func RunNodeDeployPreflight(ctx context.Context, runner *NodeDeploySSHRunner, apiserverURL string) (*NodeDeployPreflightResult, error) {
+func RunNodeDeployPreflight(ctx context.Context, runner NodeDeployRunner, apiserverURL string) (*NodeDeployPreflightResult, error) {
 	if runner == nil {
 		return nil, fmt.Errorf("ssh runner is required")
 	}
@@ -140,7 +140,7 @@ func isNodeDeployApiserverRoutableStatus(status string) bool {
 	return code >= 100 && code < 600
 }
 
-func ResolveNodeDeployApiserverURL(ctx context.Context, runner *NodeDeploySSHRunner, fallbackURL string) string {
+func ResolveNodeDeployApiserverURL(ctx context.Context, runner NodeDeployRunner, fallbackURL string) string {
 	if runner == nil {
 		return strings.TrimRight(strings.TrimSpace(fallbackURL), "/")
 	}
