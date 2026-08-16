@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"runtime"
 	"strconv"
@@ -38,10 +39,10 @@ func Available() error {
 	return nil
 }
 
-// Provision makes sure sshd runs inside the default WSL distro and authorizes
-// publicKey for both the default login user and root. It returns the addresses
-// the caller can use to reach the distro over SSH.
-func Provision(ctx context.Context, publicKey string) (*ProvisionResult, error) {
+// Provision makes sure sshd runs inside distro and authorizes publicKey for
+// both the distro's login user and root. An empty distro means the default one.
+// It returns the addresses the caller can use to reach the distro over SSH.
+func Provision(ctx context.Context, distro, publicKey string) (*ProvisionResult, error) {
 	if err := Available(); err != nil {
 		return nil, err
 	}
@@ -50,12 +51,12 @@ func Provision(ctx context.Context, publicKey string) (*ProvisionResult, error) 
 		return nil, fmt.Errorf("public key must be a single non-empty line")
 	}
 
-	defaultUser, err := defaultUser(ctx)
+	defaultUser, err := defaultUser(ctx, distro)
 	if err != nil {
 		return nil, err
 	}
 
-	stdout, stderr, err := run(ctx, true, provisionScript(publicKey, defaultUser))
+	stdout, stderr, err := run(ctx, distro, true, provisionScript(publicKey, defaultUser))
 	result, parseErr := parseProvisionOutput(stdout)
 	if err != nil {
 		if result != nil && result.err != "" {
@@ -73,6 +74,9 @@ func Provision(ctx context.Context, publicKey string) (*ProvisionResult, error) 
 	if result.port == 0 {
 		result.port = 22
 	}
+	if result.distro == "" {
+		result.distro = strings.TrimSpace(distro)
+	}
 	return &ProvisionResult{
 		Distro:   result.distro,
 		Os:       result.os,
@@ -83,9 +87,10 @@ func Provision(ctx context.Context, publicKey string) (*ProvisionResult, error) 
 	}, nil
 }
 
-// defaultUser returns the login user of the default WSL distro.
-func defaultUser(ctx context.Context) (string, error) {
-	stdout, stderr, err := run(ctx, false, "id -un\n")
+// defaultUser returns the login user of distro, or of the default distro when
+// distro is empty.
+func defaultUser(ctx context.Context, distro string) (string, error) {
+	stdout, stderr, err := run(ctx, distro, false, "id -un\n")
 	if err != nil {
 		return "", fmt.Errorf("failed to query the default WSL distro: %w: %s", err, summarize(stderr, stdout))
 	}
@@ -266,21 +271,40 @@ echo "CASOS_OK=1"
 	return b.String()
 }
 
-// run pipes script into the default WSL distro's shell and returns its output.
-func run(ctx context.Context, asRoot bool, script string) (string, string, error) {
-	args := []string{}
+// run pipes script into the shell of distro, or of the default distro when
+// distro is empty, and returns its output.
+func run(ctx context.Context, distro string, asRoot bool, script string) (string, string, error) {
+	args := distroArgs(distro)
 	if asRoot {
 		args = append(args, "-u", "root")
 	}
 	args = append(args, "--", "sh", "-s")
 
-	cmd := exec.CommandContext(ctx, "wsl.exe", args...)
+	cmd := wslCommand(ctx, args...)
 	cmd.Stdin = strings.NewReader(script)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	err := cmd.Run()
 	return decodeOutput(stdout.Bytes()), decodeOutput(stderr.Bytes()), err
+}
+
+// distroArgs returns the wsl.exe arguments that select distro. An empty distro
+// leaves the selection to wsl.exe, which then uses the default distro.
+func distroArgs(distro string) []string {
+	if distro = strings.TrimSpace(distro); distro != "" {
+		return []string{"-d", distro}
+	}
+	return []string{}
+}
+
+// wslCommand builds a wsl.exe invocation that reports in UTF-8. Recent WSL
+// releases honour WSL_UTF8; older ones ignore it and keep writing UTF-16LE,
+// which decodeOutput still handles.
+func wslCommand(ctx context.Context, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "wsl.exe", args...)
+	cmd.Env = append(os.Environ(), "WSL_UTF8=1")
+	return cmd
 }
 
 // decodeOutput converts wsl.exe output to UTF-8. wsl.exe writes its own

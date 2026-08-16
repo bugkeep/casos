@@ -12,7 +12,7 @@ func (c *ApiController) AddLocalWSLMachine() {
 		return
 	}
 
-	result, err := deploy.AddLocalWSLMachine(c.Ctx.Request.Context(), "admin")
+	result, err := deploy.AddLocalWSLMachine(c.Ctx.Request.Context(), "admin", "")
 	if err != nil {
 		c.ResponseError(err.Error())
 		return

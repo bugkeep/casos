@@ -27,12 +27,13 @@ type LocalWSLMachineResult struct {
 	Sudo bool `json:"sudo"`
 }
 
-// AddLocalWSLMachine registers the WSL distro of the local Windows host as a
-// machine. It provisions sshd inside the distro, installs a generated key pair
-// and verifies the connection, so the caller needs no connection details.
-// Running it again for the same distro refreshes the address and credential,
-// which is needed because WSL changes its IP address on every restart.
-func AddLocalWSLMachine(ctx context.Context, owner string) (*LocalWSLMachineResult, error) {
+// AddLocalWSLMachine registers a WSL distro of the local Windows host as a
+// machine. An empty distro selects the default one. It provisions sshd inside
+// the distro, installs a generated key pair and verifies the connection, so the
+// caller needs no connection details. Running it again for the same distro
+// refreshes the address and credential, which is needed because WSL changes its
+// IP address on every restart.
+func AddLocalWSLMachine(ctx context.Context, owner, distro string) (*LocalWSLMachineResult, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -43,6 +44,17 @@ func AddLocalWSLMachine(ctx context.Context, owner string) (*LocalWSLMachineResu
 	if err := wsl.Available(); err != nil {
 		return nil, err
 	}
+	distro = strings.TrimSpace(distro)
+	if distro == "" {
+		// The default distro is not always the right one: Docker Desktop and
+		// friends register distros that cannot host a node, and one of them may
+		// well be the default.
+		if status, err := wsl.Detect(ctx); err == nil {
+			if selected := status.NodeDistro(); selected != nil {
+				distro = selected.Name
+			}
+		}
+	}
 
 	keyPair, err := GenerateNodeDeployKeyPair()
 	if err != nil {
@@ -51,7 +63,7 @@ func AddLocalWSLMachine(ctx context.Context, owner string) (*LocalWSLMachineResu
 
 	provisionCtx, cancel := context.WithTimeout(ctx, localWSLProvisionTimeout)
 	defer cancel()
-	provisioned, err := wsl.Provision(provisionCtx, keyPair.PublicKey)
+	provisioned, err := wsl.Provision(provisionCtx, distro, keyPair.PublicKey)
 	if err != nil {
 		return nil, err
 	}

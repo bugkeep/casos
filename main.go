@@ -125,6 +125,10 @@ func main() {
 			if err := server.StartControllerManager(ctx, srvCfg); err != nil {
 				logs.Warning("start controller-manager: %v", err)
 			}
+			// Last, because it deploys a worker node and therefore needs the
+			// scheduler, the controller-manager and the cluster networking that
+			// Bootstrap installs to be running already.
+			deploy.StartLocalWSLBootstrap()
 		case <-ctx.Done():
 		}
 	}()
