@@ -84,9 +84,12 @@ require (
 	github.com/Masterminds/semver/v3 v3.5.0
 	github.com/casbin/casbin/v2 v2.135.0
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
+	github.com/inconshreveable/mousetrap v1.1.0
+	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	golang.org/x/crypto v0.53.0
 	golang.org/x/net v0.55.0
+	golang.org/x/sys v0.46.0
 	gopkg.in/yaml.v3 v3.0.1
 	helm.sh/helm/v3 v3.21.2
 	k8s.io/api v1.36.1-k3s1
@@ -186,7 +189,6 @@ require (
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/hashicorp/golang-lru v0.5.4 // indirect
 	github.com/huandu/xstrings v1.5.0 // indirect
-	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jackc/pgerrcode v0.0.0-20240316143900-6e2875d9b438 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
@@ -261,7 +263,6 @@ require (
 	github.com/shopspring/decimal v1.4.0 // indirect
 	github.com/soheilhy/cmux v0.1.5 // indirect
 	github.com/spf13/cast v1.7.0 // indirect
-	github.com/spf13/cobra v1.10.2 // indirect
 	github.com/stoewer/go-strcase v1.3.0 // indirect
 	github.com/syndtr/goleveldb v1.0.1-0.20210819022825-2ae1ddf74ef7 // indirect
 	github.com/t4db/t4 v1.0.3 // indirect
@@ -295,7 +296,6 @@ require (
 	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.21.0 // indirect
-	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/term v0.44.0 // indirect
 	golang.org/x/text v0.38.0 // indirect
 	golang.org/x/time v0.15.0 // indirect

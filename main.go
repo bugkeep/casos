@@ -7,9 +7,11 @@ import (
 	"os/signal"
 	"runtime"
 	"syscall"
+	"time"
 
 	"github.com/beego/beego"
 	"github.com/beego/beego/logs"
+	"github.com/spf13/cobra"
 	logsapi "k8s.io/component-base/logs/api/v1"
 
 	"github.com/casosorg/casos/casdoor"
@@ -20,6 +22,7 @@ import (
 	"github.com/casosorg/casos/proxy"
 	"github.com/casosorg/casos/routers"
 	"github.com/casosorg/casos/server"
+	"github.com/casosorg/casos/util"
 )
 
 // Build metadata, set through -ldflags "-X main.version=..." when GoReleaser
@@ -34,6 +37,22 @@ var (
 func versionString() string {
 	return fmt.Sprintf("casos %s (commit %s, built %s, %s %s/%s)",
 		version, commit, date, runtime.Version(), runtime.GOOS, runtime.GOARCH)
+}
+
+func init() {
+	// CasOS runs kube-scheduler and kube-controller-manager in-process, and both
+	// are cobra commands (see server.StartScheduler and
+	// server.StartControllerManager). On Windows, cobra assumes a cobra command
+	// launched from Explorer is a CLI the user double-clicked by mistake, and
+	// answers by printing a notice and calling os.Exit(1) — which takes the whole
+	// of CasOS down with it, seconds after an apparently successful startup, and
+	// only ever when started by double-click.
+	//
+	// CasOS is a server that merely embeds those commands, so that guard is never
+	// wanted here. Clearing the text disables it, and clearing it unconditionally
+	// means no second launch detector has to agree with cobra's for CasOS to
+	// survive.
+	cobra.MousetrapHelpText = ""
 }
 
 func main() {
@@ -127,5 +146,41 @@ func main() {
 
 	port := conf.GetConfigIntDefault("httpport", 9000)
 	logs.Info("casos listening on :%d", port)
+	if util.StartedByDoubleClick() {
+		go openWhenReady(port)
+	}
 	beego.Run(fmt.Sprintf(":%v", port))
+}
+
+// How long openWhenReady waits before telling the user CasOS did not come up.
+// The web server binds within milliseconds of this timer starting; the
+// allowance is for a machine still busy initialising the control plane, not for
+// the listener itself.
+const startupTimeout = 60 * time.Second
+
+// openWhenReady opens the CasOS web UI once the server answers, and reports the
+// failure in a dialog if it never does.
+//
+// It runs only for a CasOS started by double-clicking casos.exe. That user has
+// no terminal to read a URL out of and no reason to expect one, and the console
+// window they do get is buried under Kubernetes logs within seconds — so both
+// the address and any startup failure have to reach them some other way.
+func openWhenReady(port int) {
+	webURL := fmt.Sprintf("http://localhost:%d/", port)
+
+	if err := util.WaitForServer(webURL, startupTimeout); err != nil {
+		logs.Warning("startup: %v", err)
+		util.ReportStartupFailure(fmt.Sprintf(
+			"CasOS did not finish starting within %s.\n\n"+
+				"The CasOS console window shows what went wrong. The most common "+
+				"cause is port %d already being in use by another program — change "+
+				"httpport in conf/app.conf to use a different one.",
+			startupTimeout, port))
+		return
+	}
+
+	logs.Info("casos ready — opening %s", webURL)
+	if err := util.OpenBrowser(webURL); err != nil {
+		logs.Warning("open browser: %v", err)
+	}
 }
