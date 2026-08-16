@@ -169,7 +169,7 @@ class MachineListPage extends React.Component {
         width: "100px",
       },
       {
-        title: i18next.t("machine:Username"),
+        title: i18next.t("general:Username"),
         dataIndex: "username",
         key: "username",
         width: "120px",
@@ -261,12 +261,12 @@ class MachineListPage extends React.Component {
             <Form.Item label={i18next.t("machine:SSH port")} name="port" rules={[{required: true, message: i18next.t("policy:required")}]}>
               <InputNumber style={{width: "100%"}} min={1} max={65535} />
             </Form.Item>
-            <Form.Item label={i18next.t("machine:Username")} name="username" rules={[{required: true, message: i18next.t("policy:required")}]}>
+            <Form.Item label={i18next.t("general:Username")} name="username" rules={[{required: true, message: i18next.t("policy:required")}]}>
               <Input placeholder="root" />
             </Form.Item>
             <Form.Item label={i18next.t("machine:Auth type")} name="authType">
               <Select options={[
-                {label: i18next.t("machine:Password"), value: "password"},
+                {label: i18next.t("general:Password"), value: "password"},
                 {label: i18next.t("machine:Private key"), value: "privateKey"},
               ]} />
             </Form.Item>
@@ -276,7 +276,7 @@ class MachineListPage extends React.Component {
                   <Input.TextArea rows={4} placeholder="-----BEGIN OPENSSH PRIVATE KEY-----" />
                 </Form.Item>
               ) : (
-                <Form.Item label={i18next.t("machine:Password")} name="password" rules={[{required: true, message: i18next.t("policy:required")}]}>
+                <Form.Item label={i18next.t("general:Password")} name="password" rules={[{required: true, message: i18next.t("policy:required")}]}>
                   <Input.Password />
                 </Form.Item>
               )}

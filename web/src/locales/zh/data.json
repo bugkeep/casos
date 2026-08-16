@@ -1,7 +1,22 @@
 {
   "account": {
+    "Back to sign in": "返回登录",
+    "Confirm password": "确认密码",
+    "Enter current password": "请输入当前密码",
+    "Enter new password": "请输入新密码",
+    "Logged in successfully": "登录成功",
     "My Account": "我的账户",
-    "Sign Out": "退出登录"
+    "New password": "新密码",
+    "Old Password": "当前密码",
+    "Passwords do not match": "两次输入的密码不一致",
+    "Please input your password": "请输入密码",
+    "Please input your username": "请输入用户名",
+    "Sign In": "登录",
+    "Sign Out": "退出登录",
+    "Sign in failed": "登录失败",
+    "Sign in is unavailable": "无法登录",
+    "Sign in is unavailable - Tooltip": "CasOS 无法确定登录方式，请检查 conf/app.conf 中的 Casdoor 配置。",
+    "Signing in...": "正在登录…"
   },
   "general": {
     "Access Control": "访问控制",
@@ -14,6 +29,7 @@
     "Branding": "品牌标识",
     "Branding desc": "Logo与网站图标",
     "Cancel": "取消",
+    "Close": "关闭",
     "Cluster": "集群",
     "ClusterRoleBindings": "集群角色绑定",
     "ConfigMaps": "配置字典",
@@ -28,6 +44,7 @@
     "Description": "Description",
     "Display name": "显示名称",
     "Display name - Tooltip": "在界面中展示的友好名称，代替内部标识符显示给用户",
+    "Done": "完成",
     "Edit": "编辑",
     "Failed to add": "Failed to add",
     "Failed to delete": "删除失败",
@@ -64,6 +81,7 @@
     "Nodes": "节点",
     "OK": "确定",
     "Observability": "可观测性",
+    "Password": "密码",
     "Persistent Volume Claims": "存储卷",
     "Phase": "阶段",
     "Pods": "容器组",
@@ -87,9 +105,8 @@
     "Successfully saved": "保存成功",
     "Sure to delete": "确认删除",
     "Updated": "更新时间",
-    "Workloads": "工作负载",
-    "Close": "关闭",
-    "Done": "完成"
+    "Username": "用户名",
+    "Workloads": "工作负载"
   },
   "helm": {
     "Helm Releases": "Helm 发布",
@@ -198,7 +215,6 @@
     "Node repair started": "节点修复已启动",
     "Operating system": "Operating system",
     "Operating system - Tooltip": "Operating system - Tooltip",
-    "Password": "Password",
     "Password - Tooltip": "Password - Tooltip",
     "Preflight": "预检",
     "Preflight check failed": "预检失败",
@@ -212,7 +228,6 @@
     "SSH Credentials desc": "SSH Credentials desc",
     "SSH port": "SSH port",
     "SSH port - Tooltip": "SSH port - Tooltip",
-    "Username": "Username",
     "Username - Tooltip": "Username - Tooltip",
     "Worker Node": "工作节点"
   },

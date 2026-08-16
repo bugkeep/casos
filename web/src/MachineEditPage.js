@@ -148,7 +148,7 @@ class MachineEditPage extends React.Component {
               6
             )}
             {this.renderField(
-              Setting.getLabel(i18next.t("machine:Username"), i18next.t("machine:Username - Tooltip")),
+              Setting.getLabel(i18next.t("general:Username"), i18next.t("machine:Username - Tooltip")),
               <Input value={machine.username} onChange={e => this.updateMachineField("username", e.target.value)} />,
               6
             )}
@@ -158,7 +158,7 @@ class MachineEditPage extends React.Component {
                 value={machine.authType || "password"}
                 style={{width: "100%"}}
                 options={[
-                  {label: i18next.t("machine:Password"), value: "password"},
+                  {label: i18next.t("general:Password"), value: "password"},
                   {label: i18next.t("machine:Private key"), value: "privateKey"},
                 ]}
                 onChange={value => this.updateMachineField("authType", value)}
@@ -173,7 +173,7 @@ class MachineEditPage extends React.Component {
               )
             ) : (
               this.renderField(
-                Setting.getLabel(i18next.t("machine:Password"), i18next.t("machine:Password - Tooltip")),
+                Setting.getLabel(i18next.t("general:Password"), i18next.t("machine:Password - Tooltip")),
                 <Input.Password
                   value={machine.password}
                   iconRender={visible => (visible ? <EyeTwoTone /> : <EyeInvisibleOutlined />)}

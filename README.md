@@ -30,7 +30,7 @@ CasOS is a cloud operating system built on Kubernetes. It embeds the Kubernetes 
 - Dashboard with cluster overview
 - DockerHub image browser
 - Multi-language support (i18n)
-- Authentication via [Casdoor](https://casdoor.org)
+- Built-in `admin` account out of the box, with optional [Casdoor](https://casdoor.org) single sign-on
 
 ## Tech Stack
 
@@ -38,7 +38,7 @@ CasOS is a cloud operating system built on Kubernetes. It embeds the Kubernetes 
 |----------|-------------------------------------------|
 | Backend  | Go 1.26+, Beego, MySQL (ORM)              |
 | Frontend | React 18, Ant Design 6, recharts, i18next |
-| Auth     | Casdoor (OAuth2 / OIDC)                   |
+| Auth     | Built-in account, or Casdoor (OAuth2 / OIDC) |
 
 ## Project Structure
 
@@ -69,7 +69,7 @@ casos/
 
 - **Backend**: [Go](https://golang.org/dl/) 1.26+
 - **Frontend**: [Node.js](https://nodejs.org/) 20+ and [Yarn](https://classic.yarnpkg.com/) 1.x
-- A [Casdoor](https://casdoor.org) instance (for authentication)
+- Optionally, a [Casdoor](https://casdoor.org) instance, if you want single sign-on instead of the built-in account
 
 Supported platforms: **Linux**, **macOS**, **Windows**
 
@@ -182,12 +182,12 @@ dataSourceName=
 dbName        = casos
 kineEndpoint  =
 
-; Casdoor
-casdoorEndpoint     = https://your-casdoor-instance
-clientId            = <your-client-id>
-clientSecret        = <your-client-secret>
-casdoorOrganization = <your-org>
-casdoorApplication  = <your-app>
+; Casdoor (optional, see Sign-in below)
+casdoorEndpoint     =
+clientId            =
+clientSecret        =
+casdoorOrganization =
+casdoorApplication  =
 
 ; Optional control-plane SOCKS5 proxy
 ; Leave blank to use environment proxy settings or direct access.
@@ -236,6 +236,38 @@ is configured.
 **Upgrade notice:** the previous example default of `127.0.0.1:10808` has been
 removed. Set `socks5Proxy` explicitly before upgrading if that local proxy is a
 required control-plane dependency.
+
+### Sign-in
+
+`casdoorEndpoint` decides how you sign in, and nothing else has to be set up:
+
+| `casdoorEndpoint` | Sign-in |
+|---|---|
+| blank (default) | Built-in account, stored in the CasOS database |
+| set | Casdoor single sign-on; the built-in account is never created |
+
+On first start CasOS creates a single built-in account, `admin`, with the
+password `123`, and signs you straight in so a fresh install has nothing to
+configure. **That also means anyone who can reach the CasOS port is an
+administrator until you change that password.** Open the account menu in the
+top-right corner, pick *My Account*, and set a real one before exposing CasOS
+beyond your own machine — the automatic sign-in stops the moment the password is
+no longer `123`. There is no password recovery: if you lose it, delete the row
+from the `user` table in `data/casos.db` and restart CasOS to get the default
+account back.
+
+To use Casdoor instead, fill in all five Casdoor settings before the first
+start. Each one also reads an environment variable of the same name, so
+`clientSecret` does not have to be written to disk:
+
+```bash
+casdoorEndpoint=https://your-casdoor-instance clientId=... clientSecret=... casdoorOrganization=... casdoorApplication=... casos
+```
+
+**Upgrade notice:** earlier releases shipped with `conf/app.conf` pointing at a
+shared public Casdoor demo application, credentials included. Those values are
+now blank. An installation that relied on them must configure its own Casdoor
+application, or clear the five settings to switch to the built-in account.
 
 ## Development
 

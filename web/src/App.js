@@ -5,7 +5,6 @@ import {ConfigProvider, FloatButton, Layout} from "antd";
 import * as Setting from "./Setting";
 import * as AccountBackend from "./backend/AccountBackend";
 import * as SiteBackend from "./backend/SiteBackend";
-import * as Conf from "./Conf";
 import {getShadcnThemeComponents, getShadcnThemeToken} from "./shadcnTheme";
 import ManagementPage from "./ManagementPage";
 import AuthCallback from "./AuthCallback";
@@ -15,7 +14,6 @@ class App extends Component {
   constructor(props) {
     super(props);
     Setting.initServerUrl();
-    Setting.initCasdoorSdk(Conf.AuthConfig);
 
     let storageThemeAlgorithm = ["default"];
     try {
@@ -79,6 +77,10 @@ class App extends Component {
     });
   }
 
+  onUpdateAccount = () => {
+    this.getAccount();
+  };
+
   signout() {
     AccountBackend.signout().then((res) => {
       if (res.status === "ok") {
@@ -127,7 +129,7 @@ class App extends Component {
       <Layout id="parent-area">
         <Switch>
           <Route exact path="/callback" component={AuthCallback} />
-          <Route exact path="/signin" render={(props) => this.renderHomeIfSignedIn(<SigninPage {...props} />)} />
+          <Route exact path="/signin" render={(props) => this.renderHomeIfSignedIn(<SigninPage logo={this.state.logo} themeAlgorithm={this.state.themeAlgorithm} site={this.state.site} {...props} />)} />
           <Route path="/" render={(props) => this.renderSigninIfNotSignedIn(
             <ManagementPage
               account={this.state.account}
@@ -138,6 +140,7 @@ class App extends Component {
               logo={this.state.logo}
               onSignout={this.signout.bind(this)}
               onUpdateSite={this.onUpdateSite}
+              onUpdateAccount={this.onUpdateAccount}
               setLogoAndThemeAlgorithm={this.setLogoAndThemeAlgorithm}
               {...props}
             />

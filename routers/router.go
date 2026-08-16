@@ -8,9 +8,11 @@ import (
 func InitAPI() {
 	beego.Router("/api/health", &controllers.ApiController{}, "GET:Health")
 
+	beego.Router("/api/get-signin-options", &controllers.ApiController{}, "GET:GetSigninOptions")
 	beego.Router("/api/signin", &controllers.ApiController{}, "POST:Signin")
 	beego.Router("/api/signout", &controllers.ApiController{}, "POST:Signout")
 	beego.Router("/api/get-account", &controllers.ApiController{}, "GET:GetAccount")
+	beego.Router("/api/update-account", &controllers.ApiController{}, "POST:UpdateAccount")
 	beego.Router("/api/e2e/signin", &controllers.ApiController{}, "POST:E2ESignin")
 
 	beego.Router("/api/get-pods", &controllers.ApiController{}, "GET:GetPods")

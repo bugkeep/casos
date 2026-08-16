@@ -15,7 +15,24 @@ export function initServerUrl() {
 }
 
 export function initCasdoorSdk(config) {
-  CasdoorSdk = new Sdk(config);
+  CasdoorSdk = new Sdk({
+    serverUrl: config.serverUrl,
+    clientId: config.clientId,
+    appName: config.appName || "",
+    organizationName: config.organizationName || "",
+    redirectPath: config.redirectPath || "/callback",
+  });
+}
+
+export function isCasdoorAvailable() {
+  return CasdoorSdk !== undefined;
+}
+
+export function isBasicLoginMode(account) {
+  if (account === undefined || account === null) {
+    return false;
+  }
+  return account.owner === "basic";
 }
 
 export function getWebSocketUrl(path, params = {}) {
@@ -31,18 +48,30 @@ export function getWebSocketUrl(path, params = {}) {
 }
 
 export function getSigninUrl() {
+  if (!isCasdoorAvailable()) {
+    return "";
+  }
   return CasdoorSdk.getSigninUrl();
 }
 
 export function getSignupUrl() {
+  if (!isCasdoorAvailable()) {
+    return "";
+  }
   return CasdoorSdk.getSignupUrl();
 }
 
 export function getUserProfileUrl(userName, account) {
+  if (!isCasdoorAvailable() || isBasicLoginMode(account)) {
+    return "";
+  }
   return CasdoorSdk.getUserProfileUrl(userName, account);
 }
 
 export function getMyProfileUrl(account) {
+  if (!isCasdoorAvailable() || isBasicLoginMode(account)) {
+    return "";
+  }
   return CasdoorSdk.getMyProfileUrl(account);
 }
 

@@ -75,6 +75,7 @@ func main() {
 	object.InitAdapter()
 	object.CreateTables()
 	object.InitSite()
+	object.InitUsers()
 	if err := object.SeedDefaultPolicies(); err != nil {
 		logs.Warning("casbin seed: %v", err)
 	}

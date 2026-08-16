@@ -90,8 +90,12 @@ type Ormer struct {
 	Engine         *xorm.Engine
 }
 
-// finalizer is the destructor for Ormer.
+// finalizer is the destructor for Ormer. An adapter that was closed explicitly
+// still reaches the finalizer, so an already-released engine is not an error.
 func finalizer(a *Ormer) {
+	if a == nil || a.Engine == nil {
+		return
+	}
 	err := a.Engine.Close()
 	if err != nil {
 		panic(err)
@@ -220,6 +224,7 @@ func (a *Ormer) createTable() {
 		new(CasbinRule),
 		new(TrivyScanResult),
 		new(HelmRepo),
+		new(User),
 	); err != nil {
 		panic(fmt.Errorf("sync database schema: %w", err))
 	}

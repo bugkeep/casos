@@ -1,7 +1,22 @@
 {
   "account": {
+    "Back to sign in": "Back to sign in",
+    "Confirm password": "Confirm password",
+    "Enter current password": "Enter current password",
+    "Enter new password": "Enter new password",
+    "Logged in successfully": "Logged in successfully",
     "My Account": "My Account",
-    "Sign Out": "Sign Out"
+    "New password": "New password",
+    "Old Password": "Current password",
+    "Passwords do not match": "The two passwords do not match",
+    "Please input your password": "Please enter your password",
+    "Please input your username": "Please enter your username",
+    "Sign In": "Sign In",
+    "Sign Out": "Sign Out",
+    "Sign in failed": "Sign in failed",
+    "Sign in is unavailable": "Sign in is unavailable",
+    "Sign in is unavailable - Tooltip": "CasOS could not work out how to sign you in. Check the Casdoor settings in conf/app.conf.",
+    "Signing in...": "Signing in..."
   },
   "general": {
     "Access Control": "Access Control",
@@ -14,6 +29,7 @@
     "Branding": "Branding",
     "Branding desc": "Logo and favicon",
     "Cancel": "Cancel",
+    "Close": "Close",
     "Cluster": "Cluster",
     "ClusterRoleBindings": "Cluster Role Bindings",
     "ConfigMaps": "ConfigMaps",
@@ -28,6 +44,7 @@
     "Description": "Description",
     "Display name": "Display name",
     "Display name - Tooltip": "A human-friendly label shown in the UI instead of the internal identifier",
+    "Done": "Done",
     "Edit": "Edit",
     "Failed to add": "Failed to add",
     "Failed to delete": "Failed to delete",
@@ -64,6 +81,7 @@
     "Nodes": "Nodes",
     "OK": "OK",
     "Observability": "Observability",
+    "Password": "Password",
     "Persistent Volume Claims": "Persistent Volume Claims",
     "Phase": "Phase",
     "Pods": "Pods",
@@ -87,9 +105,8 @@
     "Successfully saved": "Successfully saved",
     "Sure to delete": "Sure to delete",
     "Updated": "Updated",
-    "Workloads": "Workloads",
-    "Close": "Close",
-    "Done": "Done"
+    "Username": "Username",
+    "Workloads": "Workloads"
   },
   "helm": {
     "Helm Releases": "Helm Releases",
@@ -198,7 +215,6 @@
     "Node repair started": "Node repair started",
     "Operating system": "Operating system",
     "Operating system - Tooltip": "Operating system - Tooltip",
-    "Password": "Password",
     "Password - Tooltip": "Password - Tooltip",
     "Preflight": "Preflight",
     "Preflight check failed": "Preflight failed",
@@ -212,7 +228,6 @@
     "SSH Credentials desc": "SSH Credentials desc",
     "SSH port": "SSH port",
     "SSH port - Tooltip": "SSH port - Tooltip",
-    "Username": "Username",
     "Username - Tooltip": "Username - Tooltip",
     "Worker Node": "Worker Node"
   },

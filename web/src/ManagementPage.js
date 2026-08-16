@@ -22,6 +22,7 @@ import "./App.less";
 import * as Setting from "./Setting";
 import LanguageSelect from "./LanguageSelect";
 import ThemeSelect from "./ThemeSelect";
+import AccountModal from "./AccountModal";
 import BreadcrumbBar from "./common/BreadcrumbBar";
 import PodListPage from "./PodListPage";
 import DeploymentListPage from "./DeploymentListPage";
@@ -136,7 +137,8 @@ function ManagementPage(props) {
     if (!siderCollapsed) {persistMenuOpenKeys(menuOpenKeys);}
   }, [menuOpenKeys, siderCollapsed]);
 
-  const {account, site, themeAlgorithm, logo, uri, onSignout, onUpdateSite, setLogoAndThemeAlgorithm} = props;
+  const {account, site, themeAlgorithm, logo, uri, onSignout, onUpdateSite, onUpdateAccount, setLogoAndThemeAlgorithm} = props;
+  const [accountModalOpen, setAccountModalOpen] = useState(false);
   const isDark = Array.isArray(themeAlgorithm) && themeAlgorithm.includes("dark");
   // eslint-disable-next-line no-restricted-globals
   const currentUri = uri || location.pathname;
@@ -185,7 +187,17 @@ function ManagementPage(props) {
         key: "account",
         icon: <UserOutlined />,
         label: i18next.t("account:My Account"),
-        onClick: () => window.open(Setting.getMyProfileUrl(account), "_blank"),
+        onClick: () => {
+          // A built-in account is edited in place; a Casdoor account is edited in Casdoor.
+          if (Setting.isBasicLoginMode(account)) {
+            setAccountModalOpen(true);
+            return;
+          }
+          const profileUrl = Setting.getMyProfileUrl(account);
+          if (profileUrl !== "") {
+            window.open(profileUrl, "_blank");
+          }
+        },
       },
       {
         key: "signout",
@@ -380,6 +392,13 @@ function ManagementPage(props) {
             {renderAccountDropdown()}
           </div>
         </Header>
+
+        <AccountModal
+          account={account}
+          open={accountModalOpen}
+          onCancel={() => setAccountModalOpen(false)}
+          onUpdateAccount={onUpdateAccount}
+        />
 
         <Content style={{display: "flex", flexDirection: "column"}}>
           <Card className="content-warp-card" styles={{body: {padding: 0, margin: 0}}}>

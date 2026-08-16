@@ -1,13 +1,13 @@
 import React from "react";
+import PasswordSigninPage from "./PasswordSigninPage";
 import * as Setting from "./Setting";
 
 class SigninPage extends React.Component {
-  componentDidMount() {
-    window.location.replace(Setting.getSigninUrl());
-  }
-
   render() {
-    return "";
+    const {logo, themeAlgorithm, site} = this.props;
+    // App only fills in logo once the theme is switched, so fall back the same
+    // way ManagementPage does.
+    return <PasswordSigninPage logo={logo || Setting.getLogo(themeAlgorithm || [], site?.logoUrl)} />;
   }
 }
 
