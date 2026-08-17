@@ -77,23 +77,10 @@ jobs:
       contents: read
       actions: write
     timeout-minutes: 60
-    services:
-      mysql:
-        image: mysql:8
-        env:
-          MYSQL_ROOT_PASSWORD: casos-${{ github.run_id }}-${{ github.run_attempt }}
-          MYSQL_DATABASE: casos
-        ports:
-          - 3306:3306
-        options: >-
-          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -p$MYSQL_ROOT_PASSWORD"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=10
     env:
-      driverName: mysql
-      dataSourceName: root:casos-${{ github.run_id }}-${{ github.run_attempt }}@tcp(127.0.0.1:3306)/
-      dbName: casos
+      # CI runs on the default SQLite datastore; both databases live under
+      # E2E_DATA_DIR, so each job and each step with its own data dir starts
+      # from clean state without an external database service.
       socks5Proxy: ""
       coreDNSImage: registry.k8s.io/coredns/coredns:v1.12.4
       flannelImage: ghcr.io/flannel-io/flannel:v0.27.4
@@ -322,7 +309,6 @@ jobs:
         shell: bash
         env:
           E2E_DATA_DIR: ${{ runner.temp }}/casos-e2e-${{ github.run_id }}-${{ github.run_attempt }}-worker
-          dbName: casos_worker
           E2E_WORKER_DEPLOY_TIMEOUT_MS: 1320000
         run: |
           set -o pipefail
@@ -334,7 +320,6 @@ jobs:
         shell: bash
         env:
           E2E_DATA_DIR: ${{ runner.temp }}/casos-e2e-${{ github.run_id }}-${{ github.run_attempt }}-worker
-          dbName: casos_worker
         run: |
           set -o pipefail
           mapfile -t ui_test_files < ui-app-store-tests.txt
