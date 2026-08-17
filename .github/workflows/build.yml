@@ -94,6 +94,7 @@ jobs:
       driverName: mysql
       dataSourceName: root:casos-${{ github.run_id }}-${{ github.run_attempt }}@tcp(127.0.0.1:3306)/
       dbName: casos
+      autoEnrollLocalNode: "false"
       socks5Proxy: ""
       coreDNSImage: registry.k8s.io/coredns/coredns:v1.12.4
       flannelImage: ghcr.io/flannel-io/flannel:v0.27.4
