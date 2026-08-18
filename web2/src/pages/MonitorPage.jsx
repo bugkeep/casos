@@ -17,7 +17,6 @@ import * as MonitorBackend from "@/backend/MonitorBackend";
 import * as Setting from "@/Setting";
 import {Badge} from "@/components/ui/badge";
 import {Button} from "@/components/ui/button";
-import {Card, CardContent, CardHeader, CardTitle} from "@/components/ui/card";
 import {Input} from "@/components/ui/input";
 import {MessageAlert} from "@/components/ui/alert";
 import {Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle} from "@/components/ui/dialog";

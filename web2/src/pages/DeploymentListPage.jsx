@@ -1,7 +1,7 @@
 import React, {useEffect, useRef, useState} from "react";
 import {useHistory, useLocation} from "react-router-dom";
 import i18next from "i18next";
-import {HardDrive, Link2, Pencil, Plus, RefreshCw, RefreshCcwDot, Share2, Trash2} from "lucide-react";
+import {HardDrive, Link2, Pencil, Plus, RefreshCcwDot, RefreshCw, Share2, Trash2} from "lucide-react";
 import * as DeploymentBackend from "@/backend/DeploymentBackend";
 import * as NamespaceBackend from "@/backend/NamespaceBackend";
 import * as ConfigMapBackend from "@/backend/ConfigMapBackend";

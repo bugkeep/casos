@@ -1,5 +1,5 @@
 import React, {useEffect, useRef, useState} from "react";
-import {CheckCircle2, Clock, Lock, LoaderCircle, TriangleAlert} from "lucide-react";
+import {CheckCircle2, Clock, LoaderCircle, Lock, TriangleAlert} from "lucide-react";
 import * as CertificateBackend from "@/backend/CertificateBackend";
 import * as Setting from "@/Setting";
 import {Alert, AlertDescription, AlertTitle} from "@/components/ui/alert";

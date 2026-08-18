@@ -1,8 +1,8 @@
 import {expect, test} from "@playwright/test";
 import {dataTable, e2eSshPassword, signInAsCiUser, tableRow} from "./e2e-helpers.js";
 import {
-  createdMachinesFixture,
   createMachineFromUi,
+  createdMachinesFixture,
   makeMachineName,
   startWorkerNodeDeployment,
   workerNodeDialog,

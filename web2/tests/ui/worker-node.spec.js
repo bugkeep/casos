@@ -2,8 +2,9 @@ import {expect, test} from "@playwright/test";
 import {expectOkJson, expectToast, signInAsCiUser} from "./e2e-helpers.js";
 import {
   API_DEPLOY_MACHINE_NODE,
-  createdMachinesFixture,
   createMachineFromUi,
+  createdMachinesFixture,
+  expectWorkerNodeTaskVisible,
   getMachineNodeTasks,
   makeMachineName,
   openWorkerNodePanel,
@@ -11,7 +12,6 @@ import {
   startWorkerNodeRepair,
   submitWorkerNodeAction,
   workerNodeDialog,
-  expectWorkerNodeTaskVisible,
 } from "./worker-node-helpers.js";
 
 const E2E_APISERVER_URL = process.env.E2E_APISERVER_URL || "https://127.0.0.1:16443";

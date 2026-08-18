@@ -8,7 +8,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "lint": "eslint src --ext .js,.jsx --fix",
+    "lint": "eslint . --ext .js,.jsx --fix",
+    "lint:ci": "eslint . --ext .js,.jsx",
     "ui:test": "playwright test",
     "ui:test:selector:check": "node scripts/select-ui-tests-check.js",
     "ui:test:smoke": "playwright test --grep @smoke",
@@ -59,6 +60,7 @@
     "@vitejs/plugin-react": "^4.3.4",
     "eslint": "^8.57.1",
     "eslint-plugin-react": "^7.37.4",
+    "eslint-plugin-react-hooks": "^4.6.2",
     "tailwindcss": "^4.0.6",
     "tw-animate-css": "^1.2.4",
     "vite": "^6.1.0"

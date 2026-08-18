@@ -34,7 +34,13 @@ jobs:
           node-version: 22
           cache: 'yarn'
           cache-dependency-path: ./web2/yarn.lock
-      - run: yarn install --frozen-lockfile && yarn run build
+      - run: yarn install --frozen-lockfile
+        working-directory: ./web2
+      # lint:ci is the same check as `yarn lint` without --fix, so CI reports
+      # style regressions instead of silently rewriting the checkout.
+      - run: yarn run lint:ci
+        working-directory: ./web2
+      - run: yarn run build
         working-directory: ./web2
       # Consumed within the same run by the standalone and release jobs, so it
       # is uploaded everywhere and expires immediately.
