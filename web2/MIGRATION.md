@@ -152,10 +152,13 @@ that is how the `<Button asChild>` crash described below was found.
 
 ## Not carried over
 
-- `web/tests` still exists and still targets the antd UI. It is untouched.
-- CI (`.github/workflows/build.yml`) still runs the suite in `./web`. Switching
-  it over is a `working-directory` change on the ui-test job plus the
-  `cache-dependency-path` on its setup-node step.
+- `web/tests` still exists and still targets the antd UI, but CI no longer runs
+  it: the `ui-tests` job drives web2 now, so a change under `web/src/**` selects
+  no UI tests at all. That is the cost of pointing one job at one frontend —
+  restoring coverage for the old UI means running its job alongside.
+- CI still builds and ships `web/build`; only the `ui-tests` job moved. Nothing
+  in CI runs `yarn build` for web2 yet, so a production build break there would
+  go unnoticed.
 - `-tags embed` builds still ship `web/build`. See `web2/assets_embed.go` for
   what to change when web2 becomes the shipped frontend.
 

@@ -103,15 +103,15 @@ jobs:
         with:
           node-version: 22
           cache: 'yarn'
-          cache-dependency-path: ./web/yarn.lock
+          cache-dependency-path: ./web2/yarn.lock
       - run: yarn install --frozen-lockfile
-        working-directory: ./web
+        working-directory: ./web2
       - run: yarn run ui:test:selector:check
-        working-directory: ./web
+        working-directory: ./web2
       - run: yarn playwright install --with-deps chromium
-        working-directory: ./web
+        working-directory: ./web2
       - name: Run UI smoke tests
-        working-directory: ./web
+        working-directory: ./web2
         shell: bash
         run: |
           set -o pipefail
@@ -126,45 +126,45 @@ jobs:
           set -euo pipefail
           if [[ "$EVENT_NAME" == "pull_request" ]]; then
             git fetch --no-tags --prune origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF"
-            git diff --name-only "origin/$BASE_REF"...HEAD > web/ui-changed-files.txt
+            git diff --name-only "origin/$BASE_REF"...HEAD > web2/ui-changed-files.txt
           elif git rev-parse HEAD^ >/dev/null 2>&1; then
-            git diff --name-only HEAD^ HEAD > web/ui-changed-files.txt
+            git diff --name-only HEAD^ HEAD > web2/ui-changed-files.txt
           else
-            git diff-tree --no-commit-id --name-only -r HEAD > web/ui-changed-files.txt
+            git diff-tree --no-commit-id --name-only -r HEAD > web2/ui-changed-files.txt
           fi
-          node web/scripts/select-ui-tests.js web/ui-changed-files.txt > web/ui-regression-tests.txt
+          node web2/scripts/select-ui-tests.js web2/ui-changed-files.txt > web2/ui-regression-tests.txt
           echo "Changed files considered for UI regression:"
-          cat web/ui-changed-files.txt
+          cat web2/ui-changed-files.txt
           echo "Selected UI regression tests:"
-          if [[ -s web/ui-regression-tests.txt ]]; then
-            cat web/ui-regression-tests.txt
+          if [[ -s web2/ui-regression-tests.txt ]]; then
+            cat web2/ui-regression-tests.txt
             echo "has_tests=true" >> "$GITHUB_OUTPUT"
           else
             echo "(none; fixed smoke already ran)"
             echo "has_tests=false" >> "$GITHUB_OUTPUT"
           fi
-          grep -vxF "tests/ui/worker-node-ready.spec.js" web/ui-regression-tests.txt | grep -vxF "tests/ui/app-store.spec.js" > web/ui-standard-regression-tests.txt || true
-          grep -xF "tests/ui/app-store.spec.js" web/ui-regression-tests.txt > web/ui-app-store-tests.txt || true
+          grep -vxF "tests/ui/worker-node-ready.spec.js" web2/ui-regression-tests.txt | grep -vxF "tests/ui/app-store.spec.js" > web2/ui-standard-regression-tests.txt || true
+          grep -xF "tests/ui/app-store.spec.js" web2/ui-regression-tests.txt > web2/ui-app-store-tests.txt || true
           echo "Standard UI regression tests:"
-          if [[ -s web/ui-standard-regression-tests.txt ]]; then
-            cat web/ui-standard-regression-tests.txt
+          if [[ -s web2/ui-standard-regression-tests.txt ]]; then
+            cat web2/ui-standard-regression-tests.txt
             echo "has_standard_tests=true" >> "$GITHUB_OUTPUT"
           else
             echo "(none)"
             echo "has_standard_tests=false" >> "$GITHUB_OUTPUT"
           fi
           echo "App Store UI regression tests:"
-          if [[ -s web/ui-app-store-tests.txt ]]; then
-            cat web/ui-app-store-tests.txt
+          if [[ -s web2/ui-app-store-tests.txt ]]; then
+            cat web2/ui-app-store-tests.txt
           else
             echo "(none)"
           fi
-          if [[ -s web/ui-app-store-tests.txt ]]; then
+          if [[ -s web2/ui-app-store-tests.txt ]]; then
             echo "has_app_store_tests=true" >> "$GITHUB_OUTPUT"
           else
             echo "has_app_store_tests=false" >> "$GITHUB_OUTPUT"
           fi
-          if grep -qxF "tests/ui/worker-node-ready.spec.js" web/ui-regression-tests.txt || grep -qxF "tests/ui/app-store.spec.js" web/ui-regression-tests.txt; then
+          if grep -qxF "tests/ui/worker-node-ready.spec.js" web2/ui-regression-tests.txt || grep -qxF "tests/ui/app-store.spec.js" web2/ui-regression-tests.txt; then
             echo "needs_worker_vm=true" >> "$GITHUB_OUTPUT"
           else
             echo "needs_worker_vm=false" >> "$GITHUB_OUTPUT"
@@ -304,7 +304,7 @@ jobs:
           exit 1
       - name: Validate worker node is ready for worker VM UI tests
         if: steps.ui-regression-tests.outputs.needs_worker_vm == 'true' && steps.prepare-worker-vm.outcome == 'success'
-        working-directory: ./web
+        working-directory: ./web2
         timeout-minutes: 25
         shell: bash
         env:
@@ -315,7 +315,7 @@ jobs:
           yarn playwright test --workers=1 tests/ui/worker-node-ready.spec.js 2>&1 | tee ui-worker-node-ready-test.log
       - name: Run App Store UI tests
         if: steps.ui-regression-tests.outputs.has_app_store_tests == 'true' && steps.prepare-worker-vm.outcome == 'success'
-        working-directory: ./web
+        working-directory: ./web2
         timeout-minutes: 20
         shell: bash
         env:
@@ -327,7 +327,7 @@ jobs:
           yarn playwright test --grep-invert @smoke --workers=1 --retries=0 --reporter=list "${ui_test_files[@]}" 2>&1 | tee ui-app-store-test.log
       - name: Run UI regression tests
         if: steps.ui-regression-tests.outputs.has_standard_tests == 'true'
-        working-directory: ./web
+        working-directory: ./web2
         timeout-minutes: 20
         shell: bash
         run: |
@@ -336,7 +336,7 @@ jobs:
           yarn run ui:test:regression -- "${ui_test_files[@]}" 2>&1 | tee ui-test.log
       - name: Skip UI regression tests
         if: steps.ui-regression-tests.outputs.has_standard_tests != 'true'
-        working-directory: ./web
+        working-directory: ./web2
         shell: bash
         run: |
           echo "No standard changed-path UI regression tests selected; fixed smoke already ran." | tee ui-test.log
@@ -368,16 +368,16 @@ jobs:
         with:
           name: playwright-artifacts-${{ github.run_id }}
           path: |
-            ./web/playwright-report
-            ./web/test-results
-            ./web/ui-changed-files.txt
-            ./web/ui-regression-tests.txt
-            ./web/ui-standard-regression-tests.txt
-            ./web/ui-app-store-tests.txt
-            ./web/ui-smoke-test.log
-            ./web/ui-test.log
-            ./web/ui-worker-node-ready-test.log
-            ./web/ui-app-store-test.log
+            ./web2/playwright-report
+            ./web2/test-results
+            ./web2/ui-changed-files.txt
+            ./web2/ui-regression-tests.txt
+            ./web2/ui-standard-regression-tests.txt
+            ./web2/ui-app-store-tests.txt
+            ./web2/ui-smoke-test.log
+            ./web2/ui-test.log
+            ./web2/ui-worker-node-ready-test.log
+            ./web2/ui-app-store-test.log
             ${{ runner.temp }}/casos-worker-vm/serial.log
           if-no-files-found: ignore
 
