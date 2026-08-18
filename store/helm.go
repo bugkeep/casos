@@ -1382,6 +1382,11 @@ func installHelmChart(cfg *rest.Config, releaseName, namespace, chartName, repoU
 	if err != nil {
 		return err
 	}
+	if err := validateHelmInstallNodes(context.Background(), cfg, func(message string) {
+		logrus.Warn(message)
+	}); err != nil {
+		return err
+	}
 	ch, err := loadChart(chartName, repoURL, version)
 	if err != nil {
 		return err
@@ -1539,6 +1544,12 @@ func installHelmChartStream(ctx context.Context, lifecycle HelmInstallLifecycle,
 		actionConfig, err := newHelmConfigWithLog(cfg, namespace, logFn)
 		if err != nil {
 			finishWithError(err, "configuration error")
+			return
+		}
+		if err := validateHelmInstallNodes(installCtx, cfg, func(message string) {
+			sendWarning(message)
+		}); err != nil {
+			finishWithError(err, "node preflight error")
 			return
 		}
 		helmChart, err := loadChartWithContext(installCtx, chartName, repoURL, version)
