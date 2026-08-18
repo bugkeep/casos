@@ -72,15 +72,24 @@ class SecretListPage extends React.Component {
   }
 
   openEditModal(secret) {
-    const dataEntries = Object.entries(secret.stringData ?? {}).map(([key, value]) => ({key, value}));
-    this.setState({modalVisible: true, modalMode: "edit", editingSecret: secret}, () => {
-      setTimeout(() => {
-        this.formRef.current?.setFieldsValue({
-          name: secret.name, namespace: secret.namespace,
-          type: secret.type || "Opaque", dataEntries,
-        });
-      }, 0);
-    });
+    // The list carries key names only, so the values come from a single-object
+    // fetch; opening only on success keeps an empty editor off the screen.
+    SecretBackend.getSecret(secret.namespace, secret.name).then(res => {
+      if (res.status !== "ok") {
+        Setting.showMessage("error", res.msg);
+        return;
+      }
+      const full = res.data;
+      const dataEntries = Object.entries(full.stringData ?? {}).map(([key, value]) => ({key, value}));
+      this.setState({modalVisible: true, modalMode: "edit", editingSecret: full}, () => {
+        setTimeout(() => {
+          this.formRef.current?.setFieldsValue({
+            name: full.name, namespace: full.namespace,
+            type: full.type || "Opaque", dataEntries,
+          });
+        }, 0);
+      });
+    }).catch(e => Setting.showMessage("error", e.message));
   }
 
   closeModal() {
@@ -147,11 +156,11 @@ class SecretListPage extends React.Component {
       {title: "Type", dataIndex: "type", key: "type", width: 200},
       {
         title: "Keys",
-        dataIndex: "stringData",
+        dataIndex: "keys",
         key: "keys",
-        render: data => (
+        render: keys => (
           <Space size={4} wrap>
-            {Object.keys(data ?? {}).map(k => (
+            {(keys ?? []).map(k => (
               <Tag key={k} color="orange" style={{fontFamily: "monospace", fontSize: 11}}>{k}</Tag>
             ))}
           </Space>

@@ -20,7 +20,7 @@ const SOURCE_OPTIONS = [
  * variable name, because a ConfigMap key means nothing to a plain value.
  *
  * Props: value [{source, name, value, configMapName, configMapKey, secretName,
- * secretKey}], onChange, configMaps [{name, data}], secrets [{name, stringData}]
+ * secretKey}], onChange, configMaps [{name, keys}], secrets [{name, keys}]
  */
 export function EnvVarEditor({value = [], onChange, configMaps = [], secrets = []}) {
   function update(index, field, next) {
@@ -45,9 +45,9 @@ export function EnvVarEditor({value = [], onChange, configMaps = [], secrets = [
 
       {value.map((row, index) => {
         const selectedConfigMap = configMaps.find((item) => item.name === row.configMapName);
-        const configMapKeys = Object.keys(selectedConfigMap?.data ?? {}).map((key) => ({label: key, value: key}));
+        const configMapKeys = (selectedConfigMap?.keys ?? []).map((key) => ({label: key, value: key}));
         const selectedSecret = secrets.find((item) => item.name === row.secretName);
-        const secretKeys = Object.keys(selectedSecret?.stringData ?? {}).map((key) => ({label: key, value: key}));
+        const secretKeys = (selectedSecret?.keys ?? []).map((key) => ({label: key, value: key}));
 
         return (
           <div key={index} className="grid grid-cols-[110px_150px_minmax(0,1fr)_auto] items-start gap-2">

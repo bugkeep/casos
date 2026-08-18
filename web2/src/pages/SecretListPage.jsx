@@ -1,8 +1,9 @@
-import React, {useState} from "react";
+import React, {useRef, useState} from "react";
 import i18next from "i18next";
 import {Pencil, Plus, RefreshCw, Trash2} from "lucide-react";
 import * as SecretBackend from "@/backend/SecretBackend";
 import * as NamespaceBackend from "@/backend/NamespaceBackend";
+import * as Setting from "@/Setting";
 import {runAction, useResource} from "@/hooks/use-resource";
 import {Badge} from "@/components/ui/badge";
 import {Button} from "@/components/ui/button";
@@ -37,11 +38,21 @@ function SecretListPage() {
   const [form, setForm] = useState(emptyForm);
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
   const [restartTarget, setRestartTarget] = useState(null);
+  const editRequestRef = useRef(0);
 
   const namespaceOptions = (namespaces ?? []).map((item) => ({label: item.name, value: item.name}));
 
+  // Makes any in-flight detail response stale, so it cannot land in a dialog
+  // the user has since closed or reopened on another Secret.
+  function dropPendingDetail() {
+    editRequestRef.current += 1;
+    setDetailLoading(false);
+  }
+
   function openAdd() {
+    dropPendingDetail();
     setMode("add");
     setEditing(null);
     setForm({...emptyForm, namespace: namespaces?.[0]?.name ?? "default"});
@@ -49,17 +60,41 @@ function SecretListPage() {
     setDialogOpen(true);
   }
 
-  function openEdit(record) {
+  async function openEdit(record) {
+    const requestId = ++editRequestRef.current;
     setMode("edit");
     setEditing(record);
     setForm({
       namespace: record.namespace,
       name: record.name,
       type: record.type || "Opaque",
-      entries: toEntries(record.stringData),
+      entries: [],
     });
     setErrors({});
+    setDetailLoading(true);
     setDialogOpen(true);
+
+    const res = await SecretBackend.getSecret(record.namespace, record.name)
+      .catch((e) => ({status: "error", msg: e.message}));
+    if (requestId !== editRequestRef.current) {
+      return;
+    }
+    setDetailLoading(false);
+
+    if (res?.status !== "ok") {
+      // The editor is still empty here, and submitting it would replace the
+      // Secret with no keys at all, so close rather than offer that.
+      setDialogOpen(false);
+      Setting.showMessage("error", res?.msg ?? "Request failed");
+      return;
+    }
+    setEditing(res.data);
+    setForm({
+      namespace: res.data.namespace,
+      name: res.data.name,
+      type: res.data.type || "Opaque",
+      entries: toEntries(res.data.stringData),
+    });
   }
 
   async function handleSubmit() {
@@ -116,10 +151,10 @@ function SecretListPage() {
     {
       key: "keys",
       title: "Keys",
-      dataIndex: "stringData",
-      render: (data) => (
+      dataIndex: "keys",
+      render: (keys) => (
         <div className="flex flex-wrap gap-1">
-          {Object.keys(data ?? {}).map((key) => (
+          {(keys ?? []).map((key) => (
             <Badge key={key} variant="warning" className="font-mono">
               {key}
             </Badge>
@@ -183,10 +218,16 @@ function SecretListPage() {
 
       <FormDialog
         open={dialogOpen}
-        onOpenChange={setDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            dropPendingDetail();
+          }
+          setDialogOpen(open);
+        }}
         title={mode === "add" ? "Add Secret" : "Edit Secret"}
         submitText={mode === "add" ? "Create" : "Update"}
-        submitting={submitting}
+        submitting={submitting || detailLoading}
+        submitDisabled={detailLoading}
         onSubmit={handleSubmit}
         size="lg"
       >

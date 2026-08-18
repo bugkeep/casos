@@ -8,6 +8,14 @@ export function getSecrets(namespace = "") {
   }).then(res => res.json());
 }
 
+export function getSecret(namespace, name) {
+  return fetch(`${Setting.ServerUrl}/api/get-secret?namespace=${encodeURIComponent(namespace)}&name=${encodeURIComponent(name)}`, {
+    method: "GET",
+    credentials: "include",
+    headers: {"Accept-Language": Setting.getAcceptLanguage()},
+  }).then(res => res.json());
+}
+
 export function addSecret(secret) {
   return fetch(`${Setting.ServerUrl}/api/add-secret`, {
     method: "POST",

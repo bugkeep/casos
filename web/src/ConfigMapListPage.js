@@ -63,12 +63,21 @@ class ConfigMapListPage extends React.Component {
   }
 
   openEditModal(cm) {
-    const dataEntries = Object.entries(cm.data ?? {}).map(([key, value]) => ({key, value}));
-    this.setState({modalVisible: true, modalMode: "edit", editingCm: cm}, () => {
-      setTimeout(() => {
-        this.formRef.current?.setFieldsValue({name: cm.name, namespace: cm.namespace, dataEntries});
-      }, 0);
-    });
+    // The list carries key names only, so the values come from a single-object
+    // fetch; opening only on success keeps an empty editor off the screen.
+    ConfigMapBackend.getConfigMap(cm.namespace, cm.name).then(res => {
+      if (res.status !== "ok") {
+        Setting.showMessage("error", res.msg);
+        return;
+      }
+      const full = res.data;
+      const dataEntries = Object.entries(full.data ?? {}).map(([key, value]) => ({key, value}));
+      this.setState({modalVisible: true, modalMode: "edit", editingCm: full}, () => {
+        setTimeout(() => {
+          this.formRef.current?.setFieldsValue({name: full.name, namespace: full.namespace, dataEntries});
+        }, 0);
+      });
+    }).catch(e => Setting.showMessage("error", e.message));
   }
 
   closeModal() {
@@ -134,11 +143,11 @@ class ConfigMapListPage extends React.Component {
       {title: "Name", dataIndex: "name", key: "name", width: 200},
       {
         title: "Keys",
-        dataIndex: "data",
-        key: "data",
-        render: data => (
+        dataIndex: "keys",
+        key: "keys",
+        render: keys => (
           <Space size={4} wrap>
-            {Object.keys(data ?? {}).map(k => (
+            {(keys ?? []).map(k => (
               <Tag key={k} style={{fontFamily: "monospace", fontSize: 11}}>{k}</Tag>
             ))}
           </Space>

@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"encoding/json"
+	"sort"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -10,29 +11,46 @@ import (
 )
 
 type secretSummary struct {
-	Namespace       string            `json:"namespace"`
-	Name            string            `json:"name"`
-	Type            string            `json:"type"`
-	DataKeys        int               `json:"dataKeys"`
-	StringData      map[string]string `json:"stringData"`
-	CreatedAt       string            `json:"createdAt"`
-	ResourceVersion string            `json:"resourceVersion"`
+	Namespace       string   `json:"namespace"`
+	Name            string   `json:"name"`
+	Type            string   `json:"type"`
+	DataKeys        int      `json:"dataKeys"`
+	Keys            []string `json:"keys"`
+	CreatedAt       string   `json:"createdAt"`
+	ResourceVersion string   `json:"resourceVersion"`
+}
+
+// Listing every Secret used to hand the browser every service-account token,
+// registry credential and TLS private key in the cluster, none of which the
+// list view renders. The values stay behind the single-object endpoints.
+type secretDetail struct {
+	secretSummary
+	StringData map[string]string `json:"stringData"`
 }
 
 func toSecretSummary(s corev1.Secret) secretSummary {
-	sd := make(map[string]string, len(s.Data))
-	for k, v := range s.Data {
-		sd[k] = string(v)
+	keys := make([]string, 0, len(s.Data))
+	for key := range s.Data {
+		keys = append(keys, key)
 	}
+	sort.Strings(keys)
 	return secretSummary{
 		Namespace:       s.Namespace,
 		Name:            s.Name,
 		Type:            string(s.Type),
 		DataKeys:        len(s.Data),
-		StringData:      sd,
+		Keys:            keys,
 		CreatedAt:       s.CreationTimestamp.UTC().Format("2006-01-02 15:04:05"),
 		ResourceVersion: s.ResourceVersion,
 	}
+}
+
+func toSecretDetail(s corev1.Secret) secretDetail {
+	sd := make(map[string]string, len(s.Data))
+	for k, v := range s.Data {
+		sd[k] = string(v)
+	}
+	return secretDetail{secretSummary: toSecretSummary(s), StringData: sd}
 }
 
 // GetSecrets
@@ -71,7 +89,7 @@ func (c *ApiController) GetSecret() {
 		c.ResponseError(err.Error())
 		return
 	}
-	c.ResponseOk(toSecretSummary(*s))
+	c.ResponseOk(toSecretDetail(*s))
 }
 
 type secretRequest struct {
@@ -115,7 +133,7 @@ func (c *ApiController) AddSecret() {
 		c.ResponseError(err.Error())
 		return
 	}
-	c.ResponseOk(toSecretSummary(*created))
+	c.ResponseOk(toSecretDetail(*created))
 }
 
 // UpdateSecret
@@ -152,7 +170,7 @@ func (c *ApiController) UpdateSecret() {
 		c.ResponseError(err.Error())
 		return
 	}
-	c.ResponseOk(toSecretSummary(*updated))
+	c.ResponseOk(toSecretDetail(*updated))
 }
 
 // DeleteSecret

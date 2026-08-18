@@ -12,8 +12,8 @@ export const ENV_SOURCE_SECRET = "secret";
  * Props:
  *   value        {Array}   - list of env var rows
  *   onChange     {Function}  - called with updated list
- *   configMaps   {Array}   - [{name, data: {key: val}}]
- *   secrets      {Array}   - [{name, stringData: {key: val}}]
+ *   configMaps   {Array}   - [{name, keys: [key]}]
+ *   secrets      {Array}   - [{name, keys: [key]}]
  */
 function EnvVarEditor({value = [], onChange, configMaps = [], secrets = []}) {
   function update(index, field, val) {
@@ -39,10 +39,10 @@ function EnvVarEditor({value = [], onChange, configMaps = [], secrets = []}) {
     const secretOptions = secrets.map(s => ({label: s.name, value: s.name}));
 
     const selectedCm = configMaps.find(cm => cm.name === ev.configMapName);
-    const cmKeyOptions = Object.keys(selectedCm?.data ?? {}).map(k => ({label: k, value: k}));
+    const cmKeyOptions = (selectedCm?.keys ?? []).map(k => ({label: k, value: k}));
 
     const selectedSecret = secrets.find(s => s.name === ev.secretName);
-    const secretKeyOptions = Object.keys(selectedSecret?.stringData ?? {}).map(k => ({label: k, value: k}));
+    const secretKeyOptions = (selectedSecret?.keys ?? []).map(k => ({label: k, value: k}));
 
     return (
       <div key={index} style={{display: "flex", gap: 8, alignItems: "flex-start", marginBottom: 8}}>

@@ -8,6 +8,14 @@ export function getConfigMaps(namespace = "") {
   }).then(res => res.json());
 }
 
+export function getConfigMap(namespace, name) {
+  return fetch(`${Setting.ServerUrl}/api/get-configmap?namespace=${encodeURIComponent(namespace)}&name=${encodeURIComponent(name)}`, {
+    method: "GET",
+    credentials: "include",
+    headers: {"Accept-Language": Setting.getAcceptLanguage()},
+  }).then(res => res.json());
+}
+
 export function addConfigMap(configmap) {
   return fetch(`${Setting.ServerUrl}/api/add-configmap`, {
     method: "POST",

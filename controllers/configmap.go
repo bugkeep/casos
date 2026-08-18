@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"encoding/json"
+	"sort"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -10,23 +11,41 @@ import (
 )
 
 type configMapSummary struct {
-	Namespace       string            `json:"namespace"`
-	Name            string            `json:"name"`
-	DataKeys        int               `json:"dataKeys"`
-	Data            map[string]string `json:"data"`
-	CreatedAt       string            `json:"createdAt"`
-	ResourceVersion string            `json:"resourceVersion"`
+	Namespace       string   `json:"namespace"`
+	Name            string   `json:"name"`
+	DataKeys        int      `json:"dataKeys"`
+	Keys            []string `json:"keys"`
+	CreatedAt       string   `json:"createdAt"`
+	ResourceVersion string   `json:"resourceVersion"`
+}
+
+// The list view only ever renders key names, so the summary carries names and
+// the values stay behind the single-object endpoints. Every namespace holds a
+// kube-root-ca.crt, and app ConfigMaps hold whole config files, so a
+// cluster-wide list of values runs to megabytes the browser never displays.
+type configMapDetail struct {
+	configMapSummary
+	Data map[string]string `json:"data"`
 }
 
 func toSummary(cm corev1.ConfigMap) configMapSummary {
+	keys := make([]string, 0, len(cm.Data))
+	for key := range cm.Data {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
 	return configMapSummary{
 		Namespace:       cm.Namespace,
 		Name:            cm.Name,
 		DataKeys:        len(cm.Data),
-		Data:            cm.Data,
+		Keys:            keys,
 		CreatedAt:       cm.CreationTimestamp.UTC().Format("2006-01-02 15:04:05"),
 		ResourceVersion: cm.ResourceVersion,
 	}
+}
+
+func toDetail(cm corev1.ConfigMap) configMapDetail {
+	return configMapDetail{configMapSummary: toSummary(cm), Data: cm.Data}
 }
 
 // GetConfigMaps
@@ -65,7 +84,7 @@ func (c *ApiController) GetConfigMap() {
 		c.ResponseError(err.Error())
 		return
 	}
-	c.ResponseOk(toSummary(*cm))
+	c.ResponseOk(toDetail(*cm))
 }
 
 type configMapRequest struct {
@@ -103,7 +122,7 @@ func (c *ApiController) AddConfigMap() {
 		c.ResponseError(err.Error())
 		return
 	}
-	c.ResponseOk(toSummary(*created))
+	c.ResponseOk(toDetail(*created))
 }
 
 // UpdateConfigMap
@@ -135,7 +154,7 @@ func (c *ApiController) UpdateConfigMap() {
 		c.ResponseError(err.Error())
 		return
 	}
-	c.ResponseOk(toSummary(*updated))
+	c.ResponseOk(toDetail(*updated))
 }
 
 // DeleteConfigMap
