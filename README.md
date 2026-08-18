@@ -167,6 +167,23 @@ attribute after such a download:
 xattr -d com.apple.quarantine ./casos
 ```
 
+## First run
+
+CasOS needs at least one Kubernetes worker node before it can schedule
+workloads. After signing in, the dashboard shows a first-run checklist that
+walks through the setup, and disappears once all four steps are done:
+
+1. Change the default `admin` password — see [Sign-in](#sign-in) for why this
+   comes first.
+2. Add a machine with SSH credentials on the **Machines** page.
+3. Deploy that machine as a worker node. The node must join the cluster and be
+   ready before workloads can run.
+4. Install the first application from the **App Store**.
+
+Each step is derived from the server rather than from a local flag, so the
+checklist stays accurate after refreshing the browser or signing in from
+another session.
+
 ## Configuration
 
 Edit `conf/app.conf` with your values:

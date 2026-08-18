@@ -40,6 +40,10 @@ jobs:
       # style regressions instead of silently rewriting the checkout.
       - run: yarn run lint:ci
         working-directory: ./web2
+      # The pure-logic modules under src/lib have node:test suites; Playwright
+      # drives the rendered app and is too slow to cover their branches.
+      - run: yarn run test:unit
+        working-directory: ./web2
       - run: yarn run build
         working-directory: ./web2
       # Consumed within the same run by the standalone and release jobs, so it

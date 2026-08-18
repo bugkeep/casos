@@ -1,8 +1,11 @@
-import React, {useMemo} from "react";
+import React, {useEffect, useMemo, useState} from "react";
 import {useHistory} from "react-router-dom";
 import {useTranslation} from "react-i18next";
 import {Boxes, CheckCircle2, Layers, Network, Server, Settings, TriangleAlert} from "lucide-react";
+import * as AccountBackend from "@/backend/AccountBackend";
 import * as DashboardBackend from "@/backend/DashboardBackend";
+import * as HelmBackend from "@/backend/HelmBackend";
+import * as MachineBackend from "@/backend/MachineBackend";
 import {useResource} from "@/hooks/use-resource";
 import {Badge} from "@/components/ui/badge";
 import {Card, CardContent, CardHeader, CardTitle} from "@/components/ui/card";
@@ -13,8 +16,10 @@ import {PageContainer} from "@/components/shared/page-header";
 import {StatCard} from "@/components/shared/stat-card";
 import {Loading} from "@/components/shared/loading";
 import {RadialProgress} from "@/components/shared/radial-progress";
+import {FirstRunChecklist} from "@/components/shared/first-run-checklist";
 import {CHART_COLORS, EchartsWidget} from "@/components/shared/echarts-widget";
 import {getDashboardHealthState} from "@/lib/dashboardHealth";
+import {getFirstRunChecklist, isFirstRunComplete, markFirstRunChecklistDone, readFirstRunChecklistDone} from "@/lib/firstRunChecklist";
 
 const POD_PHASE_COLORS = {
   Running: "#3b82f6",
@@ -160,10 +165,37 @@ function GaugeCard({title, percent, tone, primaryValue, primaryLabel, secondaryV
   );
 }
 
-function DashboardPage() {
+function DashboardPage({account, accountUpdatedAt, onOpenAccount}) {
   const history = useHistory();
   const {t} = useTranslation();
   const {data: stats, loading} = useResource(() => DashboardBackend.getDashboard(), [], {initialData: null});
+
+  // Setup is a one-time affair, so once it is done these three requests stop
+  // being issued and the dashboard goes back to one call per visit.
+  const [firstRunDone, setFirstRunDone] = useState(() => readFirstRunChecklistDone());
+  const checklistResource = {initialData: null, enabled: !firstRunDone, toastOnError: false};
+  const {data: machines, loading: machinesLoading} = useResource(
+    () => MachineBackend.getGlobalMachines(), [accountUpdatedAt], checklistResource);
+  const {data: signinOptions, loading: signinOptionsLoading} = useResource(
+    () => AccountBackend.getSigninOptions(), [accountUpdatedAt], checklistResource);
+  const {data: releases, loading: releasesLoading} = useResource(
+    () => HelmBackend.getHelmReleases(), [accountUpdatedAt], checklistResource);
+
+  const firstRunSteps = useMemo(
+    () => getFirstRunChecklist({account, signinOptions, machines, releases, stats}),
+    [account, signinOptions, machines, releases, stats]);
+  // Half-loaded state reads as "nothing done yet", which would flash the
+  // checklist at every existing cluster on the first visit after an upgrade.
+  const firstRunLoading = machinesLoading || signinOptionsLoading || releasesLoading;
+  const firstRunComplete = isFirstRunComplete(firstRunSteps);
+
+  useEffect(() => {
+    if (firstRunDone || firstRunLoading || !firstRunComplete) {
+      return;
+    }
+    markFirstRunChecklistDone();
+    setFirstRunDone(true);
+  }, [firstRunDone, firstRunLoading, firstRunComplete]);
 
   const podPhase = useMemo(() => donutOption(stats?.podsByPhase, POD_PHASE_COLORS), [stats]);
   const serviceTypes = useMemo(() => donutOption(stats?.servicesByType, SVC_TYPE_COLORS), [stats]);
@@ -204,12 +236,29 @@ function DashboardPage() {
     Unknown: t("dashboard:reason Unknown"),
   };
 
+  const firstRunChecklist = firstRunDone || firstRunLoading || firstRunComplete ? null : (
+    <FirstRunChecklist
+      steps={firstRunSteps}
+      onAction={(step) => {
+        if (step === "password") {
+          onOpenAccount?.();
+        } else if (step === "machine" || step === "node") {
+          history.push("/machines");
+        } else if (step === "app") {
+          history.push("/app-store");
+        }
+      }}
+    />
+  );
+
   if (loading) {
     return <Loading type="page" />;
   }
 
+  // There is no dashboard to draw without cluster stats, but that is exactly
+  // the state a fresh install is in, so the setup checklist still gets shown.
   if (!stats) {
-    return null;
+    return firstRunChecklist ? <PageContainer>{firstRunChecklist}</PageContainer> : null;
   }
 
   const nodeReadyRate = stats.nodesTotal > 0 ? Number(((stats.nodesReady / stats.nodesTotal) * 100).toFixed(1)) : 0;
@@ -247,6 +296,7 @@ function DashboardPage() {
 
   return (
     <PageContainer>
+      {firstRunChecklist}
       {!clusterHealthy ? (
         <div className="grid gap-2">
           <Alert variant={healthStatus === "unknown" ? "warning" : "destructive"}>
