@@ -136,16 +136,17 @@ esac
 
 case "$(uname -m)" in
 	x86_64|amd64) ARCH_NAME="x86_64" ;;
-	aarch64|arm64) ARCH_NAME="arm64" ;;
+	# The release ships x86_64 only. An Apple Silicon Mac runs that build under
+	# Rosetta 2, so install it there; arm64 Linux has no such translation and
+	# would end up with a binary it cannot execute.
+	aarch64|arm64)
+		[[ "$OS_NAME" == "darwin" ]] ||
+			die "CasOS releases an x86_64 build only, which an arm64 Linux host cannot run; build from source instead: https://github.com/${REPO}"
+		ARCH_NAME="x86_64"
+		info "No arm64 build is released; installing the x86_64 build, which runs under Rosetta 2."
+		;;
 	*) die "unsupported architecture; download manually from https://github.com/${REPO}/releases" ;;
 esac
-
-# Under Rosetta 2 `uname -m` describes the emulated x86_64 shell rather than the
-# Apple Silicon host, so install the native arm64 build instead of an emulated one.
-if [[ "$OS_NAME" == "darwin" && "$ARCH_NAME" == "x86_64" ]] &&
-	[[ "$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)" == "1" ]]; then
-	ARCH_NAME="arm64"
-fi
 
 FILENAME="casos_${OS_NAME}_${ARCH_NAME}.tar.gz"
 TEMP_DIR="$(mktemp -d)"
@@ -157,19 +158,10 @@ cleanup() {
 trap cleanup EXIT
 
 info "Downloading CasOS ${CASOS_VERSION}..."
+# The release no longer publishes a checksum file, so the integrity of the
+# download rests on the HTTPS transfer from GitHub. curl -f turns an HTTP error
+# into a non-zero exit rather than a saved error page.
 curl -fsSL -o "$TEMP_DIR/$FILENAME" "$RELEASE_URL/$FILENAME"
-curl -fsSL -o "$TEMP_DIR/SHA256SUMS" "$RELEASE_URL/SHA256SUMS"
-
-EXPECTED="$(grep -E "^[0-9a-fA-F]{64}[[:space:]]+\\*?${FILENAME}$" "$TEMP_DIR/SHA256SUMS" | head -1 | awk '{print tolower($1)}' || true)"
-[[ -n "$EXPECTED" ]] || die "release checksum for $FILENAME was not found"
-if command -v sha256sum >/dev/null 2>&1; then
-	ACTUAL="$(sha256sum "$TEMP_DIR/$FILENAME" | awk '{print tolower($1)}')"
-elif command -v shasum >/dev/null 2>&1; then
-	ACTUAL="$(shasum -a 256 "$TEMP_DIR/$FILENAME" | awk '{print tolower($1)}')"
-else
-	die "required command not found: sha256sum or shasum"
-fi
-[[ "$ACTUAL" == "$EXPECTED" ]] || die "download checksum verification failed"
 
 # The release ships the executable compressed, which cuts the download to about
 # a third. The archive holds that one file and nothing else.

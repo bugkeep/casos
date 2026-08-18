@@ -19,9 +19,11 @@ builds:
       - linux
       - darwin
       - windows
+    # x86_64 only: nobody runs the arm64 downloads, and dropping them cuts the
+    # release to three archives. Worker nodes are unaffected — they install
+    # upstream Kubernetes binaries for their own architecture.
     goarch:
       - amd64
-      - arm64
 
 # An in-process Kubernetes control plane links to roughly 150 MB of machine
 # code, and the embed build tag adds the frontend on top of that. Gzip and
@@ -45,9 +47,10 @@ archives:
       {{ .ProjectName }}_{{ .Os }}_
       {{- if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
 
-# Covers the archives, which is what the installers download and verify.
+# The installers download over HTTPS from GitHub and no longer verify a
+# published digest, so the release ships the archives alone.
 checksum:
-  name_template: SHA256SUMS
+  disable: true
 
 release:
   # semantic-release owns the draft, tag, and notes. GoReleaser reuses that

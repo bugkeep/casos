@@ -75,26 +75,26 @@ Supported platforms: **Linux**, **macOS**, **Windows**
 
 ## Install
 
-Linux and macOS (x86_64 or arm64):
+Linux and macOS (x86_64):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/casosorg/casos/master/scripts/install.sh | bash
 ```
 
-Windows PowerShell (x86_64 or arm64):
+Windows PowerShell (x86_64):
 
 ```powershell
 irm https://raw.githubusercontent.com/casosorg/casos/master/scripts/install.ps1 | iex
 ```
 
 The installer downloads the matching archive from the latest GitHub release,
-verifies it against `SHA256SUMS`, unpacks the executable, and adds CasOS to
-your user `PATH`. On Linux
+unpacks the executable, and adds CasOS to your user `PATH`. On Linux
 and macOS, open a new shell or run the `source` command printed by the
 installer before running `casos`; the installer also prints the absolute
 executable path. On Windows, the current PowerShell session is updated
-immediately. On an Apple Silicon Mac the installer picks the native `arm64`
-build even when it runs from a Rosetta shell. Open
+immediately. Releases are x86_64 only: an Apple Silicon Mac and a Windows on
+ARM machine both get that build and run it under emulation, while an arm64
+Linux host has to build from source. Open
 `http://localhost:9000` after starting CasOS. Rerun the command to upgrade. Set
 `CASOS_VERSION` to a release tag such as `v1.32.0` to install that version.
 Both installers read the same settings:
@@ -326,8 +326,7 @@ CGO_ENABLED=0 go build -trimpath -tags embed -o casos .
 `GENERATE_SOURCEMAP=false` keeps the `.map` files out of the binary; without it
 they are embedded as well and add tens of megabytes.
 
-Every release publishes this binary for Linux, macOS, and Windows on x86_64 and
-arm64, alongside a `SHA256SUMS` file, on the
+Every release publishes this binary for Linux, macOS, and Windows on x86_64 on the
 [releases page](https://github.com/casosorg/casos/releases/latest). Each one
 ships as an archive — `.tar.gz` for Linux and macOS, `.zip` for Windows —
 holding the executable alone; compressing a statically linked Kubernetes
