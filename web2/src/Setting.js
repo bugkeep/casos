@@ -204,7 +204,7 @@ export function getLogo(themes, storeLogoUrl) {
 
 export function getFooterHtml(themes, storeFooterHtml, site) {
   const logoUrl = getLogo([], site?.logoUrl);
-  const defaultFooterHtml = `<a target="_blank" href="https://github.com/casosorg/casos" rel="noreferrer"><img style="padding-bottom: 3px;" height="30" alt="CasOS" src="${logoUrl}" /></a>`;
+  const defaultFooterHtml = `<a target="_blank" href="https://github.com/casosorg/casos" rel="noreferrer"><img style="height: 30px; width: auto; padding-bottom: 3px;" alt="CasOS" src="${logoUrl}" /></a>`;
   const footerHtml = storeFooterHtml || defaultFooterHtml;
   if (Array.isArray(themes) && themes.includes("dark")) {
     return footerHtml.replace(/(\.png)/g, "_white$1");

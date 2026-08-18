@@ -126,7 +126,7 @@ function ManagementPage(props) {
         </main>
 
         <footer className="text-muted-foreground flex items-center justify-center border-t py-5 text-sm">
-          <div dangerouslySetInnerHTML={{__html: footerHtml}} />
+          <div className="[&_img]:inline-block [&_img]:max-h-[30px] [&_img]:w-auto" dangerouslySetInnerHTML={{__html: footerHtml}} />
         </footer>
       </div>
 
