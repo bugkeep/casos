@@ -37,10 +37,10 @@ export default defineConfig({
     chunkSizeWarningLimit: 1500,
     rollupOptions: {
       output: {
-        // echarts and xterm are only needed by a handful of routes; splitting
+        // recharts and xterm are only needed by a handful of routes; splitting
         // them keeps the initial bundle from carrying the whole charting stack.
         manualChunks: {
-          echarts: ["echarts"],
+          recharts: ["recharts"],
           xterm: ["xterm", "xterm-addon-fit"],
           vendor: ["react", "react-dom", "react-router-dom"],
         },

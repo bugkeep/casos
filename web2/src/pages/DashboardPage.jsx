@@ -17,7 +17,7 @@ import {StatCard} from "@/components/shared/stat-card";
 import {Loading} from "@/components/shared/loading";
 import {RadialProgress} from "@/components/shared/radial-progress";
 import {FirstRunChecklist} from "@/components/shared/first-run-checklist";
-import {CHART_COLORS, EchartsWidget} from "@/components/shared/echarts-widget";
+import {CategoryDonut, DualCategoryPie, RankedBarChart} from "@/components/shared/charts";
 import {getDashboardHealthState} from "@/lib/dashboardHealth";
 import {getFirstRunChecklist, isFirstRunComplete, markFirstRunChecklistDone, readFirstRunChecklistDone} from "@/lib/firstRunChecklist";
 
@@ -38,108 +38,6 @@ const SVC_TYPE_COLORS = {
 
 function formatMiB(mib) {
   return mib >= 1024 ? `${(mib / 1024).toFixed(1)} GiB` : `${mib} MiB`;
-}
-
-// The two donuts share a shape: a category breakdown with the legend beside it
-// rather than under it, so the chart keeps its height in a short card.
-function donutOption(data, colors) {
-  if (!data) {
-    return null;
-  }
-  return {
-    tooltip: {trigger: "item", formatter: "{b}: {c} ({d}%)"},
-    legend: {type: "scroll", orient: "vertical", right: 8, left: "56%", top: "center", textStyle: {fontSize: 12}},
-    series: [
-      {
-        type: "pie",
-        radius: ["42%", "68%"],
-        center: ["28%", "50%"],
-        avoidLabelOverlap: true,
-        itemStyle: {borderRadius: 5, borderWidth: 2},
-        label: {show: false},
-        emphasis: {label: {show: true, fontSize: 13, fontWeight: "bold"}},
-        data: Object.entries(data).map(([name, value], index) => ({
-          name,
-          value,
-          itemStyle: {color: colors[name] || CHART_COLORS[index % CHART_COLORS.length]},
-        })),
-      },
-    ],
-  };
-}
-
-// A cluster can have hundreds of namespaces; the bar chart shows the twelve
-// busiest, which is what the question "where are my pods" actually means.
-function podsByNamespaceOption(podsByNamespace) {
-  if (!podsByNamespace) {
-    return null;
-  }
-  const sorted = Object.entries(podsByNamespace)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 12);
-
-  return {
-    color: CHART_COLORS,
-    tooltip: {
-      trigger: "axis",
-      axisPointer: {type: "shadow"},
-      formatter: (params) => `${params[0].name}<br/>Pods: <b>${params[0].value}</b>`,
-    },
-    grid: {left: 16, right: 24, top: 8, bottom: 8, containLabel: true},
-    xAxis: {type: "value", minInterval: 1, axisLabel: {fontSize: 11}},
-    yAxis: {
-      type: "category",
-      data: sorted.map(([namespace]) => namespace),
-      axisLabel: {fontSize: 11, formatter: (value) => (value.length > 20 ? `${value.slice(0, 18)}…` : value)},
-    },
-    series: [
-      {
-        type: "bar",
-        data: sorted.map(([, count], index) => ({
-          value: count,
-          itemStyle: {color: CHART_COLORS[index % CHART_COLORS.length], borderRadius: [0, 4, 4, 0]},
-        })),
-      },
-    ],
-  };
-}
-
-function nodeInfraOption(nodesByOS, nodesByArch) {
-  const osData = Object.entries(nodesByOS || {}).map(([name, value], index) => ({
-    name,
-    value,
-    itemStyle: {color: CHART_COLORS[index % CHART_COLORS.length]},
-  }));
-  const archData = Object.entries(nodesByArch || {}).map(([name, value], index) => ({
-    name,
-    value,
-    itemStyle: {color: CHART_COLORS[(index + 4) % CHART_COLORS.length]},
-  }));
-
-  return {
-    tooltip: {trigger: "item", formatter: "{a}<br/>{b}: {c} ({d}%)"},
-    legend: {data: [...osData, ...archData].map((item) => item.name), bottom: 0, textStyle: {fontSize: 11}},
-    series: [
-      {
-        name: "OS",
-        type: "pie",
-        radius: ["20%", "40%"],
-        center: ["30%", "45%"],
-        label: {position: "inner", fontSize: 11, color: "#fff"},
-        itemStyle: {borderRadius: 4, borderWidth: 2},
-        data: osData,
-      },
-      {
-        name: "Arch",
-        type: "pie",
-        radius: ["20%", "40%"],
-        center: ["70%", "45%"],
-        label: {position: "inner", fontSize: 11, color: "#fff"},
-        itemStyle: {borderRadius: 4, borderWidth: 2},
-        data: archData,
-      },
-    ],
-  };
 }
 
 function GaugeCard({title, percent, tone, primaryValue, primaryLabel, secondaryValue, secondaryLabel}) {
@@ -196,11 +94,6 @@ function DashboardPage({account, accountUpdatedAt, onOpenAccount}) {
     markFirstRunChecklistDone();
     setFirstRunDone(true);
   }, [firstRunDone, firstRunLoading, firstRunComplete]);
-
-  const podPhase = useMemo(() => donutOption(stats?.podsByPhase, POD_PHASE_COLORS), [stats]);
-  const serviceTypes = useMemo(() => donutOption(stats?.servicesByType, SVC_TYPE_COLORS), [stats]);
-  const podsByNamespace = useMemo(() => podsByNamespaceOption(stats?.podsByNamespace), [stats]);
-  const nodeInfra = useMemo(() => nodeInfraOption(stats?.nodesByOS, stats?.nodesByArch), [stats]);
 
   const reasonVariants = {
     CrashLoopBackOff: "danger",
@@ -381,7 +274,7 @@ function DashboardPage({account, accountUpdatedAt, onOpenAccount}) {
             <CardTitle className="text-sm">{t("dashboard:chart Pods by namespace")}</CardTitle>
           </CardHeader>
           <CardContent className="px-2">
-            <EchartsWidget option={podsByNamespace} style={{height: 280}} />
+            <RankedBarChart data={stats.podsByNamespace} valueLabel="Pods" className="aspect-auto h-[280px] w-full" />
           </CardContent>
         </Card>
 
@@ -390,7 +283,7 @@ function DashboardPage({account, accountUpdatedAt, onOpenAccount}) {
             <CardTitle className="text-sm">{t("dashboard:chart Pod phase")}</CardTitle>
           </CardHeader>
           <CardContent className="px-2">
-            <EchartsWidget option={podPhase} style={{height: 280}} />
+            <CategoryDonut data={stats.podsByPhase} colors={POD_PHASE_COLORS} className="aspect-auto h-[280px] w-full" />
           </CardContent>
         </Card>
       </div>
@@ -419,7 +312,7 @@ function DashboardPage({account, accountUpdatedAt, onOpenAccount}) {
             <CardTitle className="text-sm">{t("dashboard:chart Service types")}</CardTitle>
           </CardHeader>
           <CardContent className="px-2">
-            <EchartsWidget option={serviceTypes} style={{height: 200}} />
+            <CategoryDonut data={stats.servicesByType} colors={SVC_TYPE_COLORS} className="aspect-auto h-[200px] w-full" />
           </CardContent>
         </Card>
       </div>
@@ -429,7 +322,7 @@ function DashboardPage({account, accountUpdatedAt, onOpenAccount}) {
           <CardTitle className="text-sm">{t("dashboard:chart Node infra")}</CardTitle>
         </CardHeader>
         <CardContent className="px-2">
-          <EchartsWidget option={nodeInfra} style={{height: 220}} />
+          <DualCategoryPie left={stats.nodesByOS} right={stats.nodesByArch} className="aspect-auto h-[220px] w-full" />
         </CardContent>
       </Card>
     </PageContainer>

@@ -173,7 +173,7 @@ export function isDarkTheme(themeAlgorithm) {
 
 // Dark mode is a class on <html> because that is what the Tailwind `dark:`
 // variant keys off; the data-theme attribute is kept for the handful of plain
-// CSS rules and third-party widgets (xterm, echarts) that read it.
+// CSS rules and third-party widgets (xterm) that read it.
 export function applyThemeAlgorithm(themeAlgorithm) {
   const dark = isDarkTheme(themeAlgorithm);
   document.documentElement.classList.toggle("dark", dark);

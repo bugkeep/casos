@@ -1,8 +1,7 @@
-import React, {useEffect, useRef, useState} from "react";
+import React, {useCallback, useEffect, useState} from "react";
 import {useHistory} from "react-router-dom";
 import {useTranslation} from "react-i18next";
 import i18next from "i18next";
-import * as echarts from "echarts";
 import * as DeploymentBackend from "@/backend/DeploymentBackend";
 import * as StatefulSetBackend from "@/backend/StatefulSetBackend";
 import * as DaemonSetBackend from "@/backend/DaemonSetBackend";
@@ -13,10 +12,10 @@ import * as NamespaceBackend from "@/backend/NamespaceBackend";
 import {Card, CardContent, CardHeader, CardTitle} from "@/components/ui/card";
 import {MessageAlert} from "@/components/ui/alert";
 import {EmptyState} from "@/components/shared/empty-state";
+import {ForceGraph} from "@/components/shared/force-graph";
 import {Loading} from "@/components/shared/loading";
 import {PageContainer} from "@/components/shared/page-header";
 import {SearchSelect} from "@/components/shared/simple-select";
-import {isDarkMode} from "@/components/shared/echarts-widget";
 
 const CATEGORIES = [
   {name: "Ingress", color: "#3b82f6"},
@@ -46,6 +45,8 @@ const ROUTE_MAP = {
   pod: "/pods",
 };
 
+const EMPTY_GRAPH = {nodes: [], links: []};
+
 // A controller owns a pod when every label in its selector matches. An empty
 // selector matches nothing here rather than everything — a selector-less object
 // is a mis-shaped record, not a claim on the whole namespace.
@@ -74,8 +75,8 @@ function buildGraphData(deployments, statefulSets, daemonSets, pods, services, i
       id,
       name,
       category,
-      symbolSize: category < CAT.POD ? 44 : 30,
-      itemStyle: color ? {color} : undefined,
+      size: category < CAT.POD ? 44 : 30,
+      color: color || CATEGORIES[category].color,
     });
   }
 
@@ -137,63 +138,24 @@ function buildGraphData(deployments, statefulSets, daemonSets, pods, services, i
   return {nodes, links};
 }
 
-function buildOption(nodes, links, dark) {
-  return {
-    backgroundColor: "transparent",
-    tooltip: {
-      formatter: (params) => {
-        if (params.dataType !== "node") {
-          return "";
-        }
-        const [type, ...rest] = params.data.id.split("/");
-        return `<b style="text-transform:capitalize">${type}</b><br/>${rest.join("/")}`;
-      },
-    },
-    legend: {
-      data: CATEGORIES.map((category) => category.name),
-      top: 8,
-      left: "center",
-      itemWidth: 12,
-      itemHeight: 12,
-      textStyle: {fontSize: 12, color: dark ? "#d4d4d4" : "#404040"},
-    },
-    series: [
-      {
-        type: "graph",
-        layout: "force",
-        data: nodes,
-        links,
-        categories: CATEGORIES.map((category) => ({name: category.name, itemStyle: {color: category.color}})),
-        roam: true,
-        draggable: true,
-        force: {repulsion: 320, gravity: 0.04, edgeLength: [90, 220], layoutAnimation: true},
-        label: {
-          show: true,
-          position: "bottom",
-          fontSize: 11,
-          color: dark ? "#a3a3a3" : "#525252",
-          formatter: (params) => (params.data.name.length > 22 ? `${params.data.name.slice(0, 20)}…` : params.data.name),
-        },
-        lineStyle: {opacity: 0.55, width: 1.5, color: "source", curveness: 0.08},
-        emphasis: {focus: "adjacency", lineStyle: {width: 3}},
-        edgeSymbol: ["none", "arrow"],
-        edgeSymbolSize: [0, 8],
-      },
-    ],
-  };
+function LegendSwatch({color, label}) {
+  return (
+    <span className="text-muted-foreground flex items-center gap-1.5 text-xs">
+      <span className="h-2.5 w-2.5 shrink-0 rounded-[2px]" style={{backgroundColor: color}} />
+      {label}
+    </span>
+  );
 }
 
 function TopologyPage() {
   useTranslation();
   const history = useHistory();
-  const containerRef = useRef(null);
-  const chartRef = useRef(null);
 
   const [namespaces, setNamespaces] = useState([]);
   const [namespace, setNamespace] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [graphData, setGraphData] = useState({nodes: [], links: []});
+  const [graphData, setGraphData] = useState(EMPTY_GRAPH);
 
   useEffect(() => {
     NamespaceBackend.getNamespaces().then((res) => {
@@ -230,46 +192,24 @@ function TopologyPage() {
       .finally(() => setLoading(false));
   }, [namespace]);
 
-  useEffect(() => {
-    if (!containerRef.current) {
-      return undefined;
+  // Clicking a node jumps to the list page for that kind, which is what makes
+  // the graph a navigation aid rather than a picture.
+  const handleNodeClick = useCallback((node) => {
+    const [type] = node.id.split("/");
+    if (ROUTE_MAP[type]) {
+      history.push(ROUTE_MAP[type]);
     }
-    const chart = echarts.init(containerRef.current, isDarkMode() ? "dark" : undefined);
-    chart.setOption({backgroundColor: "transparent"});
-    chartRef.current = chart;
-
-    const resizeObserver = new ResizeObserver(() => chart.resize());
-    resizeObserver.observe(containerRef.current);
-
-    // Clicking a node jumps to the list page for that kind, which is what makes
-    // the graph a navigation aid rather than a picture.
-    chart.on("click", (params) => {
-      if (params.dataType !== "node") {
-        return;
-      }
-      const [type] = params.data.id.split("/");
-      if (ROUTE_MAP[type]) {
-        history.push(ROUTE_MAP[type]);
-      }
-    });
-
-    return () => {
-      resizeObserver.disconnect();
-      chart.dispose();
-      chartRef.current = null;
-    };
   }, [history]);
 
-  useEffect(() => {
-    if (!chartRef.current) {
-      return;
-    }
-    if (graphData.nodes.length === 0) {
-      chartRef.current.clear();
-      return;
-    }
-    chartRef.current.setOption(buildOption(graphData.nodes, graphData.links, isDarkMode()), {notMerge: true});
-  }, [graphData]);
+  const getTooltip = useCallback((node) => {
+    const [type, ...rest] = node.id.split("/");
+    return (
+      <>
+        <div className="font-medium capitalize">{type}</div>
+        <div className="text-muted-foreground">{rest.join("/")}</div>
+      </>
+    );
+  }, []);
 
   return (
     <PageContainer>
@@ -300,6 +240,11 @@ function TopologyPage() {
 
         <CardContent className="relative px-2">
           {error ? <MessageAlert title={error} className="mb-3" /> : null}
+          <div className="mb-1 flex flex-wrap justify-center gap-x-4 gap-y-1.5">
+            {CATEGORIES.map((category) => (
+              <LegendSwatch key={category.name} color={category.color} label={category.name} />
+            ))}
+          </div>
           {loading ? (
             <div className="absolute inset-0 z-10 flex items-center justify-center">
               <Loading />
@@ -307,8 +252,15 @@ function TopologyPage() {
           ) : null}
           {!loading && graphData.nodes.length === 0 && !error ? (
             <EmptyState title={i18next.t("general:No resources found")} className="py-24" />
-          ) : null}
-          <div ref={containerRef} className="h-[640px] w-full" />
+          ) : (
+            <ForceGraph
+              nodes={graphData.nodes}
+              links={graphData.links}
+              onNodeClick={handleNodeClick}
+              getTooltip={getTooltip}
+              className="h-[640px] w-full"
+            />
+          )}
         </CardContent>
       </Card>
     </PageContainer>
