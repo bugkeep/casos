@@ -108,7 +108,12 @@ if ($Version -eq 'latest') {
 $Architecture = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
 $ArchName = switch ($Architecture) {
     'AMD64' { 'x86_64' }
-    'ARM64' { 'arm64' }
+    # The release ships x86_64 only. Windows on ARM emulates x86_64, so that
+    # build runs here as well.
+    'ARM64' {
+        Write-Host 'No arm64 build is released; installing the x86_64 build, which runs under Windows x64 emulation.'
+        'x86_64'
+    }
     default { throw "Unsupported architecture: $Architecture" }
 }
 
@@ -119,18 +124,10 @@ New-Item -ItemType Directory -Path $TempDir | Out-Null
 
 try {
     $ArchivePath = Join-Path $TempDir $Filename
-    $ChecksumsPath = Join-Path $TempDir 'SHA256SUMS'
     Write-Host "Downloading CasOS $Version..."
+    # The release no longer publishes a checksum file, so the integrity of the
+    # download rests on the HTTPS transfer from GitHub.
     Invoke-WebRequest -Uri "$ReleaseUrl/$Filename" -OutFile $ArchivePath -UseBasicParsing
-    Invoke-WebRequest -Uri "$ReleaseUrl/SHA256SUMS" -OutFile $ChecksumsPath -UseBasicParsing
-
-    $ChecksumLine = Get-Content $ChecksumsPath |
-        Where-Object { $_ -match "^[0-9a-fA-F]{64}\s+\*?$([regex]::Escape($Filename))$" } |
-        Select-Object -First 1
-    if (-not $ChecksumLine) { throw "Release checksum for $Filename was not found." }
-    $Expected = ($ChecksumLine -split '\s+')[0].ToLowerInvariant()
-    $Actual = (Get-FileHash -Algorithm SHA256 -Path $ArchivePath).Hash.ToLowerInvariant()
-    if ($Actual -ne $Expected) { throw 'Download checksum verification failed.' }
 
     # The release ships the executable compressed, which cuts the download to
     # about a third. The archive holds that one file and nothing else.
