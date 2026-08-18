@@ -14,6 +14,7 @@ import {StatCard} from "@/components/shared/stat-card";
 import {Loading} from "@/components/shared/loading";
 import {RadialProgress} from "@/components/shared/radial-progress";
 import {CHART_COLORS, EchartsWidget} from "@/components/shared/echarts-widget";
+import {getDashboardHealthState} from "@/lib/dashboardHealth";
 
 const POD_PHASE_COLORS = {
   Running: "#3b82f6",
@@ -174,10 +175,14 @@ function DashboardPage() {
     OOMKilled: "danger",
     ImagePullBackOff: "warning",
     ErrImagePull: "warning",
+    ErrImageNeverPull: "warning",
     InvalidImageName: "warning",
     CreateContainerConfigError: "warning",
     CreateContainerError: "warning",
+    RunContainerError: "danger",
     Evicted: "secondary",
+    Unschedulable: "warning",
+    SchedulerError: "danger",
     Failed: "danger",
     Unknown: "muted",
   };
@@ -187,10 +192,14 @@ function DashboardPage() {
     OOMKilled: t("dashboard:reason OOMKilled"),
     ImagePullBackOff: t("dashboard:reason ImagePullBackOff"),
     ErrImagePull: t("dashboard:reason ImagePullBackOff"),
+    ErrImageNeverPull: t("dashboard:reason ErrImageNeverPull"),
     InvalidImageName: t("dashboard:reason InvalidImageName"),
     CreateContainerConfigError: t("dashboard:reason ConfigError"),
     CreateContainerError: t("dashboard:reason ContainerError"),
+    RunContainerError: t("dashboard:reason RunContainerError"),
     Evicted: t("dashboard:reason Evicted"),
+    Unschedulable: t("dashboard:reason Unschedulable"),
+    SchedulerError: t("dashboard:reason SchedulerError"),
     Failed: t("dashboard:reason Failed"),
     Unknown: t("dashboard:reason Unknown"),
   };
@@ -205,7 +214,22 @@ function DashboardPage() {
 
   const nodeReadyRate = stats.nodesTotal > 0 ? Number(((stats.nodesReady / stats.nodesTotal) * 100).toFixed(1)) : 0;
   const podRunningRate = stats.podsTotal > 0 ? Number(((stats.podsRunning / stats.podsTotal) * 100).toFixed(1)) : 0;
-  const unhealthyPods = stats.unhealthyPods || [];
+  const unhealthyPods = Array.isArray(stats.unhealthyPods) ? stats.unhealthyPods : [];
+  const {healthStatus, notReadyNodes} = getDashboardHealthState(stats);
+  const clusterHealthy = healthStatus === "healthy";
+  let healthMessage = "";
+  if (healthStatus === "unknown") {
+    healthMessage = t("dashboard:health data unavailable");
+  } else if (healthStatus === "unhealthy") {
+    const unhealthyDetails = [];
+    if (notReadyNodes > 0) {
+      unhealthyDetails.push(t("dashboard:alert nodes not ready", {count: notReadyNodes}));
+    }
+    if (unhealthyPods.length > 0) {
+      unhealthyDetails.push(t("dashboard:alert unhealthy", {count: unhealthyPods.length}));
+    }
+    healthMessage = unhealthyDetails.join(", ") || t("dashboard:alert unhealthy cluster");
+  }
   const deploymentsDegraded = stats.deploymentsAvailable < stats.deploymentsTotal;
   const hasClusterMetrics = stats.clusterCPUTotalM > 0 || stats.clusterMemTotalMi > 0;
 
@@ -223,20 +247,22 @@ function DashboardPage() {
 
   return (
     <PageContainer>
-      {unhealthyPods.length > 0 ? (
+      {!clusterHealthy ? (
         <div className="grid gap-2">
-          <Alert variant="destructive">
+          <Alert variant={healthStatus === "unknown" ? "warning" : "destructive"}>
             <TriangleAlert />
-            <AlertTitle>{t("dashboard:alert unhealthy", {count: unhealthyPods.length})}</AlertTitle>
+            <AlertTitle className="line-clamp-none break-words">{healthMessage}</AlertTitle>
           </Alert>
-          <DataTable
-            columns={unhealthyColumns}
-            dataSource={unhealthyPods}
-            rowKey={(record, index) => `${record.namespace}/${record.name}/${index}`}
-            pageSize={5}
-            dense
-            onRowClick={(record) => history.push(`/pods?namespace=${record.namespace}`)}
-          />
+          {healthStatus === "unhealthy" && unhealthyPods.length > 0 ? (
+            <DataTable
+              columns={unhealthyColumns}
+              dataSource={unhealthyPods}
+              rowKey={(record, index) => `${record.namespace}/${record.name}/${index}`}
+              pageSize={5}
+              dense
+              onRowClick={(record) => history.push(`/pods?namespace=${record.namespace}`)}
+            />
+          ) : null}
         </div>
       ) : (
         <Alert variant="success">

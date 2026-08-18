@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"fmt"
 	"path/filepath"
 
 	corev1 "k8s.io/api/core/v1"
@@ -14,6 +15,24 @@ type unhealthyPod struct {
 	Phase     string `json:"phase"`
 	Reason    string `json:"reason"`
 }
+
+var dashboardContainerFailureReasons = map[string]struct{}{
+	"CrashLoopBackOff":           {},
+	"OOMKilled":                  {},
+	"ImagePullBackOff":           {},
+	"ErrImagePull":               {},
+	"ErrImageNeverPull":          {},
+	"InvalidImageName":           {},
+	"CreateContainerConfigError": {},
+	"CreateContainerError":       {},
+	"RunContainerError":          {},
+}
+
+const (
+	dashboardHealthHealthy   = "healthy"
+	dashboardHealthUnhealthy = "unhealthy"
+	dashboardHealthUnknown   = "unknown"
+)
 
 type dashboardStats struct {
 	NodesTotal           int            `json:"nodesTotal"`
@@ -32,6 +51,10 @@ type dashboardStats struct {
 	DeploymentsTotal     int            `json:"deploymentsTotal"`
 	DeploymentsAvailable int            `json:"deploymentsAvailable"`
 	UnhealthyPods        []unhealthyPod `json:"unhealthyPods"`
+	// Deprecated compatibility field. False means either unhealthy or unknown;
+	// consumers should use HealthStatus when they need to distinguish the two.
+	Healthy      bool   `json:"healthy"`
+	HealthStatus string `json:"healthStatus"`
 	// Resource usage (from metrics-server; zero when metrics-server is absent)
 	ClusterCPUUsedM   int64 `json:"clusterCPUUsedM"`
 	ClusterCPUTotalM  int64 `json:"clusterCPUTotalM"`
@@ -57,7 +80,9 @@ func (c *ApiController) GetDashboard() {
 		UnhealthyPods:   []unhealthyPod{},
 	}
 
+	nodesLoaded := false
 	if nodes, err := object.GetNodes(cfg); err == nil {
+		nodesLoaded = true
 		stats.NodesTotal = len(nodes)
 		for _, n := range nodes {
 			for _, cond := range n.Status.Conditions {
@@ -78,20 +103,12 @@ func (c *ApiController) GetDashboard() {
 		}
 	}
 
-	unhealthyReasons := map[string]bool{
-		"CrashLoopBackOff":           true,
-		"OOMKilled":                  true,
-		"ImagePullBackOff":           true,
-		"ErrImagePull":               true,
-		"InvalidImageName":           true,
-		"CreateContainerConfigError": true,
-		"CreateContainerError":       true,
-		"Evicted":                    true,
-	}
-
+	podsLoaded := false
 	if pods, err := object.GetPods(cfg, ""); err == nil {
+		podsLoaded = true
 		stats.PodsTotal = len(pods)
-		for _, p := range pods {
+		for i := range pods {
+			p := &pods[i]
 			phase := string(p.Status.Phase)
 			if phase == "" {
 				phase = "Unknown"
@@ -106,37 +123,7 @@ func (c *ApiController) GetDashboard() {
 			}
 			stats.PodsByNamespace[ns]++
 
-			// Detect unhealthy pods
-			reason := ""
-			if phase == "Failed" {
-				reason = p.Status.Reason
-				if reason == "" {
-					reason = "Failed"
-				}
-			} else if phase == "Unknown" {
-				reason = "Unknown"
-			} else {
-				// Check container statuses for known bad waiting/terminated reasons
-			outer:
-				for _, cs := range p.Status.ContainerStatuses {
-					if cs.State.Waiting != nil && unhealthyReasons[cs.State.Waiting.Reason] {
-						reason = cs.State.Waiting.Reason
-						break outer
-					}
-					if cs.State.Terminated != nil && unhealthyReasons[cs.State.Terminated.Reason] {
-						reason = cs.State.Terminated.Reason
-						break outer
-					}
-				}
-				for _, cs := range p.Status.InitContainerStatuses {
-					if reason != "" {
-						break
-					}
-					if cs.State.Waiting != nil && unhealthyReasons[cs.State.Waiting.Reason] {
-						reason = cs.State.Waiting.Reason
-					}
-				}
-			}
+			reason := dashboardPodUnhealthyReason(p)
 			if reason != "" {
 				stats.UnhealthyPods = append(stats.UnhealthyPods, unhealthyPod{
 					Namespace: ns,
@@ -184,6 +171,9 @@ func (c *ApiController) GetDashboard() {
 		stats.ServiceAccounts = len(sas)
 	}
 
+	stats.HealthStatus = dashboardHealthStatus(stats, nodesLoaded, podsLoaded)
+	stats.Healthy = stats.HealthStatus == dashboardHealthHealthy
+
 	// Cluster resource usage — best-effort, ignored if kubelet is unreachable
 	certDir := ""
 	if sc := getServerConfig(); sc != nil {
@@ -199,4 +189,67 @@ func (c *ApiController) GetDashboard() {
 	}
 
 	c.ResponseOk(stats)
+}
+
+func dashboardHealthStatus(stats dashboardStats, nodesLoaded, podsLoaded bool) string {
+	if nodesLoaded && stats.NodesTotal > 0 && stats.NodesReady != stats.NodesTotal {
+		return dashboardHealthUnhealthy
+	}
+	if podsLoaded && len(stats.UnhealthyPods) > 0 {
+		return dashboardHealthUnhealthy
+	}
+	if !nodesLoaded || !podsLoaded || stats.NodesTotal == 0 {
+		return dashboardHealthUnknown
+	}
+	return dashboardHealthHealthy
+}
+
+func dashboardPodUnhealthyReason(p *corev1.Pod) string {
+	if p.Status.Phase == corev1.PodFailed {
+		if p.Status.Reason != "" {
+			return p.Status.Reason
+		}
+		return "Failed"
+	}
+	if p.Status.Phase == "" || p.Status.Phase == corev1.PodUnknown {
+		return "Unknown"
+	}
+
+	for _, statuses := range [][]corev1.ContainerStatus{
+		p.Status.InitContainerStatuses,
+		p.Status.ContainerStatuses,
+	} {
+		for _, cs := range statuses {
+			if reason := dashboardContainerUnhealthyReason(cs); reason != "" {
+				return reason
+			}
+		}
+	}
+	if p.Status.Phase == corev1.PodPending {
+		for _, condition := range p.Status.Conditions {
+			if condition.Type != corev1.PodScheduled || condition.Status != corev1.ConditionFalse {
+				continue
+			}
+			switch condition.Reason {
+			case corev1.PodReasonUnschedulable, corev1.PodReasonSchedulerError:
+				return condition.Reason
+			}
+		}
+	}
+	return ""
+}
+
+func dashboardContainerUnhealthyReason(status corev1.ContainerStatus) string {
+	if status.State.Waiting != nil {
+		if _, ok := dashboardContainerFailureReasons[status.State.Waiting.Reason]; ok {
+			return status.State.Waiting.Reason
+		}
+	}
+	if status.State.Terminated != nil && status.State.Terminated.ExitCode != 0 {
+		if status.State.Terminated.Reason != "" {
+			return status.State.Terminated.Reason
+		}
+		return fmt.Sprintf("ExitCode %d", status.State.Terminated.ExitCode)
+	}
+	return ""
 }

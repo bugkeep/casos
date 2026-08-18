@@ -1,4 +1,23 @@
 {
+  "dashboard": {
+    "health data unavailable": "Cluster health data unavailable",
+    "alert healthy": "Cluster healthy",
+    "alert unhealthy": "{{count}} unhealthy pod(s)",
+    "alert nodes not ready": "{{count}} node(s) not ready",
+    "alert unhealthy cluster": "Cluster unhealthy",
+    "reason CrashLoopBackOff": "Container repeatedly restarting",
+    "reason OOMKilled": "Out of memory",
+    "reason ImagePullBackOff": "Image pull failed",
+    "reason ConfigError": "Container configuration error",
+    "reason ContainerError": "Container creation error",
+    "reason Evicted": "Evicted",
+    "reason Failed": "Failed",
+    "reason Unknown": "Unknown",
+    "reason Unschedulable": "Unschedulable",
+    "reason SchedulerError": "Scheduler error",
+    "reason RunContainerError": "Container run error",
+    "reason ErrImageNeverPull": "Image is not available locally"
+  },
   "account": {
     "Back to sign in": "Back to sign in",
     "Confirm password": "Confirm password",
