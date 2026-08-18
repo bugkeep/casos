@@ -1,5 +1,5 @@
-const {randomUUID} = require("crypto");
-const {expect} = require("@playwright/test");
+import {randomUUID} from "crypto";
+import {expect} from "@playwright/test";
 
 const API_E2E_SIGNIN = "/api/e2e/signin";
 const e2eToken = process.env.E2E_TEST_TOKEN;
@@ -31,8 +31,41 @@ async function signInAsCiUser(page) {
   });
 }
 
-module.exports = {
+// Toasts come from sonner, which marks each one with data-sonner-toast. That
+// attribute is the addressable part: the surrounding classes are Tailwind
+// output and must never be selected on.
+function toast(page) {
+  return page.locator("[data-sonner-toast]");
+}
+
+// A string matches the toast body exactly; a RegExp matches loosely, which is
+// what the backend-error assertions need.
+function expectToast(page, text) {
+  const body = typeof text === "string" ? toast(page).getByText(text, {exact: true}) : toast(page).getByText(text);
+  return expect(body).toBeVisible();
+}
+
+// A DataTable renders skeleton rows while loading and stamps data-loading on its
+// root, so "the table has settled" is an assertion rather than a sleep.
+function dataTable(page, testId) {
+  return testId ? page.getByTestId(testId) : page.locator("[data-slot=data-table]");
+}
+
+async function expectTableIdle(page, testId) {
+  await expect(dataTable(page, testId)).toHaveAttribute("data-loading", "false");
+}
+
+function tableRow(scope, rowKey) {
+  return scope.locator(`tr[data-row-key="${rowKey}"]`);
+}
+
+export {
+  dataTable,
   e2eSshPassword,
   expectOkJson,
+  expectTableIdle,
+  expectToast,
   signInAsCiUser,
+  tableRow,
+  toast,
 };

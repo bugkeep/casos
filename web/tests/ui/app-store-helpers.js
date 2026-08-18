@@ -1,6 +1,6 @@
-const {randomUUID} = require("crypto");
-const {expect} = require("@playwright/test");
-const {expectOkJson} = require("./e2e-helpers");
+import {randomUUID} from "crypto";
+import {expect} from "@playwright/test";
+import {dataTable, expectOkJson, tableRow} from "./e2e-helpers.js";
 
 const API_UNINSTALL_HELM_RELEASE = "/api/uninstall-helm-release";
 const API_INSTALL_HELM_CHART_STREAM = "/api/install-helm-chart-stream";
@@ -10,6 +10,8 @@ const API_DELETE_HELM_REPO = "/api/delete-helm-repo";
 const INSTALL_DONE_TIMEOUT_MS = Number(process.env.E2E_APP_INSTALL_DONE_TIMEOUT_MS) || 11 * 60 * 1000;
 const HTTP_CHECK_TIMEOUT_MS = Number(process.env.E2E_APP_HTTP_TIMEOUT_MS) || 180_000;
 const HTTP_CHECK_INTERVAL_MS = 3_000;
+
+const SERVICES_TABLE = "services-table";
 
 async function expectHelmCleanup(response) {
   expect(response.ok()).toBeTruthy();
@@ -91,7 +93,7 @@ async function addCustomHelmRepo(page, {name, url, addedHelmRepos}) {
   const addRepo = page.waitForResponse(response =>
     response.url().includes(API_ADD_HELM_REPO) && response.request().method() === "POST"
   );
-  await dialog.getByRole("button", {name: "OK"}).click();
+  await dialog.getByRole("button", {name: "Add", exact: true}).click();
   await expectOkJson(await addRepo);
   await expect(dialog).toBeHidden();
 
@@ -106,7 +108,7 @@ async function addCustomHelmRepo(page, {name, url, addedHelmRepos}) {
   return repo;
 }
 
-function installModal(page) {
+function installDialog(page) {
   return page.getByRole("dialog").filter({hasText: "Install chart"});
 }
 
@@ -120,7 +122,8 @@ function compactInstallDialogText(text) {
 
 async function waitForInstallDone(dialog) {
   const doneButton = dialog.getByRole("button", {name: "Done"});
-  const errorAlert = dialog.locator(".ant-alert-error").first();
+  // Alerts carry data-variant; a destructive one is the install having failed.
+  const errorAlert = dialog.locator("[data-slot=alert][data-variant=destructive]").first();
   const deadline = Date.now() + INSTALL_DONE_TIMEOUT_MS;
 
   while (Date.now() < deadline) {
@@ -138,27 +141,28 @@ async function waitForInstallDone(dialog) {
   throw new Error(`Timed out waiting for Helm install to complete:\n${dialogText}`);
 }
 
-async function openChartInstallModal(page, {repoName, chartName}) {
+async function openChartInstallDialog(page, {repoName, chartName}) {
   await page.goto("/app-store");
   await expect(page).toHaveURL(/\/app-store$/);
 
   await page.getByText(repoName, {exact: true}).click();
-  const chartCard = page.locator(".ant-row .ant-col .ant-card").filter({has: page.getByText(chartName, {exact: true})});
+  const chartCard = page.getByTestId("chart-card").filter({has: page.getByText(chartName, {exact: true})});
   await expect(chartCard).toBeVisible({timeout: 30_000});
   await chartCard.getByRole("button", {name: "Install"}).click();
 
-  const dialog = installModal(page);
+  const dialog = installDialog(page);
   await expect(dialog).toBeVisible();
   return dialog;
 }
 
 // installAppFromAppStore drives the App Store install flow to completion: opens the chart's
-// install modal, overrides the release name and values, submits, and waits for the streamed
+// install dialog, overrides the release name and values, submits, and waits for the streamed
 // install log to report completion (the "Done" button). The release is recorded on
 // installedReleases so installedReleasesFixture can uninstall it afterward.
 async function installAppFromAppStore(page, {repoName, chartName, releaseName, namespace = "default", valuesYAML, installedReleases}) {
-  const dialog = await openChartInstallModal(page, {repoName, chartName});
+  const dialog = await openChartInstallDialog(page, {repoName, chartName});
 
+  // The values editor only appears once the chart's default values have loaded.
   const textarea = dialog.locator("textarea");
   await expect(textarea).toBeVisible({timeout: 30_000});
 
@@ -168,7 +172,7 @@ async function installAppFromAppStore(page, {repoName, chartName, releaseName, n
   const installRequestPromise = page.waitForRequest(request =>
     request.url().includes(API_INSTALL_HELM_CHART_STREAM) && request.method() === "POST"
   );
-  await dialog.getByRole("button", {name: "Install"}).click();
+  await dialog.getByRole("button", {name: "Install", exact: true}).click();
   const submittedInstall = (await installRequestPromise).postDataJSON();
   if (submittedInstall?.releaseName && submittedInstall?.namespace) {
     installedReleases.push({name: submittedInstall.releaseName, namespace: submittedInstall.namespace});
@@ -180,18 +184,14 @@ async function installAppFromAppStore(page, {repoName, chartName, releaseName, n
   await expect(dialog).toBeHidden();
 }
 
-function servicesTable(page) {
-  return page.locator(".ant-table-wrapper").filter({hasText: "Services"});
-}
-
 // getServiceAccessUrl reads the "Access URL" column rendered for a NodePort service on the
-// Services page (see ServiceListPage.js), which is where an installed app's reachable URL
+// Services page (see ServiceListPage.jsx), which is where an installed app's reachable URL
 // is computed from the cluster node IP and the service's NodePort.
 async function getServiceAccessUrl(page, namespace, name) {
   await page.goto("/services");
   await expect(page).toHaveURL(/\/services$/);
 
-  const row = servicesTable(page).locator(`tr[data-row-key="${namespace}/${name}"]`);
+  const row = tableRow(dataTable(page, SERVICES_TABLE), `${namespace}/${name}`);
   await expect(row).toBeVisible({timeout: 30_000});
 
   const link = row.getByRole("link").first();
@@ -226,11 +226,12 @@ async function waitForAppContent(request, url, expectedText, timeoutMs = HTTP_CH
   throw lastError || new Error(`Timed out waiting for ${url} to serve expected content`);
 }
 
-module.exports = {
+export {
   API_UNINSTALL_HELM_RELEASE,
   API_ADD_HELM_REPO,
   API_GET_HELM_REPOS,
   API_DELETE_HELM_REPO,
+  SERVICES_TABLE,
   addCustomHelmRepo,
   addedHelmReposFixture,
   installAppFromAppStore,

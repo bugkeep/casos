@@ -1,0 +1,154 @@
+# Frontend notes
+
+`web/` is the React frontend: shadcn/ui (Radix + Tailwind v4) on Vite, talking to
+the Beego backend. It replaced an Ant Design frontend that used to live in the
+same directory; the antd mentions left in the source are comments naming what
+each component replaces.
+
+## Stack
+
+| | |
+|---|---|
+| Build | Vite 6 |
+| UI kit | shadcn/ui (Radix + Tailwind v4) |
+| Icons | lucide-react |
+| Tables | `@tanstack/react-table` via `DataTable` |
+| Toasts | sonner, behind `Setting.showMessage` |
+| Router | react-router-dom 5 |
+| Language | JavaScript (JSX) |
+
+## API clients
+
+`src/backend/*.js` are 32 plain `fetch` wrappers with no UI dependency. They
+carry the whole backend contract, so treat a change there as a backend change.
+`src/i18n.js` and `src/locales/{en,zh}/data.json` hold the translations; the Go
+side reads the same JSON (see `i18n/`).
+
+## Dev loop
+
+```bash
+cd web && yarn install && yarn start
+```
+
+Vite serves on **8002** and proxies `/api`, `/k8s` and `/.well-known` to the Go
+backend on `:9000`, websockets included (the pod terminal needs that). Because
+the proxy handles it, `Setting.ServerUrl` stays empty and every request is
+relative — the same code path used in production, where the backend serves the
+built bundle itself.
+
+## Component contract
+
+Written against these, not against raw Radix. Page code should rarely import
+from `components/ui/` directly except for `Button`, `Input`, `Badge`.
+
+### `DataTable` — `components/shared/data-table.jsx`
+
+The list-page workhorse. Columns are declared as:
+
+```js
+{key, title, dataIndex, render(value, record, index), width, align,
+ sortable, ellipsis, className, headerClassName}
+```
+
+`dataIndex` may be a dotted path; a column without one is a display column
+(actions) and cannot sort. Table props: `dataSource`, `rowKey` (string or
+function), `loading`, `title`, `description`, `toolbar`, `searchable`,
+`pageSize` (0 disables pagination), `emptyText`, `onRowClick`, `expandable`,
+`dense`. Pagination only renders once the rows overflow a page.
+
+### Dialogs
+
+- `FormDialog` + `Field` — create/edit modals. `FormDialog` owns the chrome and
+  submit state; `Field` is label + control + error text.
+- `ConfirmDialog` — replaces antd `Popconfirm`. Trigger is passed as children;
+  the confirm button is destructive by default.
+- `ResourceSheet` — replaces antd `Drawer` (logs, terminal, files, history).
+
+### Data fetching — `hooks/use-resource.js`
+
+```js
+const {data, loading, error, refresh} = useResource(
+  () => PodBackend.getPods(), [], {initialData: []});
+```
+
+Handles the `{status, data, msg}` envelope, toasts failures, and drops responses
+that arrive after unmount or after a newer request. `runAction(promise, {...})`
+is the mutation counterpart and resolves to a boolean so callers close a dialog
+only on success.
+
+### Other shared pieces
+
+`StatusBadge` / `ReadyBadge` / `ColorTag` (`tagVariant()` maps antd colour names
+to badge variants), `KeyValueEditor` + `StringListEditor` (+ `toEntries` /
+`fromEntries`), `EnvVarEditor`, `RestartDeploymentsDialog`, `SimpleSelect` /
+`SearchSelect`, `NumberInput`, `PasswordInput`, `StatCard`, `EmptyState`,
+`Loading` / `AiDots`, `CodeText` / `CodeBlock` / `CopyButton`,
+`DescriptionList`, `ResultScreen`, `Space`, `PageContainer` / `PageHeader`.
+
+### Navigation
+
+`src/nav.js` is the single description of the sidebar tree, read by both
+`AppSidebar` and `BreadcrumbBar`. The old UI kept that mapping in two places and
+they drifted. `src/routes.jsx` holds the route table; every page is lazy-loaded.
+
+## End-to-end tests
+
+```bash
+cd web && yarn ui:test:selector:check   # unit-tests the changed-path selection
+cd web && yarn ui:test:smoke            # @smoke only
+cd web && yarn ui:test                  # everything
+```
+
+`playwright.config.js` starts both servers itself: the Go backend in
+`e2eTestMode` and a Vite dev server on 8002. Override `E2E_FRONTEND_PORT`,
+`E2E_BACKEND_PORT`, `E2E_APISERVER_PORT` and `E2E_WEBHOOK_PORT` to run beside a
+backend you already have going — the dev server's proxy target follows
+`BACKEND_URL`, which the config sets from `E2E_BACKEND_PORT`.
+
+### Selectors are a contract
+
+Tailwind class names are generated output and must never be selected on, so the
+suite is written against roles, labels and a small set of deliberate hooks:
+
+| Hook | Where | Replaces |
+|---|---|---|
+| `data-testid` on `DataTable` (`testId` prop) | machines, sites, services, nodes, worker-node tasks | `.ant-table-wrapper` filtered by text |
+| `data-row-key` on every `DataTable` row | `DataTable` | antd's own `data-row-key` |
+| `data-loading` on `DataTable` | `DataTable` | `.ant-spin-spinning` |
+| `data-variant` on `Alert` | `ui/alert.jsx` | `.ant-alert-error` |
+| `data-sonner-toast` | sonner | `.ant-message` |
+| `data-testid="management-layout"` | `ManagementPage` | `#parent-area` |
+| `data-testid="chart-card"` | `AppStorePage` | `.ant-row .ant-col .ant-card` |
+
+Adding a hook is preferable to selecting on a class; adding one is cheap and
+says out loud that a test depends on it.
+
+`findMachineRow` does not walk pagination — `DataTable` filters every loaded
+row, so the helper types into the search box instead.
+
+`routes-render.spec.js` walks all 33 routes asserting React did not throw and
+something painted; nothing else covers 30 of them, and that is how the
+`<Button asChild>` crash described below was found.
+
+## React 18, not 19
+
+shadcn's current component sources assume React 19, where `ref` is an ordinary
+prop. This project is on React 18, where it is not, so `Button`, `Input` and
+`Textarea` are `forwardRef` components — without that, every Radix `asChild`
+trigger (tooltip, dropdown, popover, dialog) silently fails to get its anchor.
+
+`Button` also renders `asChild` as a bare `Slot` around its single child: Slot
+accepts exactly one child, and injecting the loading spinner alongside it threw
+and took the whole route down. `loading` is therefore only honoured on a real
+`<button>`.
+
+## Serving from the Go backend
+
+`routers/static_filter.go` serves `web/build` from disk, so a `yarn build` is
+picked up without rebuilding the backend. The directory is looked up relative to
+the working directory first and then next to the executable, so a binary copied
+out of the repository still finds the frontend shipped beside it.
+
+`-tags embed` compiles the frontend into the binary instead:
+`web/assets_embed.go` carries the `//go:embed all:build` directive, so a
+standalone build fails to compile unless `yarn build` has run in `web/`.

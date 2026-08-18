@@ -76,7 +76,7 @@ func getAllI18nStringsBackend(fileContent string, isControllerPackage bool) []st
 	return res
 }
 
-func getAllFilePathsInFolder(folder string, fileSuffix string) []string {
+func getAllFilePathsInFolder(folder string, fileSuffixes ...string) []string {
 	res := []string{}
 	err := filepath.Walk(folder,
 		func(path string, info os.FileInfo, err error) error {
@@ -88,7 +88,7 @@ func getAllFilePathsInFolder(folder string, fileSuffix string) []string {
 				return filepath.SkipDir
 			}
 
-			if !strings.HasSuffix(info.Name(), fileSuffix) {
+			if !hasAnySuffix(info.Name(), fileSuffixes) {
 				return nil
 			}
 
@@ -103,12 +103,23 @@ func getAllFilePathsInFolder(folder string, fileSuffix string) []string {
 	return res
 }
 
+func hasAnySuffix(name string, suffixes []string) bool {
+	for _, suffix := range suffixes {
+		if strings.HasSuffix(name, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
 func parseAllWords(category string) *I18nData {
 	var paths []string
 	if category == "backend" {
 		paths = getAllFilePathsInFolder("../", ".go")
 	} else {
-		paths = getAllFilePathsInFolder("../web/src", ".js")
+		// The frontend keeps its components in .jsx and its API clients and
+		// helpers in .js, and i18next.t calls appear in both.
+		paths = getAllFilePathsInFolder("../web/src", ".js", ".jsx")
 	}
 
 	allWords := []string{}

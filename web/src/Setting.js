@@ -1,17 +1,16 @@
-import {Tooltip, message, theme} from "antd";
-import {QuestionCircleOutlined} from "@ant-design/icons";
-import React from "react";
 import Sdk from "casdoor-js-sdk";
 import i18next from "i18next";
+import {toast} from "sonner";
 
-export let ServerUrl = "";
+// The Vite dev server proxies /api, /k8s and /.well-known to the Go backend, and
+// in production the backend serves this bundle itself. So a relative URL is
+// always correct and ServerUrl stays empty unless a build explicitly points the
+// frontend somewhere else.
+export let ServerUrl = import.meta.env.VITE_SERVER_URL ?? "";
 export let CasdoorSdk;
 
 export function initServerUrl() {
-  const fullServerUrl = window.location.origin;
-  if (fullServerUrl === "http://localhost:8001") {
-    ServerUrl = "http://localhost:9000";
-  }
+  ServerUrl = import.meta.env.VITE_SERVER_URL ?? "";
 }
 
 export function initCasdoorSdk(config) {
@@ -83,18 +82,22 @@ export function goToLink(link) {
   window.location.href = link;
 }
 
+// showMessage keeps the call sites of the old antd `message` API working while
+// the toast itself is sonner, so pages do not each grow their own notification
+// style.
 export function showMessage(type, msg) {
-  if (type === "success") {
-    message.success(msg);
-  } else if (type === "error") {
-    message.error(msg);
-  } else if (type === "info") {
-    message.info(msg);
+  if (!msg) {
+    return;
   }
-}
-
-export function getItem(label, key, icon, children) {
-  return {key, icon, children, label};
+  if (type === "success") {
+    toast.success(msg);
+  } else if (type === "error") {
+    toast.error(msg);
+  } else if (type === "warning") {
+    toast.warning(msg);
+  } else {
+    toast.info(msg);
+  }
 }
 
 export function getLanguage() {
@@ -151,21 +154,43 @@ export function getShortName(s) {
   return (s || "").charAt(0).toUpperCase();
 }
 
+// The site record carries a per-deployment accent colour. Tailwind reads it as
+// the --brand custom property, so setting it here re-tints every `brand`
+// utility without a rebuild.
 export function setThemeColor(color) {
   if (!color) {return;}
   localStorage.setItem("themeColor", color);
+  document.documentElement.style.setProperty("--brand", color);
 }
 
 export function getThemeColor() {
   return localStorage.getItem("themeColor") || "#404040";
 }
 
-export function getAlgorithm(themeAlgorithmNames) {
-  return (themeAlgorithmNames || ["default"]).sort().reverse().map((algorithmName) => {
-    if (algorithmName === "dark") {return theme.darkAlgorithm;}
-    if (algorithmName === "compact") {return theme.compactAlgorithm;}
-    return theme.defaultAlgorithm;
-  });
+export function isDarkTheme(themeAlgorithm) {
+  return Array.isArray(themeAlgorithm) && themeAlgorithm.includes("dark");
+}
+
+// Dark mode is a class on <html> because that is what the Tailwind `dark:`
+// variant keys off; the data-theme attribute is kept for the handful of plain
+// CSS rules and third-party widgets (xterm) that read it.
+export function applyThemeAlgorithm(themeAlgorithm) {
+  const dark = isDarkTheme(themeAlgorithm);
+  document.documentElement.classList.toggle("dark", dark);
+  document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+}
+
+export function readThemeAlgorithm() {
+  try {
+    const raw = localStorage.getItem("themeAlgorithm");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {return parsed;}
+    }
+  } catch {
+    // A corrupt value is not worth failing startup over.
+  }
+  return ["default"];
 }
 
 export function getLogo(themes, storeLogoUrl) {
@@ -179,7 +204,7 @@ export function getLogo(themes, storeLogoUrl) {
 
 export function getFooterHtml(themes, storeFooterHtml, site) {
   const logoUrl = getLogo([], site?.logoUrl);
-  const defaultFooterHtml = `<a target="_blank" href="https://github.com/casosorg/casos" rel="noreferrer"><img style="padding-bottom: 3px;" height="30" alt="CasOS" src="${logoUrl}" /></a>`;
+  const defaultFooterHtml = `<a target="_blank" href="https://github.com/casosorg/casos" rel="noreferrer"><img style="height: 30px; width: auto; padding-bottom: 3px;" alt="CasOS" src="${logoUrl}" /></a>`;
   const footerHtml = storeFooterHtml || defaultFooterHtml;
   if (Array.isArray(themes) && themes.includes("dark")) {
     return footerHtml.replace(/(\.png)/g, "_white$1");
@@ -206,17 +231,6 @@ export function getNavbarHtml(themes, storeNavbarHtml) {
     return navbarHtml.replace(/(\.png)/g, "_white$1");
   }
   return navbarHtml;
-}
-
-export function getLabel(text, tooltip) {
-  return (
-    <React.Fragment>
-      <span style={{marginRight: 4}}>{text}</span>
-      <Tooltip placement="top" title={tooltip}>
-        <QuestionCircleOutlined style={{color: "var(--ant-color-text-secondary)"}} />
-      </Tooltip>
-    </React.Fragment>
-  );
 }
 
 export function getFormattedDate(dateStr) {

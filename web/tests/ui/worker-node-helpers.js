@@ -1,6 +1,6 @@
-const {randomUUID} = require("crypto");
-const {expect} = require("@playwright/test");
-const {e2eSshPassword, expectOkJson} = require("./e2e-helpers");
+import {randomUUID} from "crypto";
+import {expect} from "@playwright/test";
+import {dataTable, e2eSshPassword, expectOkJson, expectTableIdle, expectToast, tableRow} from "./e2e-helpers.js";
 
 const API_ADD_MACHINE = "/api/add-machine";
 const API_DELETE_MACHINE = "/api/delete-machine";
@@ -9,7 +9,9 @@ const API_GET_MACHINE_NODE_TASKS = "/api/get-machine-node-tasks";
 const API_REPAIR_MACHINE_NODE = "/api/repair-machine-node";
 // MachineListPage currently submits new machines with owner "admin".
 const E2E_MACHINE_OWNER = process.env.E2E_MACHINE_OWNER || "admin";
-const MAX_MACHINE_PAGES_TO_SCAN = Number(process.env.E2E_MAX_MACHINE_PAGES_TO_SCAN) || 50;
+
+const MACHINES_TABLE = "machines-table";
+const WORKER_NODE_TASKS_TABLE = "worker-node-tasks";
 
 const createdMachinesFixture = async({page}, use) => {
   const createdMachines = [];
@@ -35,103 +37,23 @@ function makeMachineName(prefix) {
 }
 
 function machineTable(page) {
-  return page.locator(".ant-table-wrapper").filter({hasText: "Machines"});
+  return dataTable(page, MACHINES_TABLE);
 }
 
-function machineRowFor(page, machineName) {
-  return machineTable(page).locator(`tr[data-row-key="${machineName}"]`);
-}
-
-function machineTableTitle(page) {
-  return machineTable(page).locator(".ant-table-title");
-}
-
-function activeMachinePage(page) {
-  return machineTable(page).locator(".ant-pagination-item-active");
-}
-
-async function waitForMachineTableIdle(page) {
-  await expect(machineTable(page).locator(".ant-spin-spinning")).toHaveCount(0);
-}
-
-async function activeMachinePageNumber(page) {
-  const activePage = activeMachinePage(page);
-  const pageText = (await activePage.getAttribute("data-page")) || (await activePage.textContent())?.trim();
-  const pageNumber = Number(pageText);
-  if (!Number.isInteger(pageNumber) || pageNumber < 1) {
-    throw new Error(`Could not read active Machines page number from "${pageText || "<empty>"}"`);
-  }
-  return pageNumber;
-}
-
-async function expectActiveMachinePage(page, pageNumber) {
-  const pageItem = machineTable(page).locator(`.ant-pagination-item-${pageNumber}`);
-  await expect(pageItem).toHaveClass(/ant-pagination-item-active/);
-}
-
-async function clickMachinePagination(page, button, step) {
-  const currentPage = await activeMachinePageNumber(page);
-  await button.click();
-  await expectActiveMachinePage(page, currentPage + step);
-  await waitForMachineTableIdle(page);
-}
-
-async function goToFirstMachinePage(page) {
-  const firstPage = machineTable(page).locator(".ant-pagination-item-1");
-  if (await firstPage.count() > 0) {
-    const firstPageClass = await firstPage.getAttribute("class");
-    if (!firstPageClass?.includes("ant-pagination-item-active")) {
-      await firstPage.click();
-    }
-    await expectActiveMachinePage(page, 1);
-    return;
-  }
-
-  const previousPage = machineTable(page).locator(".ant-pagination-prev button");
-  let pageTurnCount = 0;
-  while (await previousPage.count() > 0 && await previousPage.isEnabled()) {
-    if (pageTurnCount >= MAX_MACHINE_PAGES_TO_SCAN) {
-      throw new Error("Could not reach the first Machines page; pagination appears stuck");
-    }
-    await clickMachinePagination(page, previousPage, -1);
-    pageTurnCount += 1;
-  }
-  if (await activeMachinePage(page).count() === 0) {
-    const previousPageCount = await previousPage.count();
-    if (previousPageCount > 0) {
-      await expect(previousPage).toBeDisabled();
-    }
-    const nextPage = machineTable(page).locator(".ant-pagination-next button");
-    const nextPageCount = await nextPage.count();
-    if (nextPageCount > 0) {
-      await expect(nextPage).toBeDisabled();
-    }
-    await expect(machineTable(page)).toBeVisible();
-    await expect(machineTable(page).locator("tbody tr").first()).toBeAttached();
-    return;
-  }
-  await expectActiveMachinePage(page, 1);
-}
-
+/**
+ * Locates a machine's row by filtering the table rather than paging to it.
+ *
+ * DataTable searches every loaded row regardless of which page is showing, so
+ * the match is one keystroke away and no pagination walking is needed.
+ */
 async function findMachineRow(page, machineName) {
-  await goToFirstMachinePage(page);
-  await waitForMachineTableIdle(page);
-  const machineRow = machineRowFor(page, machineName);
-  let pageTurnCount = 0;
+  const table = machineTable(page);
+  await expect(table).toBeVisible();
+  await expectTableIdle(page, MACHINES_TABLE);
 
-  while (await machineRow.count() === 0) {
-    if (pageTurnCount >= MAX_MACHINE_PAGES_TO_SCAN) {
-      throw new Error(`Could not find machine ${machineName} within ${MAX_MACHINE_PAGES_TO_SCAN} Machines pages`);
-    }
-    const nextPage = machineTable(page).locator(".ant-pagination-next button");
-    if (await nextPage.count() === 0 || !(await nextPage.isEnabled())) {
-      throw new Error(`Machine ${machineName} was not found after scanning all available Machines pages`);
-    }
-    await clickMachinePagination(page, nextPage, 1);
-    pageTurnCount += 1;
-  }
+  await table.getByPlaceholder("Search...").fill(machineName);
 
-  await machineRow.scrollIntoViewIfNeeded();
+  const machineRow = tableRow(table, machineName);
   await expect(machineRow).toBeVisible();
   return machineRow;
 }
@@ -143,16 +65,18 @@ async function getMachineNodeTasks(page, machineName) {
   return expectOkJson(tasks);
 }
 
+// The pane's heading is "Worker Node — <machine>" with an em dash, so it is
+// matched loosely rather than reproducing the punctuation in every call site.
 function workerNodeDialog(page, machineName) {
-  return page.getByRole("dialog", {name: `Worker Node - ${machineName}`});
+  return page.getByRole("dialog", {name: new RegExp(`Worker Node.*${machineName}`)});
 }
 
 function workerNodeTaskTable(page, machineName) {
-  return workerNodeDialog(page, machineName).getByRole("table");
+  return workerNodeDialog(page, machineName).getByTestId(WORKER_NODE_TASKS_TABLE);
 }
 
 async function expectWorkerNodeTaskVisible(page, machineName, task) {
-  const taskRow = workerNodeTaskTable(page, machineName).locator(`tr[data-row-key="${task.id}"]`);
+  const taskRow = tableRow(workerNodeTaskTable(page, machineName), task.id);
   await expect(taskRow.getByRole("cell", {name: String(task.id), exact: true})).toBeVisible();
   await expect(taskRow.getByRole("cell", {name: task.nodeName || machineName, exact: true})).toBeVisible();
 }
@@ -163,22 +87,25 @@ async function expectWorkerNodeLogVisible(page, machineName, message) {
 
 async function createMachineFromUi(page, machineName, createdMachines, options = {}) {
   await page.goto("/machines");
-  await page.waitForLoadState("networkidle");
   await expect(page).toHaveURL(/\/machines$/);
+  await expectTableIdle(page, MACHINES_TABLE);
 
-  await machineTableTitle(page).getByRole("button").filter({hasText: /^Add$/}).click();
+  // "Add Local WSL" also starts with Add, so the name has to match exactly.
+  await machineTable(page).getByRole("button", {name: "Add", exact: true}).click();
   const addDialog = page.getByRole("dialog", {name: "Add Machine"});
   await expect(addDialog).toBeVisible();
   await addDialog.getByPlaceholder("my-machine").fill(machineName);
   await addDialog.getByPlaceholder("My Machine").fill(options.displayName || "E2E Worker Node");
   await addDialog.getByPlaceholder("192.168.1.10").fill(options.ip || "127.0.0.1");
   await addDialog.getByPlaceholder("root").fill(options.username || "root");
-  await addDialog.getByLabel("Password").fill(options.password || e2eSshPassword);
+  // Matched by role: the field's reveal toggle is labelled "Show password", so
+  // a plain getByLabel("Password") would resolve to both the input and a button.
+  await addDialog.getByRole("textbox", {name: "Password"}).fill(options.password || e2eSshPassword);
 
   const addMachine = page.waitForResponse(response =>
     response.url().includes(API_ADD_MACHINE) && response.request().method() === "POST"
   );
-  await addDialog.getByRole("button", {name: "Add"}).click();
+  await addDialog.getByRole("button", {name: "Add", exact: true}).click();
   const addMachineResponse = await addMachine;
   try {
     await expectOkJson(addMachineResponse);
@@ -229,7 +156,7 @@ async function startWorkerNodeDeployment(page, machineName, apiserverUrl) {
     phase: "queued",
   });
 
-  await expect(page.locator(".ant-message").getByText("Node deployment started", {exact: true})).toBeVisible();
+  await expectToast(page, "Node deployment started");
   await expectWorkerNodeTaskVisible(page, machineName, deployBody.data);
   await expectWorkerNodeLogVisible(page, machineName, "Node deployment task created");
   return deployBody.data;
@@ -251,23 +178,26 @@ async function startWorkerNodeRepair(page, machineName, apiserverUrl) {
     phase: "queued",
   });
 
-  await expect(page.locator(".ant-message").getByText("Node repair started", {exact: true})).toBeVisible();
+  await expectToast(page, "Node repair started");
   await expectWorkerNodeTaskVisible(page, machineName, repairBody.data);
   await expectWorkerNodeLogVisible(page, machineName, "Node deployment task created");
   return repairBody.data;
 }
 
-module.exports = {
+export {
   API_ADD_MACHINE,
   API_DELETE_MACHINE,
   API_DEPLOY_MACHINE_NODE,
   API_GET_MACHINE_NODE_TASKS,
   API_REPAIR_MACHINE_NODE,
   E2E_MACHINE_OWNER,
+  MACHINES_TABLE,
+  WORKER_NODE_TASKS_TABLE,
   createdMachinesFixture,
   createMachineFromUi,
   findMachineRow,
   getMachineNodeTasks,
+  machineTable,
   makeMachineName,
   openWorkerNodePanel,
   startWorkerNodeDeployment,

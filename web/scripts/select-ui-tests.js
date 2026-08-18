@@ -1,5 +1,8 @@
-const fs = require("fs");
-const path = require("path");
+import fs from "fs";
+import path from "path";
+import {fileURLToPath, pathToFileURL} from "url";
+
+const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 
 // Registry of non-smoke regression specs selectable from changed paths.
 const ALL_REGRESSION_TESTS = [
@@ -9,13 +12,16 @@ const ALL_REGRESSION_TESTS = [
   "tests/ui/app-store.spec.js",
 ];
 
+// Routed screens live in src/pages and the drawers and dialogs they open live
+// in src/components/shared, so a feature's patterns have to name both.
 const WORKER_NODE_PATTERNS = [
   /^controllers\/machine(_node_deploy)?\.go$/,
   /^controllers\/node\.go$/,
   /^object\/machine(_node_deploy)?\.go$/,
   /^object\/node\.go$/,
-  /^web\/src\/Machine(ListPage|EditPage|NodeDeployPanel)\.js$/,
-  /^web\/src\/NodeListPage\.js$/,
+  /^web\/src\/pages\/Machine(ListPage|EditPage)\.jsx$/,
+  /^web\/src\/pages\/NodeListPage\.jsx$/,
+  /^web\/src\/components\/shared\/machine-node-deploy-sheet\.jsx$/,
   /^web\/src\/backend\/(Machine(NodeDeploy)?|Node)Backend\.js$/,
   /^web\/tests\/ui\/worker-node(-ready)?\.spec\.js$/,
   /^web\/tests\/ui\/worker-node-helpers\.js$/,
@@ -27,13 +33,13 @@ const PLATFORM_READINESS_PATTERNS = [
 ];
 
 const SMOKE_COVERED_PATTERNS = [
-  /^web\/src\/SiteEditPage\.js$/,
+  /^web\/src\/pages\/SiteEditPage\.jsx$/,
 ];
 
 const SITE_PATTERNS = [
   /^controllers\/site\.go$/,
   /^object\/site\.go$/,
-  /^web\/src\/SiteListPage\.js$/,
+  /^web\/src\/pages\/SiteListPage\.jsx$/,
   /^web\/src\/backend\/SiteBackend\.js$/,
   /^web\/tests\/ui\/site-e2e\.spec\.js$/,
 ];
@@ -42,25 +48,30 @@ const APP_STORE_PATTERNS = [
   /^controllers\/helm\.go$/,
   /^object\/helm_repo\.go$/,
   /^store\/helm\.go$/,
-  /^web\/src\/AppStorePage\.js$/,
-  /^web\/src\/HelmInstallModal\.js$/,
-  /^web\/src\/HelmReleasePage\.js$/,
-  /^web\/src\/DeploymentListPage\.js$/,
-  /^web\/src\/ServiceListPage\.js$/,
+  /^web\/src\/pages\/(AppStore|HelmRelease|DeploymentList|ServiceList)Page\.jsx$/,
+  /^web\/src\/components\/shared\/helm-(install-dialog|compatibility-alert)\.jsx$/,
+  /^web\/src\/components\/shared\/deployment-(dialogs|storage-editor)\.jsx$/,
   /^web\/src\/backend\/HelmBackend\.js$/,
   /^web\/tests\/ui\/app-store\.spec\.js$/,
   /^web\/tests\/ui\/app-store-helpers\.js$/,
 ];
 
+// Anything that every screen is built out of — the shared table, the app shell,
+// the route table, the build config — can break any spec, so it runs the lot.
 const FULL_REGRESSION_PATTERNS = [
   /^\.github\/workflows\//,
   /^conf\/app\.conf$/,
   /^routers\/router\.go$/,
+  /^routers\/static_filter\.go$/,
   /^web\/package\.json$/,
   /^web\/playwright\.config\.js$/,
-  /^web\/src\/(Conf|Setting)\.js$/,
+  /^web\/vite\.config\.js$/,
+  /^web\/src\/(App|Setting|nav|routes)\.(js|jsx)$/,
+  /^web\/src\/components\/shared\/(data-table|form-dialog|confirm-dialog|resource-sheet)\.jsx$/,
+  /^web\/src\/components\/ui\//,
+  /^web\/src\/hooks\//,
   /^web\/src\/locales\//,
-  /^web\/tests\/ui\/e2e-helpers\.js$/,
+  /^web\/tests\/ui\/(e2e-helpers|routes-render\.spec)\.js$/,
   /^web\/yarn\.lock$/,
 ];
 
@@ -168,7 +179,7 @@ function main(argv) {
     return;
   }
 
-  const repoRoot = path.resolve(__dirname, "..", "..");
+  const repoRoot = path.resolve(scriptDir, "..", "..");
   let resolvedChangedFilesPath;
   try {
     resolvedChangedFilesPath = fs.realpathSync(path.resolve(changedFilesPath));
@@ -203,11 +214,11 @@ function main(argv) {
   process.stdout.write(tests.length > 0 ? `${tests.join("\n")}\n` : "");
 }
 
-if (require.main === module) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   main(process.argv);
 }
 
-module.exports = {
+export {
   ALL_REGRESSION_TESTS,
   selectRegressionTests,
 };

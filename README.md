@@ -297,7 +297,7 @@ go run main.go
 ### Frontend
 
 ```bash
-cd web2
+cd web
 
 # Install dependencies (first time only)
 yarn install
@@ -305,9 +305,6 @@ yarn install
 # Start dev server — port 8002, proxies API to localhost:9000
 yarn start
 ```
-
-`web/` is the previous Ant Design frontend. It still builds and the backend will
-still serve it, but `web2/` is what ships.
 
 ## Deployment
 
@@ -324,29 +321,26 @@ go build -o casos .
 ### Frontend
 
 ```bash
-cd web2
+cd web
 
-# Production build (outputs to web2/build/)
+# Production build (outputs to web/build/)
 yarn build
 ```
 
-Serve the `web2/build/` directory with any static file server, or let the Go
-backend serve it directly. The backend prefers `web2/build/` and falls back to
-`web/build/`, so deleting the former is all it takes to go back to the old UI.
+Serve the `web/build/` directory with any static file server, or let the Go
+backend serve it directly: the backend reads it from disk, so a rebuild of the
+frontend needs no rebuild of the backend.
 
 ### Standalone binary
 
-Building with `-tags embed` compiles `web2/build/` into the backend, producing a
+Building with `-tags embed` compiles `web/build/` into the backend, producing a
 single file that serves the UI without needing the directory beside it. Run
-`yarn build` first — the build tag requires `web2/build/` to exist.
+`yarn build` first — the build tag requires `web/build/` to exist.
 
 ```bash
-cd web2 && yarn build && cd ..
+cd web && yarn build && cd ..
 CGO_ENABLED=0 go build -trimpath -tags embed -o casos .
 ```
-
-`GENERATE_SOURCEMAP=false` keeps the `.map` files out of the binary; without it
-they are embedded as well and add tens of megabytes.
 
 Every release publishes this binary for Linux, macOS, and Windows on x86_64 on the
 [releases page](https://github.com/casosorg/casos/releases/latest). Each one
@@ -359,9 +353,8 @@ control plane cuts the download to roughly a third.
 ```bash
 cd web
 
-yarn lint:js    # ESLint
-yarn lint:css   # Stylelint
-yarn lint       # both
+yarn lint       # ESLint with --fix
+yarn lint:ci    # the same check without --fix, as CI runs it
 ```
 
 ## License

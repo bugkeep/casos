@@ -1,5 +1,6 @@
 //go:build !embed
 
+// Package webassets exposes the frontend in web/build.
 package webassets
 
 import (

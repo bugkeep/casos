@@ -1,13 +1,13 @@
-const {expect, test} = require("@playwright/test");
-const {e2eSshPassword, signInAsCiUser} = require("./e2e-helpers");
-const {
-  createdMachinesFixture,
+import {expect, test} from "@playwright/test";
+import {dataTable, e2eSshPassword, signInAsCiUser, tableRow} from "./e2e-helpers.js";
+import {
   createMachineFromUi,
+  createdMachinesFixture,
   makeMachineName,
   startWorkerNodeDeployment,
   workerNodeDialog,
   workerNodeTaskTable,
-} = require("./worker-node-helpers");
+} from "./worker-node-helpers.js";
 
 // This test only runs in CI jobs that provisioned a real worker VM
 // (see "Prepare worker node VM" in .github/workflows/build.yml). It exercises
@@ -28,11 +28,11 @@ const workerNodeReadyTest = test.extend({
 workerNodeReadyTest.describe.configure({retries: 0});
 
 function nodeRow(page, nodeName) {
-  return page.locator(".ant-table-wrapper").filter({hasText: "Nodes"}).locator(`tr[data-row-key="${nodeName}"]`);
+  return tableRow(dataTable(page, "nodes-table"), nodeName);
 }
 
 async function waitForDeployTaskToSucceed(page, machineName, taskId) {
-  const taskRow = workerNodeTaskTable(page, machineName).locator(`tr[data-row-key="${taskId}"]`);
+  const taskRow = tableRow(workerNodeTaskTable(page, machineName), taskId);
   await expect(taskRow.getByRole("cell", {name: "succeeded", exact: true})).toBeVisible({
     timeout: E2E_WORKER_DEPLOY_TIMEOUT_MS,
   });

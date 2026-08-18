@@ -1,6 +1,6 @@
-const {expect, test} = require("@playwright/test");
-const {signInAsCiUser} = require("./e2e-helpers");
-const {
+import {expect, test} from "@playwright/test";
+import {signInAsCiUser} from "./e2e-helpers.js";
+import {
   addCustomHelmRepo,
   addedHelmReposFixture,
   getServiceAccessUrl,
@@ -9,7 +9,7 @@ const {
   makeReleaseName,
   makeRepoName,
   waitForAppContent,
-} = require("./app-store-helpers");
+} from "./app-store-helpers.js";
 
 const appStoreTest = test.extend({
   installedReleases: installedReleasesFixture,

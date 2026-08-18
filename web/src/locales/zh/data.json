@@ -1,4 +1,23 @@
 {
+  "dashboard": {
+    "health data unavailable": "集群健康数据不可用",
+    "alert healthy": "集群健康",
+    "alert unhealthy": "{{count}} 个异常 Pod",
+    "alert nodes not ready": "{{count}} 个节点未就绪",
+    "alert unhealthy cluster": "集群不健康",
+    "reason CrashLoopBackOff": "容器反复重启",
+    "reason OOMKilled": "内存不足被终止",
+    "reason ImagePullBackOff": "镜像拉取失败",
+    "reason ConfigError": "容器配置错误",
+    "reason ContainerError": "容器创建错误",
+    "reason Evicted": "已驱逐",
+    "reason Failed": "失败",
+    "reason Unknown": "未知",
+    "reason Unschedulable": "无法调度",
+    "reason SchedulerError": "调度器错误",
+    "reason RunContainerError": "容器运行错误",
+    "reason ErrImageNeverPull": "本地不存在镜像"
+  },
   "account": {
     "Back to sign in": "返回登录",
     "Confirm password": "确认密码",
@@ -205,6 +224,7 @@
     "Local WSL machine added": "已添加本机 WSL",
     "Local WSL machine refreshed": "已刷新本机 WSL",
     "Machine owner is required": "机器所有者不能为空",
+    "No machines yet": "还没有机器，请先添加一台机器。",
     "No node deployment logs": "暂无部署日志。",
     "Node deployment failed": "节点部署失败",
     "Node deployment logs": "节点部署日志",
@@ -230,6 +250,25 @@
     "SSH port - Tooltip": "连接节点使用的 SSH 端口，通常为 22。",
     "Username - Tooltip": "CasOS 用于连接节点的 SSH 用户名。",
     "Worker Node": "工作节点"
+  },
+  "node": {
+    "No nodes registered. Add a machine and deploy it as a node from Machines.": "还没有注册节点，请先在机器页添加机器并部署为节点。"
+  },
+  "onboarding": {
+    "First-run checklist": "首次运行清单",
+    "{{completed}} of {{total}} complete": "已完成 {{completed}} / {{total}} 项",
+    "Complete these steps to get a working CasOS cluster.": "完成以下步骤即可开始使用 CasOS 集群。",
+    "Change the default password": "修改默认密码",
+    "Use a unique password for the built-in admin account.": "为内置管理员账户设置一个唯一密码。",
+    "Open account settings": "打开账户设置",
+    "Add a machine": "添加机器",
+    "Add an SSH-accessible machine before deploying it as a node.": "先添加一台可通过 SSH 访问的机器，再将它部署为节点。",
+    "Open Machines": "打开机器页",
+    "Deploy a machine as a node": "将机器部署为节点",
+    "A node is required before CasOS can schedule workloads.": "必须先有节点，CasOS 才能调度工作负载。",
+    "Install your first app": "安装第一个应用",
+    "Install an app from the App Store after a node is ready.": "节点就绪后，从应用市场安装一个应用。",
+    "Open App Store": "打开应用市场"
   },
   "policy": {
     "Add Rule": "添加规则",

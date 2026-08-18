@@ -1,21 +1,25 @@
-const {randomUUID} = require("crypto");
-const os = require("os");
-const path = require("path");
-const {defineConfig, devices} = require("@playwright/test");
+import {randomUUID} from "crypto";
+import os from "os";
+import path from "path";
+import {fileURLToPath} from "url";
+import {defineConfig, devices} from "@playwright/test";
+
+const configDir = path.dirname(fileURLToPath(import.meta.url));
 
 const backendPort = Number(process.env.E2E_BACKEND_PORT || 9000);
-const frontendPort = Number(process.env.E2E_FRONTEND_PORT || 8001);
+// 8002 is the frontend's dev port.
+const frontendPort = Number(process.env.E2E_FRONTEND_PORT || 8002);
 const baseURL = `http://127.0.0.1:${frontendPort}`;
 const backendURL = `http://127.0.0.1:${backendPort}`;
 const e2eToken = process.env.E2E_TEST_TOKEN || randomUUID();
 const e2eDataDir = process.env.E2E_DATA_DIR || path.join(os.tmpdir(), `casos-e2e-${process.pid}`);
-const backendDir = path.resolve(__dirname, "..");
+const backendDir = path.resolve(configDir, "..");
 const browserChannel = process.env.E2E_BROWSER_CHANNEL;
 const videoMode = process.env.E2E_DISABLE_VIDEO ? "off" : "retain-on-failure";
 
 process.env.E2E_TEST_TOKEN = e2eToken;
 
-module.exports = defineConfig({
+export default defineConfig({
   testDir: "./tests/ui",
   outputDir: "test-results",
   timeout: 30 * 1000,
@@ -67,6 +71,9 @@ module.exports = defineConfig({
         BROWSER: "none",
         CI: "false",
         PORT: String(frontendPort),
+        // Point the dev server's proxy at the backend this run started, not at
+        // whatever happens to be on the default port.
+        BACKEND_URL: backendURL,
       },
     },
   ],

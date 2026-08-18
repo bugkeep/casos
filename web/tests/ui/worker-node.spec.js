@@ -1,9 +1,10 @@
-const {expect, test} = require("@playwright/test");
-const {expectOkJson, signInAsCiUser} = require("./e2e-helpers");
-const {
+import {expect, test} from "@playwright/test";
+import {expectOkJson, expectToast, signInAsCiUser} from "./e2e-helpers.js";
+import {
   API_DEPLOY_MACHINE_NODE,
-  createdMachinesFixture,
   createMachineFromUi,
+  createdMachinesFixture,
+  expectWorkerNodeTaskVisible,
   getMachineNodeTasks,
   makeMachineName,
   openWorkerNodePanel,
@@ -11,8 +12,7 @@ const {
   startWorkerNodeRepair,
   submitWorkerNodeAction,
   workerNodeDialog,
-  expectWorkerNodeTaskVisible,
-} = require("./worker-node-helpers");
+} from "./worker-node-helpers.js";
 
 const E2E_APISERVER_URL = process.env.E2E_APISERVER_URL || "https://127.0.0.1:16443";
 const E2E_MACHINE_PREFIX = "a-worker-e2e";
@@ -72,12 +72,12 @@ workerNodeTest("rejects a second active worker node deployment from the machines
 
   const firstDeploy = submitWorkerNodeAction(page, machineName, "Deploy Node", API_DEPLOY_MACHINE_NODE);
   const firstDeployBody = await expectOkJson(await firstDeploy);
-  await expect(page.locator(".ant-message").getByText("Node deployment started", {exact: true})).toBeVisible();
+  await expectToast(page, "Node deployment started");
 
   const duplicateDeploy = submitWorkerNodeAction(page, machineName, "Deploy Node", API_DEPLOY_MACHINE_NODE);
   const duplicateDeployBody = await expectErrorJson(await duplicateDeploy);
   expect(duplicateDeployBody.msg).toContain("already active");
-  await expect(page.locator(".ant-message").getByText(/already active/)).toBeVisible();
+  await expectToast(page, /already active/);
 
   const tasksBody = await getMachineNodeTasks(page, machineName);
   expect(tasksBody.data).toHaveLength(1);
@@ -97,7 +97,7 @@ workerNodeTest("rejects invalid worker node deployment input from the machines p
   const invalidNodeName = submitWorkerNodeAction(page, machineName, "Deploy Node", API_DEPLOY_MACHINE_NODE);
   const invalidNodeNameBody = await expectErrorJson(await invalidNodeName);
   expect(invalidNodeNameBody.msg).toContain("nodeName must be a valid RFC 1123 subdomain");
-  await expect(page.locator(".ant-message").getByText(/nodeName must be a valid RFC 1123 subdomain/)).toBeVisible();
+  await expectToast(page, /nodeName must be a valid RFC 1123 subdomain/);
 
   let tasksBody = await getMachineNodeTasks(page, machineName);
   expect(tasksBody.data).toHaveLength(0);
@@ -107,7 +107,7 @@ workerNodeTest("rejects invalid worker node deployment input from the machines p
   const invalidApiserver = submitWorkerNodeAction(page, machineName, "Deploy Node", API_DEPLOY_MACHINE_NODE);
   const invalidApiserverBody = await expectErrorJson(await invalidApiserver);
   expect(invalidApiserverBody.msg).toContain("apiserverUrl must be a valid https URL");
-  await expect(page.locator(".ant-message").getByText(/apiserverUrl must be a valid https URL/)).toBeVisible();
+  await expectToast(page, /apiserverUrl must be a valid https URL/);
 
   tasksBody = await getMachineNodeTasks(page, machineName);
   expect(tasksBody.data).toHaveLength(0);
