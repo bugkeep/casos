@@ -7,21 +7,15 @@ import (
 	"io/fs"
 )
 
-// The all: prefix keeps entries whose names begin with "." or "_", which a
-// plain pattern silently drops: everything under web/public is copied into the
-// build output verbatim, so the frontend decides what ships, not this pattern.
+// Standalone binaries ship the shadcn frontend from web2/build, so this tree is
+// deliberately not embedded: doing so would carry a second copy of the whole UI
+// in every release and force `-tags embed` builds to run `yarn build` here as
+// well, for assets nothing would ever serve.
 //
-//go:embed all:build
-var embedded embed.FS
-
-// Files returns the frontend compiled into the binary. Building with
-// -tags embed therefore requires web/build to exist: run `yarn build` first.
+// The router only reaches this package when web2 reports no frontend, which
+// cannot happen under this build tag — see web2/assets_embed.go. The empty
+// filesystem is what keeps that unreachable branch harmless rather than a nil
+// dereference.
 func Files() fs.FS {
-	files, err := fs.Sub(embedded, "build")
-	if err != nil {
-		// "build" is a constant that fs.Sub accepts by construction; an error
-		// here would mean the embedded tree itself is malformed.
-		panic(err)
-	}
-	return files
+	return embed.FS{}
 }

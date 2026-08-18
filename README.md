@@ -280,14 +280,17 @@ go run main.go
 ### Frontend
 
 ```bash
-cd web
+cd web2
 
 # Install dependencies (first time only)
 yarn install
 
-# Start dev server — port 8001, proxies API to localhost:9000
+# Start dev server — port 8002, proxies API to localhost:9000
 yarn start
 ```
+
+`web/` is the previous Ant Design frontend. It still builds and the backend will
+still serve it, but `web2/` is what ships.
 
 ## Deployment
 
@@ -304,22 +307,24 @@ go build -o casos .
 ### Frontend
 
 ```bash
-cd web
+cd web2
 
-# Production build (outputs to web/build/)
+# Production build (outputs to web2/build/)
 yarn build
 ```
 
-Serve the `web/build/` directory with any static file server, or let the Go backend serve it directly.
+Serve the `web2/build/` directory with any static file server, or let the Go
+backend serve it directly. The backend prefers `web2/build/` and falls back to
+`web/build/`, so deleting the former is all it takes to go back to the old UI.
 
 ### Standalone binary
 
-Building with `-tags embed` compiles `web/build/` into the backend, producing a
+Building with `-tags embed` compiles `web2/build/` into the backend, producing a
 single file that serves the UI without needing the directory beside it. Run
-`yarn build` first — the build tag requires `web/build/` to exist.
+`yarn build` first — the build tag requires `web2/build/` to exist.
 
 ```bash
-cd web && GENERATE_SOURCEMAP=false yarn build && cd ..
+cd web2 && yarn build && cd ..
 CGO_ENABLED=0 go build -trimpath -tags embed -o casos .
 ```
 

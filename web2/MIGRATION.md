@@ -150,17 +150,14 @@ search box instead.
 React did not throw and something painted; nothing else covers 30 of them, and
 that is how the `<Button asChild>` crash described below was found.
 
-## Not carried over
+## What is left of web/
 
-- `web/tests` still exists and still targets the antd UI, but CI no longer runs
-  it: the `ui-tests` job drives web2 now, so a change under `web/src/**` selects
-  no UI tests at all. That is the cost of pointing one job at one frontend —
-  restoring coverage for the old UI means running its job alongside.
-- CI still builds and ships `web/build`; only the `ui-tests` job moved. Nothing
-  in CI runs `yarn build` for web2 yet, so a production build break there would
-  go unnoticed.
-- `-tags embed` builds still ship `web/build`. See `web2/assets_embed.go` for
-  what to change when web2 becomes the shipped frontend.
+`web/` still exists and still builds by hand, but CI no longer touches it: the
+`frontend` job builds web2, and the `ui-tests` job drives web2, so a change
+under `web/src/**` neither builds nor selects a single test. It is kept only as
+the fallback below — a checkout that has built the old UI but not this one still
+has something to serve. Nothing else depends on it, so it can be deleted
+whenever you are ready.
 
 ## React 18, not 19
 
@@ -176,6 +173,12 @@ and took the whole route down. `loading` is therefore only honoured on a real
 
 ## Serving from the Go backend
 
-`web2/assets_disk.go` and `web2/assets_embed.go` mirror the pair in `web/`.
 `routers/static_filter.go` serves `web2/build` when it exists and falls back to
-`web/build`, so the two frontends can be swapped without a code change.
+`web/build`, so the two frontends swap by building or deleting a directory —
+no backend rebuild, no configuration.
+
+`-tags embed` compiles the frontend into the binary, and it is web2 that gets
+embedded: `web2/assets_embed.go` carries the `//go:embed all:build` directive,
+so a standalone build fails to compile unless `yarn build` has run in web2.
+`web/assets_embed.go` deliberately embeds nothing — carrying both frontends
+would double the payload for assets nothing would ever serve.

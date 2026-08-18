@@ -21,11 +21,11 @@ const indexFile = "index.html"
 var staticAssets = frontendAssets()
 
 // frontendAssets picks between the two frontends that currently live in the
-// repository. web2 is the shadcn rewrite of web; serving it whenever it has
-// been built lets the new UI be tried against a real backend by running
-// `yarn build` in web2, and reverted by deleting that directory — no rebuild of
-// the backend and no configuration either way. Standalone `-tags embed` builds
-// still ship web, which is what web2assets.Available reports there.
+// repository. web2 is the shadcn rewrite of web and is the one that ships:
+// standalone `-tags embed` builds carry it, and every other build serves it
+// from web2/build as soon as `yarn build` has run there. web is the fallback
+// for a checkout that has only ever built the old UI, and deleting web2/build
+// is all it takes to go back to it — no rebuild of the backend, no config.
 func frontendAssets() fs.FS {
 	if web2assets.Available() {
 		return web2assets.Files()

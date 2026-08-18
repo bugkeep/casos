@@ -33,16 +33,16 @@ jobs:
         with:
           node-version: 22
           cache: 'yarn'
-          cache-dependency-path: ./web/yarn.lock
-      - run: yarn install && CI=false yarn run build
-        working-directory: ./web
+          cache-dependency-path: ./web2/yarn.lock
+      - run: yarn install --frozen-lockfile && yarn run build
+        working-directory: ./web2
       # Consumed within the same run by the standalone and release jobs, so it
       # is uploaded everywhere and expires immediately.
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: frontend-build-${{ github.run_id }}
-          path: ./web/build
+          path: ./web2/build
           retention-days: 1
 
   standalone:
@@ -59,7 +59,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: frontend-build-${{ github.run_id }}
-          path: ./web/build
+          path: ./web2/build
       # Exercises the release configuration on every pull request, so a broken
       # embed build or GoReleaser config fails here instead of at release time.
       - name: Build release binary
@@ -462,7 +462,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: frontend-build-${{ github.run_id }}
-          path: ./web/build
+          path: ./web2/build
 
       - name: Attach release binaries
         uses: goreleaser/goreleaser-action@v6

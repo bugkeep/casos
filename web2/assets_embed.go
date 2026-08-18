@@ -2,19 +2,34 @@
 
 package web2assets
 
-import "io/fs"
+import (
+	"embed"
+	"io/fs"
+)
 
-// A standalone binary still ships the Ant Design frontend from web/build: the
-// shadcn rewrite is not yet feature-complete, and embedding it would require
-// every `-tags embed` build to run `yarn build` in web2 as well.
+// The all: prefix keeps entries whose names begin with "." or "_", which a
+// plain pattern silently drops: everything under web2/public is copied into the
+// build output verbatim, so the frontend decides what ships, not this pattern.
 //
-// To ship web2 instead, replace the body of this file with the embed directive
-// from web/assets_embed.go pointed at web2/build, and add the web2 build to CI
-// next to the existing web one.
+//go:embed all:build
+var embedded embed.FS
+
+// Available reports that a standalone binary carries this frontend. It is a
+// constant under this build tag: the embed directive above will not compile
+// unless web2/build exists, so if the binary linked, the assets are in it.
 func Available() bool {
-	return false
+	return true
 }
 
+// Files returns the frontend compiled into the binary. Building with
+// -tags embed therefore requires web2/build to exist: run `yarn build` in web2
+// first.
 func Files() fs.FS {
-	return nil
+	files, err := fs.Sub(embedded, "build")
+	if err != nil {
+		// "build" is a constant that fs.Sub accepts by construction; an error
+		// here would mean the embedded tree itself is malformed.
+		panic(err)
+	}
+	return files
 }
