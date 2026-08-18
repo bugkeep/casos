@@ -1,5 +1,5 @@
 import * as React from "react";
-import {Slot} from "@radix-ui/react-slot";
+import {Slot, Slottable} from "@radix-ui/react-slot";
 import {cva} from "class-variance-authority";
 import {cn} from "@/lib/utils";
 
@@ -32,19 +32,23 @@ const buttonVariants = cva(
 // `loading` mirrors the prop every antd button in the old UI relied on: it both
 // shows a spinner and blocks the click, so callers never have to disable the
 // button separately while a request is in flight.
-function Button({className, variant, size, asChild = false, loading = false, disabled, children, ...props}) {
+const Button = React.forwardRef(function Button(
+  {className, variant, size, asChild = false, loading = false, disabled, children, ...props},
+  ref
+) {
   const Comp = asChild ? Slot : "button";
   return (
     <Comp
+      ref={ref}
       data-slot="button"
       className={cn(buttonVariants({variant, size, className}))}
       disabled={asChild ? undefined : disabled || loading}
       {...props}
     >
       {loading ? <span className="size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" /> : null}
-      {children}
+      <Slottable>{children}</Slottable>
     </Comp>
   );
-}
+});
 
 export {Button, buttonVariants};
