@@ -11,13 +11,27 @@ import (
 
 	"github.com/beego/beego/context"
 	webassets "github.com/casosorg/casos/web"
+	web2assets "github.com/casosorg/casos/web2"
 )
 
 const indexFile = "index.html"
 
 // staticAssets is the compiled frontend: embedded in the binary for standalone
-// builds, read from web/build on disk for every other build.
-var staticAssets = webassets.Files()
+// builds, read from disk for every other build.
+var staticAssets = frontendAssets()
+
+// frontendAssets picks between the two frontends that currently live in the
+// repository. web2 is the shadcn rewrite of web; serving it whenever it has
+// been built lets the new UI be tried against a real backend by running
+// `yarn build` in web2, and reverted by deleting that directory — no rebuild of
+// the backend and no configuration either way. Standalone `-tags embed` builds
+// still ship web, which is what web2assets.Available reports there.
+func frontendAssets() fs.FS {
+	if web2assets.Available() {
+		return web2assets.Files()
+	}
+	return webassets.Files()
+}
 
 func init() {
 	// Windows resolves MIME types through the registry, where .js is routinely
@@ -89,14 +103,23 @@ func openAsset(name string) (fs.File, error) {
 	return staticAssets.Open(name)
 }
 
-// setCacheControl applies the policy the frontend build implies: files under
-// static/ carry a content hash in their name and never change, while
-// index.html and the remaining top-level assets keep their names across
-// releases and must be revalidated or an upgrade serves a stale app.
+// hashedAssetDirs are the directories whose file names carry a content hash, so
+// their contents never change under a given name. Create React App emits web/
+// into static/ and Vite emits web2/ into assets/; both frontends are served by
+// this filter, so both spellings have to be recognised or the new UI ships
+// without any caching at all.
+var hashedAssetDirs = []string{"static/", "assets/"}
+
+// setCacheControl applies the policy the frontend build implies: content-hashed
+// files can be cached forever, while index.html and the remaining top-level
+// assets keep their names across releases and must be revalidated or an upgrade
+// serves a stale app.
 func setCacheControl(writer http.ResponseWriter, name string) {
-	if strings.HasPrefix(name, "static/") {
-		writer.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-		return
+	for _, dir := range hashedAssetDirs {
+		if strings.HasPrefix(name, dir) {
+			writer.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			return
+		}
 	}
 	writer.Header().Set("Cache-Control", "no-cache")
 }
