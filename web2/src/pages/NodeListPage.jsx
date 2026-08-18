@@ -181,6 +181,7 @@ function NodeListPage() {
       {error ? <MessageAlert title="Failed to fetch nodes" description={error} /> : null}
 
       <DataTable
+        testId="nodes-table"
         title={i18next.t("general:Nodes")}
         description={`${nodes?.length ?? 0} nodes`}
         columns={columns}

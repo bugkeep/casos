@@ -52,7 +52,7 @@ function ChartIcon({icon, name, size = 40}) {
 function ChartCard({chart, onInstall}) {
   const {t} = useTranslation();
   return (
-    <div className="bg-card hover:border-ring/50 flex gap-3 rounded-xl border p-3 shadow-sm transition-colors">
+    <div data-testid="chart-card" className="bg-card hover:border-ring/50 flex gap-3 rounded-xl border p-3 shadow-sm transition-colors">
       <ChartIcon icon={chart.icon} name={chart.displayName} />
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
         <div className="flex items-start gap-2">
@@ -113,6 +113,7 @@ function AddRepoDialog({open, onClose, onAdded}) {
       open={open}
       onOpenChange={(next) => (next ? null : onClose())}
       title={t("helm:Add Helm Repo")}
+      submitText={t("general:Add")}
       submitting={submitting}
       onSubmit={handleSubmit}
     >

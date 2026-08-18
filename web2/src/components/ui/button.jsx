@@ -29,22 +29,38 @@ const buttonVariants = cva(
   }
 );
 
-// `loading` mirrors the prop every antd button in the old UI relied on: it both
-// shows a spinner and blocks the click, so callers never have to disable the
-// button separately while a request is in flight.
-function Button({className, variant, size, asChild = false, loading = false, disabled, children, ...props}) {
-  const Comp = asChild ? Slot : "button";
+/**
+ * `loading` mirrors the prop every antd button in the old UI relied on: it both
+ * shows a spinner and blocks the click, so callers never have to disable the
+ * button separately while a request is in flight.
+ *
+ * forwardRef is required, not optional: this app runs React 18, where a ref is
+ * not an ordinary prop, and every Radix `asChild` trigger (tooltip, dropdown,
+ * popover, dialog) hands its child a ref to anchor and focus.
+ */
+const Button = React.forwardRef(function Button(
+  {className, variant, size, asChild = false, loading = false, disabled, children, ...props},
+  ref
+) {
+  const classes = cn(buttonVariants({variant, size, className}));
+
+  // asChild renders the caller's own element through Radix's Slot, which accepts
+  // exactly one child. The spinner is therefore only injected for a real
+  // <button>; adding it here would hand Slot two children and throw.
+  if (asChild) {
+    return (
+      <Slot ref={ref} data-slot="button" className={classes} {...props}>
+        {children}
+      </Slot>
+    );
+  }
+
   return (
-    <Comp
-      data-slot="button"
-      className={cn(buttonVariants({variant, size, className}))}
-      disabled={asChild ? undefined : disabled || loading}
-      {...props}
-    >
+    <button ref={ref} data-slot="button" className={classes} disabled={disabled || loading} {...props}>
       {loading ? <span className="size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" /> : null}
       {children}
-    </Comp>
+    </button>
   );
-}
+});
 
 export {Button, buttonVariants};

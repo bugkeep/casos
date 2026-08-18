@@ -270,6 +270,7 @@ export function MachineNodeDeploySheet({machine, account, open, onClose}) {
       ) : null}
 
       <DataTable
+        testId="worker-node-tasks"
         columns={columns}
         dataSource={tasks}
         rowKey="id"

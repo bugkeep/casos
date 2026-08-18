@@ -93,7 +93,7 @@ function ManagementPage(props) {
   const footerHtml = Setting.getFooterHtml(themeAlgorithm || [], site?.footerHtml, site);
 
   return (
-    <div className="bg-muted/30 min-h-screen">
+    <div data-testid="management-layout" className="bg-muted/30 min-h-screen">
       <AppSidebar
         collapsed={collapsed}
         selectedKey={selectedKey}

@@ -88,6 +88,7 @@ function SiteListPage() {
   return (
     <PageContainer>
       <DataTable
+        testId="sites-table"
         title={i18next.t("general:Sites")}
         columns={columns}
         dataSource={sites}

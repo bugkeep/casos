@@ -92,6 +92,12 @@ function SortIcon({state}) {
  *   onRowClick      makes rows interactive
  *   expandable      {rowExpandable(record), expandedRowRender(record)}
  *   dense           tighter row padding for embedded tables
+ *   testId          data-testid on the root, for end-to-end tests
+ *
+ * The root carries data-slot and data-loading, and every row carries the
+ * resolved data-row-key. Those are the selector contract the Playwright suite
+ * is written against: Tailwind class names are generated and must never be
+ * selected on, and a role alone cannot say *which* table or *which* row.
  */
 export function DataTable({
   columns,
@@ -111,6 +117,7 @@ export function DataTable({
   dense = false,
   className,
   tableClassName,
+  testId,
 }) {
   const [sorting, setSorting] = React.useState([]);
   const [globalFilter, setGlobalFilter] = React.useState("");
@@ -146,9 +153,17 @@ export function DataTable({
   const showPagination = pageSize > 0 && totalRows > pageSize;
 
   return (
-    <div className={cn("bg-card flex flex-col overflow-hidden rounded-xl border shadow-sm", className)}>
+    <div
+      data-slot="data-table"
+      data-testid={testId}
+      data-loading={loading ? "true" : "false"}
+      className={cn("bg-card flex flex-col overflow-hidden rounded-xl border shadow-sm", className)}
+    >
       {showHeader && (
-        <div className="flex flex-col gap-3 border-b px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div
+          data-slot="data-table-header"
+          className="flex flex-col gap-3 border-b px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+        >
           <div className="min-w-0">
             {title ? <h2 className="truncate text-sm font-semibold">{title}</h2> : null}
             {description ? <p className="text-muted-foreground mt-0.5 truncate text-xs">{description}</p> : null}
@@ -232,6 +247,7 @@ export function DataTable({
               return (
                 <React.Fragment key={row.id}>
                   <TableRow
+                    data-row-key={row.id}
                     data-state={isExpanded ? "selected" : undefined}
                     onClick={onRowClick ? () => onRowClick(row.original) : undefined}
                     className={cn(onRowClick && "cursor-pointer")}
