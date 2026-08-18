@@ -19,8 +19,12 @@ const alertVariants = cva(
   }
 );
 
-function Alert({className, variant, ...props}) {
-  return <div data-slot="alert" role="alert" className={cn(alertVariants({variant}), className)} {...props} />;
+// data-variant is what lets a test assert "an error is showing" without
+// selecting on generated Tailwind classes.
+function Alert({className, variant = "default", ...props}) {
+  return (
+    <div data-slot="alert" data-variant={variant} role="alert" className={cn(alertVariants({variant}), className)} {...props} />
+  );
 }
 
 function AlertTitle({className, ...props}) {

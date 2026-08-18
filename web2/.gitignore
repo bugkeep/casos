@@ -3,3 +3,10 @@ build
 dist
 .DS_Store
 *.local
+test-results
+playwright-report
+blob-report
+
+# Scratch files the CI ui-tests job writes here
+ui-*.txt
+ui-*.log

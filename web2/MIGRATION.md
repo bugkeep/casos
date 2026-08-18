@@ -4,8 +4,9 @@
 to the same Beego backend and can run side by side.
 
 **Status: complete.** All 37 route pages and every drawer, modal and editor they
-depend on are ported; `web2/src` contains no Ant Design import. The remaining
-mentions of antd in the source are comments naming what each component replaces.
+depend on are ported, along with the Playwright suite; `web2/src` contains no
+Ant Design import. The remaining mentions of antd in the source are comments
+naming what each component replaces.
 
 ## Stack
 
@@ -109,12 +110,69 @@ they drifted. `src/routes.jsx` holds the route table; every page is lazy-loaded.
    `Tag` → `Badge` / `StatusBadge`; `message` → `Setting.showMessage`.
 7. Add the route to `src/routes.jsx`.
 
+## End-to-end tests
+
+```bash
+cd web2 && yarn ui:test:selector:check   # unit-tests the changed-path selection
+cd web2 && yarn ui:test:smoke            # @smoke only
+cd web2 && yarn ui:test                  # everything
+```
+
+`playwright.config.js` starts both servers itself: the Go backend in
+`e2eTestMode` and a Vite dev server on 8002. Override `E2E_FRONTEND_PORT`,
+`E2E_BACKEND_PORT`, `E2E_APISERVER_PORT` and `E2E_WEBHOOK_PORT` to run beside a
+backend you already have going — the dev server's proxy target follows
+`BACKEND_URL`, which the config sets from `E2E_BACKEND_PORT`.
+
+### Selectors are a contract
+
+Tailwind class names are generated output and must never be selected on, so the
+suite is written against roles, labels and a small set of deliberate hooks:
+
+| Hook | Where | Replaces |
+|---|---|---|
+| `data-testid` on `DataTable` (`testId` prop) | machines, sites, services, nodes, worker-node tasks | `.ant-table-wrapper` filtered by text |
+| `data-row-key` on every `DataTable` row | `DataTable` | antd's own `data-row-key` |
+| `data-loading` on `DataTable` | `DataTable` | `.ant-spin-spinning` |
+| `data-variant` on `Alert` | `ui/alert.jsx` | `.ant-alert-error` |
+| `data-sonner-toast` | sonner | `.ant-message` |
+| `data-testid="management-layout"` | `ManagementPage` | `#parent-area` |
+| `data-testid="chart-card"` | `AppStorePage` | `.ant-row .ant-col .ant-card` |
+
+Adding a hook is preferable to selecting on a class; adding one is cheap and
+says out loud that a test depends on it.
+
+`findMachineRow` no longer walks pagination across fifty pages the way the antd
+helper had to — `DataTable` filters every loaded row, so it types into the
+search box instead.
+
+`routes-render.spec.js` is new, not a port. It walks all 33 routes asserting
+React did not throw and something painted; nothing else covers 30 of them, and
+that is how the `<Button asChild>` crash described below was found.
+
 ## Not carried over
 
-- The Playwright suite in `web/tests` still targets the antd UI; its selectors do
-  not match this DOM. Porting it is separate work.
+- `web/tests` still exists and still targets the antd UI, but CI no longer runs
+  it: the `ui-tests` job drives web2 now, so a change under `web/src/**` selects
+  no UI tests at all. That is the cost of pointing one job at one frontend —
+  restoring coverage for the old UI means running its job alongside.
+- CI still builds and ships `web/build`; only the `ui-tests` job moved. Nothing
+  in CI runs `yarn build` for web2 yet, so a production build break there would
+  go unnoticed.
 - `-tags embed` builds still ship `web/build`. See `web2/assets_embed.go` for
   what to change when web2 becomes the shipped frontend.
+
+## React 18, not 19
+
+shadcn's current component sources assume React 19, where `ref` is an ordinary
+prop. This project is on React 18, where it is not, so `Button`, `Input` and
+`Textarea` are `forwardRef` components — without that, every Radix `asChild`
+trigger (tooltip, dropdown, popover, dialog) silently fails to get its anchor.
+
+`Button` also renders `asChild` as a bare `Slot` around its single child: Slot
+accepts exactly one child, and injecting the loading spinner alongside it threw
+and took the whole route down. `loading` is therefore only honoured on a real
+`<button>`.
 
 ## Serving from the Go backend
 

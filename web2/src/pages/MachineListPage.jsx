@@ -204,6 +204,7 @@ function MachineListPage({account}) {
   return (
     <PageContainer>
       <DataTable
+        testId="machines-table"
         title={i18next.t("general:Machines")}
         description={`${machines?.length ?? 0} machines`}
         columns={columns}

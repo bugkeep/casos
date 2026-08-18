@@ -255,6 +255,7 @@ function ServiceListPage() {
       {error ? <MessageAlert title="Failed to fetch Services" description={error} /> : null}
 
       <DataTable
+        testId="services-table"
         title={i18next.t("general:Services")}
         description={`${services?.length ?? 0} services`}
         columns={columns}
