@@ -133,13 +133,38 @@ func (d *NodeDeployer) resolveRegistryMirrors(ctx context.Context, runner regist
 	}
 	d.logRegistryProbe("Docker Hub", dockerHubReachable, dockerHubDetail)
 
-	k8sReachable, k8sDetail, err := probeCanonicalRegistry(ctx, runner, "https://registry.k8s.io/v2/")
+	k8sReachable, k8sDetail, err := probeCanonicalRegistry(ctx, runner, k8sRegistryProbeURL(d.config.SandboxImage))
 	if err != nil {
 		return registryMirrorSelection{}, fmt.Errorf("probe registry.k8s.io from worker: %w", err)
 	}
 	d.logRegistryProbe("registry.k8s.io", k8sReachable, k8sDetail)
 
 	return registryMirrorSelection{dockerHub: !dockerHubReachable, k8s: !k8sReachable}, nil
+}
+
+// k8sRegistryProbeURL returns the manifest URL for sandboxImage. A manifest
+// request redirects to the regional Artifact Registry mirror a real pull has to
+// reach; the plain /v2/ endpoint answers without it. Falls back to /v2/ when
+// the sandbox image is not served by registry.k8s.io.
+func k8sRegistryProbeURL(sandboxImage string) string {
+	const host = "registry.k8s.io"
+	fallback := "https://" + host + "/v2/"
+
+	repoRef, ok := strings.CutPrefix(sandboxImage, host+"/")
+	if !ok {
+		return fallback
+	}
+	if repo, digest, ok := strings.Cut(repoRef, "@"); ok {
+		if repo == "" || digest == "" {
+			return fallback
+		}
+		return fmt.Sprintf("https://%s/v2/%s/manifests/%s", host, repo, digest)
+	}
+	repo, tag, ok := strings.Cut(repoRef, ":")
+	if !ok || repo == "" || tag == "" {
+		return fallback
+	}
+	return fmt.Sprintf("https://%s/v2/%s/manifests/%s", host, repo, tag)
 }
 
 func probeCanonicalRegistry(ctx context.Context, runner registryMirrorFileRunner, url string) (bool, string, error) {

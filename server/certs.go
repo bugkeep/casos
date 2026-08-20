@@ -266,11 +266,13 @@ func EnsureWebhookCert(certDir string) error {
 	return writePEM(keyFile, "RSA PRIVATE KEY", whKeyDER)
 }
 
-// EnsureAuthzWebhookConfig writes (once) the kubeconfig that the apiserver
-// uses to reach the Casbin authorization webhook.
+// EnsureAuthzWebhookConfig writes the kubeconfig that the apiserver uses to
+// reach the Casbin authorization webhook, rewriting it when the webhook port
+// has changed.
 func EnsureAuthzWebhookConfig(certDir string, webhookPort int) (string, error) {
+	serverURL := fmt.Sprintf("https://127.0.0.1:%d/authorization/authorize", webhookPort)
 	path := filepath.Join(certDir, "authz-webhook.kubeconfig")
-	if fileExists(path) {
+	if kubeconfigPointsAt(path, serverURL) {
 		return path, nil
 	}
 
@@ -293,7 +295,7 @@ clusters:
 - name: authz-webhook
   cluster:
     certificate-authority-data: %s
-    server: https://127.0.0.1:%d/authorization/authorize
+    server: %s
 users:
 - name: casos
   user:
@@ -307,7 +309,7 @@ contexts:
 current-context: default
 `,
 		base64.StdEncoding.EncodeToString(caData),
-		webhookPort,
+		serverURL,
 		base64.StdEncoding.EncodeToString(certData),
 		base64.StdEncoding.EncodeToString(keyData),
 	)
@@ -341,11 +343,23 @@ func ensureServiceAccountKey(dir string) error {
 	return writePEM(pubFile, "PUBLIC KEY", pubDER)
 }
 
+// kubeconfigPointsAt reports whether the kubeconfig at path already names
+// serverURL. Existence alone is not enough: a file kept from an earlier run
+// leaves the component dialling an endpoint that has since moved.
+func kubeconfigPointsAt(path, serverURL string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	return bytes.Contains(data, []byte("server: "+serverURL+"\n"))
+}
+
 // ensureComponentKubeconfig writes <name>.kubeconfig inside certDir, embedding
-// admin client certs as base64 to avoid Windows path escaping issues.
+// admin client certs as base64 to avoid Windows path escaping issues. It is
+// rewritten when the apiserver URL has changed.
 func ensureComponentKubeconfig(certDir, apiserverURL, name string) (string, error) {
 	path := filepath.Join(certDir, name+".kubeconfig")
-	if fileExists(path) {
+	if kubeconfigPointsAt(path, apiserverURL) {
 		return path, nil
 	}
 
