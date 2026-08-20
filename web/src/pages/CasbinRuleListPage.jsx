@@ -127,7 +127,7 @@ function CasbinRuleListPage({scope, title, description}) {
   const columns = [
     {
       key: "pType",
-      title: i18next.t("policy:Type"),
+      title: i18next.t("general:Type"),
       dataIndex: "pType",
       width: 100,
       render: (value) =>
@@ -225,7 +225,7 @@ function CasbinRuleListPage({scope, title, description}) {
         submitting={submitting}
         onSubmit={handleAdd}
       >
-        <Field label={i18next.t("policy:Type")} required>
+        <Field label={i18next.t("general:Type")} required>
           <SimpleSelect
             value={form.pType}
             onChange={(next) => setForm((prev) => ({...prev, pType: next}))}
@@ -252,7 +252,7 @@ function CasbinRuleListPage({scope, title, description}) {
 
         {isPolicy ? (
           <>
-            <Field label={i18next.t("policy:Namespace")} htmlFor="casbin-v1">
+            <Field label={i18next.t("general:Namespace")} htmlFor="casbin-v1">
               <Input
                 id="casbin-v1"
                 value={form.v1}

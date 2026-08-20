@@ -46,7 +46,7 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: `cd "${backendDir}" && go run main.go -createDatabase=true`,
+      command: `cd "${backendDir}" && go run . -createDatabase=true`,
       url: `${backendURL}/api/get-built-in-site`,
       reuseExistingServer: !process.env.CI,
       timeout: 180 * 1000,

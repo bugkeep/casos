@@ -152,7 +152,7 @@ export default function HelmReleasePage() {
     },
     {
       key: "status",
-      title: t("helm:Status"),
+      title: t("general:Status"),
       dataIndex: "status",
       width: 150,
       sortable: true,

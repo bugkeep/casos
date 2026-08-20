@@ -301,13 +301,13 @@ function MonitorPage() {
       {key: "time", title: t("monitor:Time"), width: 200, render: (_, record) => formatTime(eventDisplayTime(record))},
       {
         key: "type",
-        title: t("policy:Type"),
+        title: t("general:Type"),
         dataIndex: "type",
         width: 120,
         sortable: true,
         render: (value) => <Badge variant={EVENT_TYPE_VARIANTS[value] ?? "muted"}>{value || "-"}</Badge>,
       },
-      {key: "namespace", title: t("policy:Namespace"), dataIndex: "namespace", width: 160, sortable: true},
+      {key: "namespace", title: t("general:Namespace"), dataIndex: "namespace", width: 160, sortable: true},
       {
         key: "object",
         title: t("monitor:Object"),
@@ -338,7 +338,7 @@ function MonitorPage() {
       {key: "time", title: t("monitor:Time"), width: 190, render: (_, record) => formatTime(eventDisplayTime(record))},
       {
         key: "type",
-        title: t("policy:Type"),
+        title: t("general:Type"),
         dataIndex: "type",
         width: 110,
         render: (value) => <Badge variant={EVENT_TYPE_VARIANTS[value] ?? "muted"}>{value || "-"}</Badge>,
@@ -475,7 +475,7 @@ function MonitorPage() {
                   fetchEvents(namespaceFilter);
                 }
               }}
-              placeholder={t("policy:Namespace")}
+              placeholder={t("general:Namespace")}
               className="h-8 w-52 text-xs"
             />
             <Button variant="outline" size="sm" loading={eventsLoading} onClick={() => fetchEvents(namespaceFilter)}>
@@ -500,10 +500,10 @@ function MonitorPage() {
                   {key: "time", label: t("monitor:Time"), value: formatTime(eventDisplayTime(selectedEvent))},
                   {
                     key: "type",
-                    label: t("policy:Type"),
+                    label: t("general:Type"),
                     value: <Badge variant={EVENT_TYPE_VARIANTS[selectedEvent.type] ?? "muted"}>{selectedEvent.type || "-"}</Badge>,
                   },
-                  {key: "namespace", label: t("policy:Namespace"), value: selectedEvent.namespace || "-"},
+                  {key: "namespace", label: t("general:Namespace"), value: selectedEvent.namespace || "-"},
                   {
                     key: "object",
                     label: t("monitor:Object"),

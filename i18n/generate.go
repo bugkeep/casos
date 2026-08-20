@@ -27,29 +27,58 @@ import (
 type I18nData map[string]map[string]string
 
 var (
-	reI18nFrontend          *regexp.Regexp
+	reI18nFrontendCall      *regexp.Regexp
+	reI18nFrontendProperty  *regexp.Regexp
+	reI18nFrontendKey       *regexp.Regexp
 	reI18nBackendObject     *regexp.Regexp
 	reI18nBackendController *regexp.Regexp
 )
 
 func init() {
-	reI18nFrontend, _ = regexp.Compile("i18next.t\\(\"(.*?)\"\\)")
+	// A frontend key reaches i18next in one of two shapes, and both have to be
+	// matched here: a key the extractor misses is a key that never lands in the
+	// locale files, and i18next then falls back to rendering the key itself, so
+	// English looks correct and only the other language is visibly broken.
+	//
+	// The first shape is an argument to a translate call, written either as
+	// i18next.t(...) or as the t(...) that useTranslation returns. Capturing the
+	// whole argument list rather than just a leading string is what covers
+	// t("key", {count: n}) and t(cond ? "a" : "b"). Requiring a word boundary
+	// before the t keeps split(...) and its kin out.
+	//
+	// The second shape is a key held in an object and translated later, which is
+	// how nav.js carries the sidebar and breadcrumb labels and how
+	// helmCompatibilityErrors.js maps an error code to a message. Nothing about
+	// "word:word" tells a key apart from a Tailwind class or a URL, so those are
+	// kept honest by the namespace filter in parseAllWords rather than by the
+	// pattern.
+	reI18nFrontendCall, _ = regexp.Compile(`\bt\(((?:[^()"]|"[^"]*")*)\)`)
+	reI18nFrontendProperty, _ = regexp.Compile(`[A-Za-z_$][\w$]*:\s*("[A-Za-z][A-Za-z0-9]*:[^"\s][^"]*")`)
+	reI18nFrontendKey, _ = regexp.Compile(`"([A-Za-z][A-Za-z0-9]*:[^"\s][^"]*)"`)
 	reI18nBackendObject, _ = regexp.Compile("i18n.Translate\\((.*?)\"\\)")
 	reI18nBackendController, _ = regexp.Compile("c.T\\((.*?)\"\\)")
 }
 
 func getAllI18nStringsFrontend(fileContent string) []string {
+	return matchI18nKeys(reI18nFrontendCall, fileContent)
+}
+
+func getAllI18nPropertyStringsFrontend(fileContent string) []string {
+	return matchI18nKeys(reI18nFrontendProperty, fileContent)
+}
+
+func matchI18nKeys(re *regexp.Regexp, fileContent string) []string {
 	res := []string{}
-
-	matches := reI18nFrontend.FindAllStringSubmatch(fileContent, -1)
-	if matches == nil {
-		return res
-	}
-
-	for _, match := range matches {
-		res = append(res, match[1])
+	for _, match := range re.FindAllStringSubmatch(fileContent, -1) {
+		for _, key := range reI18nFrontendKey.FindAllStringSubmatch(match[1], -1) {
+			res = append(res, key[1])
+		}
 	}
 	return res
+}
+
+func getNamespace(word string) string {
+	return strings.SplitN(word, ":", 2)[0]
 }
 
 func getAllI18nStringsBackend(fileContent string, isControllerPackage bool) []string {
@@ -123,6 +152,7 @@ func parseAllWords(category string) *I18nData {
 	}
 
 	allWords := []string{}
+	propertyWords := []string{}
 	for _, path := range paths {
 		fileContent := util.ReadStringFromPath(path)
 
@@ -136,9 +166,25 @@ func parseAllWords(category string) *I18nData {
 			words = getAllI18nStringsBackend(fileContent, isControllerPackage)
 		} else {
 			words = getAllI18nStringsFrontend(fileContent)
+			propertyWords = append(propertyWords, getAllI18nPropertyStringsFrontend(fileContent)...)
 		}
 		allWords = append(allWords, words...)
 	}
+
+	// A translate call is unambiguous, so the namespaces it names are the whole
+	// set the frontend has. Object properties are not: "sm:max-w-lg" and
+	// "https://charts.rancher.io" have the same shape as a key, and only the
+	// namespace tells them apart.
+	namespaces := map[string]bool{}
+	for _, word := range allWords {
+		namespaces[getNamespace(word)] = true
+	}
+	for _, word := range propertyWords {
+		if namespaces[getNamespace(word)] {
+			allWords = append(allWords, word)
+		}
+	}
+
 	fmt.Printf("%v\n", allWords)
 
 	data := I18nData{}
