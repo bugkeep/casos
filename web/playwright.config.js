@@ -6,7 +6,7 @@ import {defineConfig, devices} from "@playwright/test";
 
 const configDir = path.dirname(fileURLToPath(import.meta.url));
 
-const backendPort = Number(process.env.E2E_BACKEND_PORT || 9000);
+const backendPort = Number(process.env.E2E_BACKEND_PORT || 20080);
 // 8002 is the frontend's dev port.
 const frontendPort = Number(process.env.E2E_FRONTEND_PORT || 8002);
 const baseURL = `http://127.0.0.1:${frontendPort}`;

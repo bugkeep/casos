@@ -15,9 +15,9 @@ import (
 )
 
 func TestKineEndpointConfigListensOnTheGivenPort(t *testing.T) {
-	kineConfig := kineEndpointConfig("sqlite://casos.db", kineDefaultPort+2)
+	kineConfig := kineEndpointConfig("sqlite://casos.db", 12345)
 
-	want := "tcp://127.0.0.1:2381"
+	want := "tcp://127.0.0.1:12345"
 	if kineConfig.Listener != want {
 		t.Errorf("Listener = %q, want %q", kineConfig.Listener, want)
 	}

@@ -19,7 +19,7 @@ const (
 	// schedulerDefaultPort is the secure port kube-scheduler serves on. Like
 	// the controller-manager port it is loopback-only and dialled by nobody,
 	// so it can move when the number is already taken.
-	schedulerDefaultPort = 10259
+	schedulerDefaultPort = 20259
 )
 
 // StartScheduler launches kube-scheduler in-process. Must be called after the

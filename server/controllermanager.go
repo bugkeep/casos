@@ -14,7 +14,7 @@ import (
 // controllerManagerDefaultPort is the secure port kube-controller-manager
 // serves on. It is bound to loopback and nothing dials it, so CasOS moves it
 // out of the way when another program already holds the number.
-const controllerManagerDefaultPort = 10257
+const controllerManagerDefaultPort = 20257
 
 // StartControllerManager launches kube-controller-manager in-process. Must be
 // called after the apiserver is ready.

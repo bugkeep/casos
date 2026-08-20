@@ -190,13 +190,13 @@ fi
 
 info "CasOS ${CASOS_VERSION} installed at $INSTALL_DIR/casos"
 if [[ ":$PATH:" == *":$INSTALL_DIR:"* ]]; then
-	info "Run 'casos' and open http://localhost:9000"
+	info "Run 'casos' and open http://localhost:20080"
 elif [[ -n "$SHELL_RC" ]]; then
 	SOURCE_COMMAND="$(printf 'source %q' "$SHELL_RC")"
 	info "Open a new shell or run: $SOURCE_COMMAND"
-	info "Then run 'casos' and open http://localhost:9000"
+	info "Then run 'casos' and open http://localhost:20080"
 	info "You can also run '$INSTALL_DIR/casos' directly."
 else
 	info "Add $INSTALL_DIR to PATH for your shell, or run '$INSTALL_DIR/casos' directly."
-	info "Then open http://localhost:9000"
+	info "Then open http://localhost:20080"
 fi

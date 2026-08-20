@@ -6,7 +6,7 @@ import tailwindcss from "@tailwindcss/vite";
 // Where the dev server forwards backend traffic. It is configurable so the
 // end-to-end suite can point a dev server at the throwaway backend it starts,
 // rather than at whatever is already on the default port.
-const backendTarget = process.env.BACKEND_URL || "http://127.0.0.1:9000";
+const backendTarget = process.env.BACKEND_URL || "http://127.0.0.1:20080";
 
 // The dev server stands in for the Go backend: every path the backend owns is
 // proxied to it, so the frontend runs against real APIs without CORS or a

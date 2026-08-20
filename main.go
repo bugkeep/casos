@@ -150,13 +150,18 @@ func main() {
 	beego.BConfig.WebConfig.Session.SessionProviderConfig = "./tmp"
 	beego.BConfig.WebConfig.Session.SessionGCMaxLifetime = 3600 * 24 * 365
 
-	port := conf.GetConfigIntDefault("httpport", 9000)
+	port := conf.GetConfigIntDefault("httpport", defaultHTTPPort)
 	logs.Info("casos listening on :%d", port)
 	if util.StartedByDoubleClick() {
 		go openWhenReady(port)
 	}
 	beego.Run(fmt.Sprintf(":%v", port))
 }
+
+// defaultHTTPPort is where the web UI and the REST API listen when nothing
+// sets httpport. It sits in the 20000 block CasOS reserves for its fixed
+// listeners, for the reasons set out in server.defaultApiserverPort.
+const defaultHTTPPort = 20080
 
 // How long openWhenReady waits before telling the user CasOS did not come up.
 // The web server binds within milliseconds of this timer starting; the

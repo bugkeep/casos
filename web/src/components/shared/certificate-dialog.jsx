@@ -46,7 +46,7 @@ export function CertificateDialog({ingress, open, onClose, onUpdated}) {
   const [tab, setTab] = useState("le");
   const [submitting, setSubmitting] = useState(false);
   const [certStatus, setCertStatus] = useState(null);
-  const [leForm, setLeForm] = useState({domain: "", casosServiceName: "", casosServicePort: 9000});
+  const [leForm, setLeForm] = useState({domain: "", casosServiceName: "", casosServicePort: 20080});
   const [uploadForm, setUploadForm] = useState({certPEM: "", keyPEM: ""});
   const [errors, setErrors] = useState({});
   const pollTimer = useRef(null);
@@ -70,7 +70,7 @@ export function CertificateDialog({ingress, open, onClose, onUpdated}) {
     setTab("le");
     setErrors({});
     setUploadForm({certPEM: "", keyPEM: ""});
-    setLeForm({domain, casosServiceName: "", casosServicePort: 9000});
+    setLeForm({domain, casosServiceName: "", casosServicePort: 20080});
 
     let cancelled = false;
 
@@ -109,7 +109,7 @@ export function CertificateDialog({ingress, open, onClose, onUpdated}) {
       ingressName: ingress.name,
       domain: leForm.domain,
       casosServiceName: leForm.casosServiceName || undefined,
-      casosServicePort: leForm.casosServicePort || 9000,
+      casosServicePort: leForm.casosServicePort || 20080,
     })
       .then((res) => {
         if (res.status === "ok") {
@@ -245,7 +245,7 @@ export function CertificateDialog({ingress, open, onClose, onUpdated}) {
               />
             </Field>
 
-            <Field label="casos Service Port" hint="Port of the casos Service (default 9000).">
+            <Field label="casos Service Port" hint="Port of the casos Service (default 20080).">
               <NumberInput
                 value={leForm.casosServicePort}
                 onChange={(next) => setLeForm((prev) => ({...prev, casosServicePort: next}))}

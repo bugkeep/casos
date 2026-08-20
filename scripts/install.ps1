@@ -166,4 +166,4 @@ if ($PathEntries -notcontains $InstallDir) {
 $env:PATH = "$env:PATH;$InstallDir"
 
 Write-Host "CasOS $Version installed at $InstalledExe"
-Write-Host "Run 'casos' and open http://localhost:9000"
+Write-Host "Run 'casos' and open http://localhost:20080"

@@ -48,7 +48,7 @@ or add to `web/.yarnrc`:
 registry "https://registry.yarnpkg.com"
 ```
 
-The dev server proxies API requests to the backend at `http://localhost:9000` (configured under `server.proxy` in `web/vite.config.js`, and overridable with `BACKEND_URL`).
+The dev server proxies API requests to the backend at `http://localhost:20080` (configured under `server.proxy` in `web/vite.config.js`, and overridable with `BACKEND_URL`).
 
 ## Backend
 

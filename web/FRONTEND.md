@@ -31,7 +31,7 @@ cd web && yarn install && yarn start
 ```
 
 Vite serves on **8002** and proxies `/api`, `/k8s` and `/.well-known` to the Go
-backend on `:9000`, websockets included (the pod terminal needs that). Because
+backend on `:20080`, websockets included (the pod terminal needs that). Because
 the proxy handles it, `Setting.ServerUrl` stays empty and every request is
 relative — the same code path used in production, where the backend serves the
 built bundle itself.

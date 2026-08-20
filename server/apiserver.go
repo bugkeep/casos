@@ -28,7 +28,7 @@ const (
 	// kine reports back, so the port is free to move when something else on
 	// the machine already holds the default.
 	kineBindAddress = "127.0.0.1"
-	kineDefaultPort = 2379
+	kineDefaultPort = 20379
 
 	serviceClusterIPRange      = "10.43.0.0/16"
 	kubernetesServiceIP        = "10.43.0.1"

@@ -95,7 +95,7 @@ executable path. On Windows, the current PowerShell session is updated
 immediately. Releases are x86_64 only: an Apple Silicon Mac and a Windows on
 ARM machine both get that build and run it under emulation, while an arm64
 Linux host has to build from source. Open
-`http://localhost:9000` after starting CasOS. Rerun the command to upgrade. Set
+`http://localhost:20080` after starting CasOS. Rerun the command to upgrade. Set
 `CASOS_VERSION` to a release tag such as `v1.32.0` to install that version.
 Both installers read the same settings:
 
@@ -190,7 +190,7 @@ Edit `conf/app.conf` with your values:
 
 ```ini
 appname       = casos
-httpport      = 9000
+httpport      = 20080
 runmode       = dev
 
 ; Database
@@ -212,7 +212,7 @@ casdoorApplication  =
 socks5Proxy =
 
 ; Kubernetes control plane
-apiserverPort = 6443
+apiserverPort = 20443
 apiserverBind = 127.0.0.1
 dataDir       = ./data
 ```
@@ -302,7 +302,7 @@ cd web
 # Install dependencies (first time only)
 yarn install
 
-# Start dev server — port 8002, proxies API to localhost:9000
+# Start dev server — port 8002, proxies API to localhost:20080
 yarn start
 ```
 

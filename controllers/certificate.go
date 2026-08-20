@@ -79,7 +79,7 @@ func (c *ApiController) RequestLECert() {
 		req.CasosServiceName = conf.GetConfigStringDefault("casosServiceName", "casos")
 	}
 	if req.CasosServicePort == 0 {
-		req.CasosServicePort = int32(conf.GetConfigIntDefault("casosServicePort", 9000))
+		req.CasosServicePort = int32(conf.GetConfigIntDefault("casosServicePort", 20080))
 	}
 
 	key := req.Namespace + "/" + req.IngressName

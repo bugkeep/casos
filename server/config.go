@@ -33,11 +33,31 @@ type Config struct {
 	ServiceLBEnabled          bool               // run the built-in bare-metal LoadBalancer controller
 }
 
+// CasOS keeps every port it binds on a fixed number in one 20000 block, rather
+// than on the conventional port for each component.
+//
+// The conventional numbers are where the collisions are: 6443 is taken by every
+// other Kubernetes distribution a user might have tried first, and 9000 by half
+// the developer tooling in existence. None of these ports is one a human types
+// — they travel in a kubeconfig or a bookmark — so nothing is lost by moving
+// them somewhere quieter.
+//
+// The block stays below 32768, where Linux starts handing out ephemeral ports,
+// because a listener inside the ephemeral range collides at random rather than
+// predictably. The last three digits of each port echo the conventional one it
+// replaces. A conflict is still possible — Windows with Hyper-V installed
+// draws ephemeral ports from the whole range above 1024 — which is why the
+// ports nothing outside the process dials also move aside on their own.
+const (
+	defaultApiserverPort = 20443
+	defaultWebhookPort   = 20943
+)
+
 // ConfigFromAppConf reads server config from the beego app.conf.
 func ConfigFromAppConf() (Config, error) {
 	dataDir := conf.GetDataDir()
 	bind := conf.GetConfigStringDefault("apiserverBind", outboundIP())
-	port := conf.GetConfigIntDefault("apiserverPort", 6443)
+	port := conf.GetConfigIntDefault("apiserverPort", defaultApiserverPort)
 	driverName := conf.GetDatabaseDriverName()
 	dataSourceName := conf.GetDatabaseDataSourceName()
 	dbName := conf.GetConfigStringDefault("dbName", "casos")
@@ -57,7 +77,7 @@ func ConfigFromAppConf() (Config, error) {
 		advertise = bind
 	}
 
-	webhookPort := conf.GetConfigIntDefault("webhookPort", 9443)
+	webhookPort := conf.GetConfigIntDefault("webhookPort", defaultWebhookPort)
 
 	sandboxImage := conf.GetConfigStringDefault("sandboxImage", "registry.k8s.io/pause:3.10.1")
 

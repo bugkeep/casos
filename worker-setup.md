@@ -108,7 +108,7 @@ echo "Windows host IP: $WINDOWS_IP"
 Verify casos is reachable:
 
 ```bash
-curl -s "http://$WINDOWS_IP:9000/api/get-nodes"
+curl -s "http://$WINDOWS_IP:20080/api/get-nodes"
 ```
 
 ## 5. Fetch worker kubeconfig from casos
@@ -120,7 +120,7 @@ WINDOWS_IP=$(ip route | grep default | awk '{print $3}')
 
 NODE_NAME=$(hostname)
 
-curl -s "http://$WINDOWS_IP:9000/api/get-worker-kubeconfig?nodeName=$NODE_NAME" | \
+curl -s "http://$WINDOWS_IP:20080/api/get-worker-kubeconfig?nodeName=$NODE_NAME" | \
   python3 -c "
 import sys, json
 d = json.load(sys.stdin)
@@ -131,11 +131,11 @@ print('ok')
 sudo mv /tmp/worker.kubeconfig /etc/kubernetes/worker.kubeconfig
 ```
 
-The generated kubeconfig points to `https://127.0.0.1:6443`. Replace it with the Windows host IP so kubelet can reach the apiserver from inside WSL2:
+The generated kubeconfig points to `https://127.0.0.1:20443`. Replace it with the Windows host IP so kubelet can reach the apiserver from inside WSL2:
 
 ```bash
 WINDOWS_IP=$(ip route | grep default | awk '{print $3}')
-sudo sed -i "s|https://127.0.0.1:6443|https://$WINDOWS_IP:6443|g" /etc/kubernetes/worker.kubeconfig
+sudo sed -i "s|https://127.0.0.1:20443|https://$WINDOWS_IP:20443|g" /etc/kubernetes/worker.kubeconfig
 grep server /etc/kubernetes/worker.kubeconfig
 ```
 
@@ -288,7 +288,7 @@ Query casos for registered nodes:
 
 ```bash
 WINDOWS_IP=$(ip route | grep default | awk '{print $3}')
-curl -s "http://$WINDOWS_IP:9000/api/get-nodes" | python3 -m json.tool
+curl -s "http://$WINDOWS_IP:20080/api/get-nodes" | python3 -m json.tool
 ```
 
 The node should appear with `"status": "Ready"` after the Flannel pod on that node becomes Ready.
