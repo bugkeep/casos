@@ -296,6 +296,8 @@
     "status warning": "Warning"
   },
   "node": {
+    "Rejected by the CasOS admission webhook": "Rejected by the CasOS admission webhook",
+    "{{times}} times, last at {{time}}": "{{times}} times, last at {{time}}",
     "Last heartbeat": "Last heartbeat",
     "No nodes registered. Add a machine and deploy it as a node from Machines.": "No nodes registered. Add a machine, then deploy it as a node from Machines.",
     "Some nodes are not Ready": "Some nodes are not Ready",

@@ -296,6 +296,8 @@
     "status warning": "警告"
   },
   "node": {
+    "Rejected by the CasOS admission webhook": "被 CasOS 准入 webhook 拒绝",
+    "{{times}} times, last at {{time}}": "共 {{times}} 次，最近一次 {{time}}",
     "Last heartbeat": "最近心跳",
     "No nodes registered. Add a machine and deploy it as a node from Machines.": "还没有注册节点，请先在机器页添加机器并部署为节点。",
     "Some nodes are not Ready": "部分节点未就绪",

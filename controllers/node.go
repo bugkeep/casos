@@ -12,6 +12,9 @@ import (
 type nodeSummary struct {
 	Name            string            `json:"name"`
 	Status          string            `json:"status"`
+	StatusReason    string            `json:"statusReason"`
+	StatusMessage   string            `json:"statusMessage"`
+	LastHeartbeat   string            `json:"lastHeartbeat"`
 	Roles           []string          `json:"roles"`
 	Labels          map[string]string `json:"labels"`
 	Unschedulable   bool              `json:"unschedulable"`
@@ -22,18 +25,62 @@ type nodeSummary struct {
 	ExternalIP      string            `json:"externalIP"`
 	CreatedAt       string            `json:"createdAt"`
 	ResourceVersion string            `json:"resourceVersion"`
+
+	// AdmissionDenials is filled in only when CasOS's own webhook is rejecting
+	// this node's kubelet. The Node object cannot carry that: a kubelet being
+	// denied and a kubelet that died look identical from the API's side.
+	AdmissionDenials []server.AdmissionDenial `json:"admissionDenials,omitempty"`
+}
+
+// maxNodeDenials bounds what one node contributes to the page. A kubelet locked
+// out by policy is denied on a handful of resources; past that the list stops
+// being a diagnosis and starts being a log.
+const maxNodeDenials = 6
+
+// attachAdmissionDenials joins the webhook's denial log onto a node that is not
+// Ready, so the page names the actual rejected requests instead of sending the
+// operator to the kubelet log on the node.
+func attachAdmissionDenials(s *nodeSummary) {
+	if s.Status == "Ready" {
+		return
+	}
+	found := server.AdmissionDenialsFor("system:node:" + s.Name)
+	if len(found) > maxNodeDenials {
+		found = found[:maxNodeDenials]
+	}
+	if len(found) > 0 {
+		s.AdmissionDenials = found
+	}
 }
 
 func toNodeSummary(n corev1.Node) nodeSummary {
+	// kubectl prints NotReady for both False and Unknown, so the badge matches
+	// what an operator sees from the CLI. The reason and message are what tells
+	// them apart, so carry those through instead of dropping them here.
 	status := "Unknown"
+	statusReason, statusMessage, lastHeartbeat := "", "", ""
+	readyFound := false
 	for _, c := range n.Status.Conditions {
-		if c.Type == corev1.NodeReady {
-			if c.Status == corev1.ConditionTrue {
-				status = "Ready"
-			} else {
-				status = "NotReady"
-			}
+		if c.Type != corev1.NodeReady {
+			continue
 		}
+		readyFound = true
+		if c.Status == corev1.ConditionTrue {
+			status = "Ready"
+		} else {
+			status = "NotReady"
+			// On a healthy node kubelet leaves "KubeletReady" here, which is
+			// noise; only an unhealthy node has a reason worth showing.
+			statusReason = c.Reason
+			statusMessage = c.Message
+		}
+		if !c.LastHeartbeatTime.IsZero() {
+			lastHeartbeat = c.LastHeartbeatTime.UTC().Format("2006-01-02 15:04:05")
+		}
+	}
+	if !readyFound {
+		statusReason = "NoReadyCondition"
+		statusMessage = "The node object exists but kubelet has never reported a Ready condition for it."
 	}
 	roles := []string{}
 	for k := range n.Labels {
@@ -59,6 +106,9 @@ func toNodeSummary(n corev1.Node) nodeSummary {
 	return nodeSummary{
 		Name:            n.Name,
 		Status:          status,
+		StatusReason:    statusReason,
+		StatusMessage:   statusMessage,
+		LastHeartbeat:   lastHeartbeat,
 		Roles:           roles,
 		Labels:          n.Labels,
 		Unschedulable:   n.Spec.Unschedulable,
@@ -87,7 +137,9 @@ func (c *ApiController) GetNodes() {
 	}
 	result := make([]nodeSummary, 0, len(nodes))
 	for _, n := range nodes {
-		result = append(result, toNodeSummary(n))
+		summary := toNodeSummary(n)
+		attachAdmissionDenials(&summary)
+		result = append(result, summary)
 	}
 	c.ResponseOk(result)
 }
@@ -106,7 +158,9 @@ func (c *ApiController) GetNode() {
 		c.ResponseError(err.Error())
 		return
 	}
-	c.ResponseOk(toNodeSummary(*node))
+	summary := toNodeSummary(*node)
+	attachAdmissionDenials(&summary)
+	c.ResponseOk(summary)
 }
 
 type nodeRequest struct {

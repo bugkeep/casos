@@ -5,7 +5,22 @@ import (
 	"strconv"
 
 	"github.com/casosorg/casos/object"
+	"github.com/casosorg/casos/server"
 )
+
+// reloadEnforcer rebuilds the enforcer for scope and, for the admission scope,
+// drops the recorded denials. They describe requests rejected by rules that the
+// operator has just changed, so keeping them would leave the nodes page
+// explaining a failure that no longer exists.
+func reloadEnforcer(scope string) error {
+	if err := object.ReloadEnforcer(scope); err != nil {
+		return err
+	}
+	if scope == object.ScopeAdmission {
+		server.ClearAdmissionDenials()
+	}
+	return nil
+}
 
 // GetCasbinRules godoc
 // @router /api/get-casbin-rules [get]
@@ -43,7 +58,7 @@ func (c *ApiController) AddCasbinRule() {
 		c.ResponseError(err.Error())
 		return
 	}
-	if err := object.ReloadEnforcer(rule.Scope); err != nil {
+	if err := reloadEnforcer(rule.Scope); err != nil {
 		c.ResponseError("rule saved but enforcer reload failed: " + err.Error())
 		return
 	}
@@ -71,7 +86,7 @@ func (c *ApiController) DeleteCasbinRule() {
 		return
 	}
 	if body.Scope != "" {
-		if err := object.ReloadEnforcer(body.Scope); err != nil {
+		if err := reloadEnforcer(body.Scope); err != nil {
 			c.ResponseError("rule deleted but enforcer reload failed: " + err.Error())
 			return
 		}
@@ -89,8 +104,9 @@ func (c *ApiController) ReloadCasbinEnforcer() {
 	var err error
 	if body.Scope == "" {
 		err = object.ReloadAllEnforcers()
+		server.ClearAdmissionDenials()
 	} else {
-		err = object.ReloadEnforcer(body.Scope)
+		err = reloadEnforcer(body.Scope)
 	}
 	if err != nil {
 		c.ResponseError(err.Error())

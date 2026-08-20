@@ -19,6 +19,44 @@ import {CodeText} from "@/components/shared/misc";
 
 const STATUS_VARIANTS = {Ready: "success", NotReady: "danger", Unknown: "muted"};
 
+// Setting.getFormattedDate drops the time of day, and a denial seconds old has
+// to be distinguishable from one an hour old.
+function formatTimestamp(value) {
+  if (!value) {
+    return "";
+  }
+  const date = new Date(value);
+  return isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+}
+
+// The node condition never names the request that was rejected, so every denial
+// the webhook recorded for this node's kubelet is listed. One line per resource
+// matters: a locked-out kubelet is denied on its lease, its node status and its
+// events at once, and each of those is a different missing policy rule.
+function AdmissionDenialDetail({denials}) {
+  return (
+    <div className="rounded-md bg-warning/10 px-2 py-1.5 text-xs" data-testid="node-admission-denial">
+      <p className="font-medium">
+        {i18next.t("node:Rejected by the CasOS admission webhook")} — {denials[0].subject}
+      </p>
+      <ul className="mt-1 space-y-0.5 font-mono">
+        {denials.map((denial) => (
+          <li key={`${denial.namespace}/${denial.resource}/${denial.operation}`}>
+            {denial.operation} {denial.resource}
+            {denial.namespace && denial.namespace !== "*" ? ` (${denial.namespace})` : ""}
+            {" — "}
+            {i18next.t("node:{{times}} times, last at {{time}}", {
+              times: denial.count,
+              time: formatTimestamp(denial.lastSeen),
+            })}
+          </li>
+        ))}
+      </ul>
+      <p className="mt-1 opacity-80">{denials[0].message}</p>
+    </div>
+  );
+}
+
 function NodeListPage() {
   const {data: nodes, loading, error, refresh} = useResource(() => NodeBackend.getNodes(), [], {initialData: []});
 
@@ -94,6 +132,8 @@ function NodeListPage() {
       .finally(() => setKubeconfigLoading(false));
   }
 
+  const notReadyNodes = (nodes ?? []).filter((node) => node.status !== "Ready");
+
   const columns = [
     {
       key: "name",
@@ -111,9 +151,33 @@ function NodeListPage() {
       key: "status",
       title: i18next.t("general:Status"),
       dataIndex: "status",
-      width: 120,
+      width: 180,
       sortable: true,
-      render: (value) => <Badge variant={STATUS_VARIANTS[value] ?? "muted"}>{value}</Badge>,
+      // A bare "NotReady" badge tells an operator nothing they can act on. The
+      // Ready condition's reason goes under the badge and its full message into
+      // the tooltip, so the cluster's own explanation is one hover away.
+      render: (value, record) => {
+        const badge = <Badge variant={STATUS_VARIANTS[value] ?? "muted"}>{value}</Badge>;
+        if (!record.statusReason && !record.statusMessage) {
+          return badge;
+        }
+        const detail = [
+          record.statusMessage,
+          record.lastHeartbeat ? `${i18next.t("node:Last heartbeat")}: ${record.lastHeartbeat} UTC` : null,
+        ]
+          .filter(Boolean)
+          .join(" · ");
+        return (
+          <SimpleTooltip title={detail}>
+            <span className="flex flex-col items-start gap-1" data-testid={`node-status-${record.name}`}>
+              {badge}
+              <span className="max-w-[10rem] truncate text-xs text-muted-foreground">
+                {record.statusReason || record.statusMessage}
+              </span>
+            </span>
+          </SimpleTooltip>
+        );
+      },
     },
     {
       key: "roles",
@@ -179,6 +243,34 @@ function NodeListPage() {
   return (
     <PageContainer>
       {error ? <MessageAlert title="Failed to fetch nodes" description={error} /> : null}
+
+      {notReadyNodes.length > 0 ? (
+        <MessageAlert
+          variant="warning"
+          data-testid="nodes-not-ready-alert"
+          title={i18next.t("node:Some nodes are not Ready")}
+          description={
+            <>
+              {notReadyNodes.map((node) => (
+                <React.Fragment key={node.name}>
+                  <p>
+                    <span className="font-medium">{node.name}</span>
+                    {node.statusReason ? ` — ${node.statusReason}` : ""}
+                    {node.statusMessage ? `: ${node.statusMessage}` : ""}
+                    {node.lastHeartbeat ? ` (${i18next.t("node:Last heartbeat")}: ${node.lastHeartbeat} UTC)` : ""}
+                  </p>
+                  {node.admissionDenials?.length ? <AdmissionDenialDetail denials={node.admissionDenials} /> : null}
+                </React.Fragment>
+              ))}
+              {notReadyNodes.every((node) => !node.admissionDenials?.length) ? (
+                <p className="opacity-80">
+                  {i18next.t("node:The node condition is only the symptom — the kubelet log on the node carries the underlying error.")}
+                </p>
+              ) : null}
+            </>
+          }
+        />
+      ) : null}
 
       <DataTable
         testId="nodes-table"

@@ -63,6 +63,11 @@ func authorizationHandler(w http.ResponseWriter, r *http.Request) {
 	writeAuthzResponse(w, review)
 }
 
+// isSystemUser is deliberately broader than the admission side's
+// isReservedIdentity: it also treats system:authenticated as a system group, so
+// every authenticated caller passes through. Authorization runs after the Node
+// and RBAC authorizers, and returning "no opinion" here only ever widens access
+// — never the source of a denial.
 func isSystemUser(user string, groups []string) bool {
 	if strings.HasPrefix(user, "system:") {
 		return true
