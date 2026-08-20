@@ -1,7 +1,7 @@
 import React, {useEffect, useRef, useState} from "react";
 import {useHistory, useLocation} from "react-router-dom";
 import i18next from "i18next";
-import {HardDrive, Link2, Pencil, Plus, RefreshCcwDot, RefreshCw, Share2, Trash2} from "lucide-react";
+import {HardDrive, Link2, Pencil, Plus, RefreshCcwDot, RefreshCw, RotateCw, Share2, Trash2} from "lucide-react";
 import * as DeploymentBackend from "@/backend/DeploymentBackend";
 import * as NamespaceBackend from "@/backend/NamespaceBackend";
 import * as ConfigMapBackend from "@/backend/ConfigMapBackend";
@@ -257,7 +257,10 @@ function DeploymentListPage() {
     const payload = {
       namespace: form.namespace,
       name: form.name,
-      replicas: Number(form.replicas) ?? 1,
+      // An emptied box means "not set", not zero: sent as null the API keeps the
+      // current count on edit and falls back to 1 on create, while an explicit 0
+      // is sent as 0 and scales the workload down.
+      replicas: form.replicas === "" || form.replicas === null ? null : Number(form.replicas),
       image: form.image,
       containerName: form.containerName ?? "",
       envVars: rowsToEnvVars(form.envVars),
@@ -277,6 +280,18 @@ function DeploymentListPage() {
 
     if (ok) {
       setDialogOpen(false);
+      refresh();
+    }
+  }
+
+  // A rolling restart is the usual way to get a workload to pick up a changed
+  // ConfigMap, Secret or mutable image tag. The ConfigMap and Secret pages offer
+  // it right after an edit; this is the same action for a single deployment.
+  async function handleRestart(record) {
+    const ok = await runAction(DeploymentBackend.restartDeployment(record.namespace, record.name), {
+      successMessage: "Rolling restart started",
+    });
+    if (ok) {
       refresh();
     }
   }
@@ -402,7 +417,7 @@ function DeploymentListPage() {
     {
       key: "actions",
       title: i18next.t("general:Action"),
-      width: 240,
+      width: 280,
       align: "right",
       render: (_, record) => (
         <div className="flex justify-end gap-1">
@@ -411,6 +426,17 @@ function DeploymentListPage() {
               <Pencil className="size-4" />
             </Button>
           </SimpleTooltip>
+          <ConfirmDialog
+            title={`Restart Deployment "${record.name}"?`}
+            description={`Rolls the pods in ${record.namespace} one at a time, so the deployment keeps serving through the restart.`}
+            confirmText="Restart"
+            variant="default"
+            onConfirm={() => handleRestart(record)}
+          >
+            <Button variant="outline" size="icon-sm" aria-label="Restart">
+              <RotateCw className="size-4" />
+            </Button>
+          </ConfirmDialog>
           <SimpleTooltip title="Update image">
             <Button variant="outline" size="icon-sm" onClick={() => setUpdateImageDeploy(record)} aria-label="Update image">
               <RefreshCcwDot className="size-4" />

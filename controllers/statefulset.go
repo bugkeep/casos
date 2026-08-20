@@ -56,7 +56,7 @@ type statefulSetRequest struct {
 	Name            string          `json:"name"`
 	ServiceName     string          `json:"serviceName"`
 	ContainerName   string          `json:"containerName"`
-	Replicas        int32           `json:"replicas"`
+	Replicas        *int32          `json:"replicas"`
 	Image           string          `json:"image"`
 	CpuRequest      string          `json:"cpuRequest"`
 	MemoryRequest   string          `json:"memoryRequest"`
@@ -65,10 +65,7 @@ type statefulSetRequest struct {
 }
 
 func buildStatefulSet(req statefulSetRequest) *appsv1.StatefulSet {
-	replicas := req.Replicas
-	if replicas <= 0 {
-		replicas = 1
-	}
+	replicas := replicasOrDefault(req.Replicas)
 	containerName := req.ContainerName
 	if containerName == "" {
 		containerName = req.Name
@@ -205,11 +202,12 @@ func (c *ApiController) UpdateStatefulSet() {
 		return
 	}
 
-	replicas := req.Replicas
-	if replicas <= 0 {
-		replicas = 1
+	// A payload that leaves out the replica count keeps the one the workload is
+	// already running at; only an explicit value scales it, zero included.
+	if req.Replicas != nil {
+		replicas := replicasOrDefault(req.Replicas)
+		existing.Spec.Replicas = &replicas
 	}
-	existing.Spec.Replicas = &replicas
 	if len(existing.Spec.Template.Spec.Containers) > 0 {
 		existing.Spec.Template.Spec.Containers[0].Image = req.Image
 		existing.Spec.Template.Spec.Containers[0].Env = buildEnvVars(req.EnvVars)

@@ -114,7 +114,7 @@ func (c *ApiController) GetDeployment() {
 type deploymentRequest struct {
 	Namespace       string          `json:"namespace"`
 	Name            string          `json:"name"`
-	Replicas        int32           `json:"replicas"`
+	Replicas        *int32          `json:"replicas"`
 	ContainerName   string          `json:"containerName"`
 	Image           string          `json:"image"`
 	CpuRequest      string          `json:"cpuRequest"`
@@ -125,10 +125,7 @@ type deploymentRequest struct {
 }
 
 func buildDeployment(req deploymentRequest) *appsv1.Deployment {
-	replicas := req.Replicas
-	if replicas <= 0 {
-		replicas = 1
-	}
+	replicas := replicasOrDefault(req.Replicas)
 	containerName := req.ContainerName
 	if containerName == "" {
 		containerName = req.Name
@@ -230,11 +227,12 @@ func (c *ApiController) UpdateDeployment() {
 		return
 	}
 
-	replicas := req.Replicas
-	if replicas <= 0 {
-		replicas = 1
+	// A payload that leaves out the replica count keeps the one the workload is
+	// already running at; only an explicit value scales it, zero included.
+	if req.Replicas != nil {
+		replicas := replicasOrDefault(req.Replicas)
+		existing.Spec.Replicas = &replicas
 	}
-	existing.Spec.Replicas = &replicas
 	if len(existing.Spec.Template.Spec.Containers) > 0 {
 		existing.Spec.Template.Spec.Containers[0].Image = req.Image
 		existing.Spec.Template.Spec.Containers[0].Env = buildEnvVars(req.EnvVars)

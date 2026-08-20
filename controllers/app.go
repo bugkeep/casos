@@ -20,7 +20,7 @@ type deployAppRequest struct {
 	Namespace   string           `json:"namespace"`
 	Name        string           `json:"name"`
 	Image       string           `json:"image"`
-	Replicas    int32            `json:"replicas"`
+	Replicas    *int32           `json:"replicas"`
 	Ports       []appPortRequest `json:"ports"`
 	EnvVars     []envVarRequest  `json:"envVars"`
 	ServiceType string           `json:"serviceType"`
@@ -46,9 +46,6 @@ func (c *ApiController) DeployApp() {
 	}
 	if req.Namespace == "" {
 		req.Namespace = "default"
-	}
-	if req.Replicas <= 0 {
-		req.Replicas = 1
 	}
 
 	deplReq := deploymentRequest{

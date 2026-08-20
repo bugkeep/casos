@@ -129,7 +129,10 @@ function StatefulSetListPage() {
       name: form.name,
       serviceName: form.serviceName ?? "",
       image: form.image,
-      replicas: Number(form.replicas) || 0,
+      // An emptied box means "not set", not zero: sent as null the API keeps the
+      // current count on edit and falls back to 1 on create, while an explicit 0
+      // is sent as 0 and scales the workload down.
+      replicas: form.replicas === "" || form.replicas === null ? null : Number(form.replicas),
       containerName: form.containerName ?? "",
       envVars: rowsToEnvVars(form.envVars),
     };
