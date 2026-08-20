@@ -5,6 +5,7 @@ import * as StatefulSetBackend from "@/backend/StatefulSetBackend";
 import * as NamespaceBackend from "@/backend/NamespaceBackend";
 import * as ConfigMapBackend from "@/backend/ConfigMapBackend";
 import * as SecretBackend from "@/backend/SecretBackend";
+import * as MetricsBackend from "@/backend/MetricsBackend";
 import * as Setting from "@/Setting";
 import {runAction, useResource} from "@/hooks/use-resource";
 import {Button} from "@/components/ui/button";
@@ -20,8 +21,25 @@ import {NumberInput} from "@/components/shared/number-input";
 import {ReplicasControl} from "@/components/shared/replicas-control";
 import {LabelWithTip} from "@/components/shared/misc";
 import {EnvVarEditor, envVarsToRows, rowsToEnvVars} from "@/components/shared/env-var-editor";
+import {
+  ResourceEditor,
+  emptyResources,
+  resourcesFromRecord,
+  resourcesToPayload,
+  validateResources,
+  workloadUsage,
+} from "@/components/shared/resource-editor";
 
-const emptyForm = {namespace: "", name: "", serviceName: "", image: "", replicas: 1, containerName: "", envVars: []};
+const emptyForm = {
+  namespace: "",
+  name: "",
+  serviceName: "",
+  image: "",
+  replicas: 1,
+  containerName: "",
+  ...emptyResources,
+  envVars: [],
+};
 
 function StatefulSetListPage() {
   const {
@@ -32,6 +50,7 @@ function StatefulSetListPage() {
     refresh,
   } = useResource(() => StatefulSetBackend.getStatefulSets(), [], {initialData: []});
   const {data: namespaces} = useResource(() => NamespaceBackend.getNamespaces(), [], {initialData: [], toastOnError: false});
+  const {data: metrics} = useResource(() => MetricsBackend.getMetrics(), [], {initialData: null, toastOnError: false});
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [mode, setMode] = useState("add");
@@ -86,6 +105,7 @@ function StatefulSetListPage() {
       image: record.image,
       replicas: record.replicas ?? 0,
       containerName: "",
+      ...resourcesFromRecord(record),
       envVars: envVarsToRows(record.envVars),
     });
     setErrors({});
@@ -119,6 +139,7 @@ function StatefulSetListPage() {
     if (!form.image) {
       nextErrors.image = "Image is required";
     }
+    Object.assign(nextErrors, validateResources(form));
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) {
       return;
@@ -134,6 +155,7 @@ function StatefulSetListPage() {
       // is sent as 0 and scales the workload down.
       replicas: form.replicas === "" || form.replicas === null ? null : Number(form.replicas),
       containerName: form.containerName ?? "",
+      ...resourcesToPayload(form),
       envVars: rowsToEnvVars(form.envVars),
     };
 
@@ -297,6 +319,17 @@ function StatefulSetListPage() {
             />
           </Field>
         ) : null}
+
+        <Separator />
+
+        <Field label="CPU & Memory">
+          <ResourceEditor
+            value={form}
+            onChange={(next) => setForm((prev) => ({...prev, ...next}))}
+            errors={errors}
+            usage={editing ? workloadUsage(metrics?.pods, editing.namespace, editing.name) : null}
+          />
+        </Field>
 
         <Separator />
 

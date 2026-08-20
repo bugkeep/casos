@@ -2,19 +2,20 @@ package controllers
 
 import (
 	"encoding/json"
+	"fmt"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/casosorg/casos/object"
 )
 
 type daemonSetSummary struct {
-	Namespace              string            `json:"namespace"`
-	Name                   string            `json:"name"`
-	Image                  string            `json:"image"`
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+	Image     string `json:"image"`
+	resourceSummary
 	DesiredNumberScheduled int32             `json:"desiredNumberScheduled"`
 	NumberReady            int32             `json:"numberReady"`
 	Selector               map[string]string `json:"selector"`
@@ -36,6 +37,7 @@ func toDaemonSetSummary(ds appsv1.DaemonSet) daemonSetSummary {
 		Namespace:              ds.Namespace,
 		Name:                   ds.Name,
 		Image:                  image,
+		resourceSummary:        extractResources(ds.Spec.Template.Spec.Containers),
 		DesiredNumberScheduled: ds.Status.DesiredNumberScheduled,
 		NumberReady:            ds.Status.NumberReady,
 		Selector:               selector,
@@ -46,17 +48,16 @@ func toDaemonSetSummary(ds appsv1.DaemonSet) daemonSetSummary {
 }
 
 type daemonSetRequest struct {
-	Namespace       string          `json:"namespace"`
-	Name            string          `json:"name"`
-	ContainerName   string          `json:"containerName"`
-	Image           string          `json:"image"`
-	CpuRequest      string          `json:"cpuRequest"`
-	MemoryRequest   string          `json:"memoryRequest"`
+	Namespace     string `json:"namespace"`
+	Name          string `json:"name"`
+	ContainerName string `json:"containerName"`
+	Image         string `json:"image"`
+	resourceRequest
 	EnvVars         []envVarRequest `json:"envVars"`
 	ResourceVersion string          `json:"resourceVersion"`
 }
 
-func buildDaemonSet(req daemonSetRequest) *appsv1.DaemonSet {
+func buildDaemonSet(req daemonSetRequest) (*appsv1.DaemonSet, error) {
 	containerName := req.ContainerName
 	if containerName == "" {
 		containerName = req.Name
@@ -68,15 +69,8 @@ func buildDaemonSet(req daemonSetRequest) *appsv1.DaemonSet {
 		Env:   buildEnvVars(req.EnvVars),
 	}
 
-	if req.CpuRequest != "" || req.MemoryRequest != "" {
-		reqs := corev1.ResourceList{}
-		if req.CpuRequest != "" {
-			reqs[corev1.ResourceCPU] = resource.MustParse(req.CpuRequest)
-		}
-		if req.MemoryRequest != "" {
-			reqs[corev1.ResourceMemory] = resource.MustParse(req.MemoryRequest)
-		}
-		container.Resources = corev1.ResourceRequirements{Requests: reqs}
+	if err := applyResources(&container, req.resourceRequest); err != nil {
+		return nil, err
 	}
 
 	return &appsv1.DaemonSet{
@@ -97,7 +91,7 @@ func buildDaemonSet(req daemonSetRequest) *appsv1.DaemonSet {
 				},
 			},
 		},
-	}
+	}, nil
 }
 
 // GetDaemonSets
@@ -155,7 +149,12 @@ func (c *ApiController) AddDaemonSet() {
 	if req.Namespace == "" {
 		req.Namespace = "default"
 	}
-	created, err := object.AddDaemonSet(cfg, buildDaemonSet(req))
+	daemonSet, err := buildDaemonSet(req)
+	if err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
+	created, err := object.AddDaemonSet(cfg, daemonSet)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
@@ -186,19 +185,16 @@ func (c *ApiController) UpdateDaemonSet() {
 		return
 	}
 
-	if len(existing.Spec.Template.Spec.Containers) > 0 {
-		existing.Spec.Template.Spec.Containers[0].Image = req.Image
-		existing.Spec.Template.Spec.Containers[0].Env = buildEnvVars(req.EnvVars)
-	} else {
-		containerName := req.ContainerName
-		if containerName == "" {
-			containerName = req.Name
-		}
-		existing.Spec.Template.Spec.Containers = []corev1.Container{{
-			Name:  containerName,
-			Image: req.Image,
-			Env:   buildEnvVars(req.EnvVars),
-		}}
+	if len(existing.Spec.Template.Spec.Containers) == 0 {
+		c.ResponseError(fmt.Sprintf("daemon set %s/%s has no containers", req.Namespace, req.Name))
+		return
+	}
+	container := &existing.Spec.Template.Spec.Containers[0]
+	container.Image = req.Image
+	container.Env = buildEnvVars(req.EnvVars)
+	if err := applyResources(container, req.resourceRequest); err != nil {
+		c.ResponseError(err.Error())
+		return
 	}
 	existing.ResourceVersion = req.ResourceVersion
 

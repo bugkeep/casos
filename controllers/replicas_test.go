@@ -27,12 +27,18 @@ func TestReplicasOrDefault(t *testing.T) {
 }
 
 func TestBuildWorkloadsKeepZeroReplicas(t *testing.T) {
-	depl := buildDeployment(deploymentRequest{Namespace: "default", Name: "coredns", Image: "coredns:1.11", Replicas: int32Ptr(0)})
+	depl, err := buildDeployment(deploymentRequest{Namespace: "default", Name: "coredns", Image: "coredns:1.11", Replicas: int32Ptr(0)})
+	if err != nil {
+		t.Fatalf("buildDeployment() error = %v", err)
+	}
 	if depl.Spec.Replicas == nil || *depl.Spec.Replicas != 0 {
 		t.Errorf("deployment replicas = %v, want 0", depl.Spec.Replicas)
 	}
 
-	sts := buildStatefulSet(statefulSetRequest{Namespace: "default", Name: "etcd", Image: "etcd:3.5", Replicas: int32Ptr(0)})
+	sts, err := buildStatefulSet(statefulSetRequest{Namespace: "default", Name: "etcd", Image: "etcd:3.5", Replicas: int32Ptr(0)})
+	if err != nil {
+		t.Fatalf("buildStatefulSet() error = %v", err)
+	}
 	if sts.Spec.Replicas == nil || *sts.Spec.Replicas != 0 {
 		t.Errorf("statefulset replicas = %v, want 0", sts.Spec.Replicas)
 	}

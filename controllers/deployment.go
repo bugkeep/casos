@@ -2,30 +2,31 @@ package controllers
 
 import (
 	"encoding/json"
+	"fmt"
 	"strconv"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/casosorg/casos/object"
 )
 
 type deploymentSummary struct {
-	Namespace         string            `json:"namespace"`
-	Name              string            `json:"name"`
-	Replicas          int32             `json:"replicas"`
-	ReadyReplicas     int32             `json:"readyReplicas"`
-	AvailableReplicas int32             `json:"availableReplicas"`
-	Image             string            `json:"image"`
-	Ports             []portSummary     `json:"ports"`
-	Selector          map[string]string `json:"selector"`
-	EnvVars           []envVarSummary   `json:"envVars"`
-	Volumes           []volumeSummary   `json:"volumes"`
-	CreatedAt         string            `json:"createdAt"`
-	ResourceVersion   string            `json:"resourceVersion"`
+	Namespace         string `json:"namespace"`
+	Name              string `json:"name"`
+	Replicas          int32  `json:"replicas"`
+	ReadyReplicas     int32  `json:"readyReplicas"`
+	AvailableReplicas int32  `json:"availableReplicas"`
+	Image             string `json:"image"`
+	resourceSummary
+	Ports           []portSummary     `json:"ports"`
+	Selector        map[string]string `json:"selector"`
+	EnvVars         []envVarSummary   `json:"envVars"`
+	Volumes         []volumeSummary   `json:"volumes"`
+	CreatedAt       string            `json:"createdAt"`
+	ResourceVersion string            `json:"resourceVersion"`
 }
 
 func toDeploymentSummary(d appsv1.Deployment) deploymentSummary {
@@ -63,6 +64,7 @@ func toDeploymentSummary(d appsv1.Deployment) deploymentSummary {
 		ReadyReplicas:     d.Status.ReadyReplicas,
 		AvailableReplicas: d.Status.AvailableReplicas,
 		Image:             image,
+		resourceSummary:   extractResources(d.Spec.Template.Spec.Containers),
 		Ports:             ports,
 		Selector:          selector,
 		EnvVars:           extractEnvVars(d.Spec.Template.Spec.Containers),
@@ -112,19 +114,18 @@ func (c *ApiController) GetDeployment() {
 }
 
 type deploymentRequest struct {
-	Namespace       string          `json:"namespace"`
-	Name            string          `json:"name"`
-	Replicas        *int32          `json:"replicas"`
-	ContainerName   string          `json:"containerName"`
-	Image           string          `json:"image"`
-	CpuRequest      string          `json:"cpuRequest"`
-	MemoryRequest   string          `json:"memoryRequest"`
+	Namespace     string `json:"namespace"`
+	Name          string `json:"name"`
+	Replicas      *int32 `json:"replicas"`
+	ContainerName string `json:"containerName"`
+	Image         string `json:"image"`
+	resourceRequest
 	EnvVars         []envVarRequest `json:"envVars"`
 	Volumes         []volumeRequest `json:"volumes"`
 	ResourceVersion string          `json:"resourceVersion"`
 }
 
-func buildDeployment(req deploymentRequest) *appsv1.Deployment {
+func buildDeployment(req deploymentRequest) (*appsv1.Deployment, error) {
 	replicas := replicasOrDefault(req.Replicas)
 	containerName := req.ContainerName
 	if containerName == "" {
@@ -137,15 +138,8 @@ func buildDeployment(req deploymentRequest) *appsv1.Deployment {
 		Env:   buildEnvVars(req.EnvVars),
 	}
 
-	if req.CpuRequest != "" || req.MemoryRequest != "" {
-		reqs := corev1.ResourceList{}
-		if req.CpuRequest != "" {
-			reqs[corev1.ResourceCPU] = resource.MustParse(req.CpuRequest)
-		}
-		if req.MemoryRequest != "" {
-			reqs[corev1.ResourceMemory] = resource.MustParse(req.MemoryRequest)
-		}
-		container.Resources = corev1.ResourceRequirements{Requests: reqs}
+	if err := applyResources(&container, req.resourceRequest); err != nil {
+		return nil, err
 	}
 
 	podVolumes, mounts := buildPodVolumes(req.Name, req.Volumes)
@@ -172,7 +166,7 @@ func buildDeployment(req deploymentRequest) *appsv1.Deployment {
 				},
 			},
 		},
-	}
+	}, nil
 }
 
 // AddDeployment
@@ -191,11 +185,16 @@ func (c *ApiController) AddDeployment() {
 	if req.Namespace == "" {
 		req.Namespace = "default"
 	}
+	deployment, err := buildDeployment(req)
+	if err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
 	if err := ensureDeploymentPVCs(cfg, req.Namespace, req.Name, req.Volumes); err != nil {
 		c.ResponseError(err.Error())
 		return
 	}
-	created, err := object.AddDeployment(cfg, buildDeployment(req))
+	created, err := object.AddDeployment(cfg, deployment)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
@@ -233,19 +232,19 @@ func (c *ApiController) UpdateDeployment() {
 		replicas := replicasOrDefault(req.Replicas)
 		existing.Spec.Replicas = &replicas
 	}
-	if len(existing.Spec.Template.Spec.Containers) > 0 {
-		existing.Spec.Template.Spec.Containers[0].Image = req.Image
-		existing.Spec.Template.Spec.Containers[0].Env = buildEnvVars(req.EnvVars)
-	} else {
-		containerName := req.ContainerName
-		if containerName == "" {
-			containerName = req.Name
-		}
-		existing.Spec.Template.Spec.Containers = []corev1.Container{{
-			Name:  containerName,
-			Image: req.Image,
-			Env:   buildEnvVars(req.EnvVars),
-		}}
+	// Kubernetes rejects a pod template with no containers, so an empty list
+	// means the cluster handed back something malformed. Say so rather than
+	// papering over it with a freshly built container.
+	if len(existing.Spec.Template.Spec.Containers) == 0 {
+		c.ResponseError(fmt.Sprintf("deployment %s/%s has no containers", req.Namespace, req.Name))
+		return
+	}
+	container := &existing.Spec.Template.Spec.Containers[0]
+	container.Image = req.Image
+	container.Env = buildEnvVars(req.EnvVars)
+	if err := applyResources(container, req.resourceRequest); err != nil {
+		c.ResponseError(err.Error())
+		return
 	}
 	existing.ResourceVersion = req.ResourceVersion
 

@@ -2,22 +2,23 @@ package controllers
 
 import (
 	"encoding/json"
+	"fmt"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/casosorg/casos/object"
 )
 
 type statefulSetSummary struct {
-	Namespace       string            `json:"namespace"`
-	Name            string            `json:"name"`
-	ServiceName     string            `json:"serviceName"`
-	Replicas        int32             `json:"replicas"`
-	ReadyReplicas   int32             `json:"readyReplicas"`
-	Image           string            `json:"image"`
+	Namespace     string `json:"namespace"`
+	Name          string `json:"name"`
+	ServiceName   string `json:"serviceName"`
+	Replicas      int32  `json:"replicas"`
+	ReadyReplicas int32  `json:"readyReplicas"`
+	Image         string `json:"image"`
+	resourceSummary
 	Selector        map[string]string `json:"selector"`
 	EnvVars         []envVarSummary   `json:"envVars"`
 	CreatedAt       string            `json:"createdAt"`
@@ -44,6 +45,7 @@ func toStatefulSetSummary(sts appsv1.StatefulSet) statefulSetSummary {
 		Replicas:        replicas,
 		ReadyReplicas:   sts.Status.ReadyReplicas,
 		Image:           image,
+		resourceSummary: extractResources(sts.Spec.Template.Spec.Containers),
 		Selector:        selector,
 		EnvVars:         extractEnvVars(sts.Spec.Template.Spec.Containers),
 		CreatedAt:       sts.CreationTimestamp.UTC().Format("2006-01-02 15:04:05"),
@@ -52,19 +54,18 @@ func toStatefulSetSummary(sts appsv1.StatefulSet) statefulSetSummary {
 }
 
 type statefulSetRequest struct {
-	Namespace       string          `json:"namespace"`
-	Name            string          `json:"name"`
-	ServiceName     string          `json:"serviceName"`
-	ContainerName   string          `json:"containerName"`
-	Replicas        *int32          `json:"replicas"`
-	Image           string          `json:"image"`
-	CpuRequest      string          `json:"cpuRequest"`
-	MemoryRequest   string          `json:"memoryRequest"`
+	Namespace     string `json:"namespace"`
+	Name          string `json:"name"`
+	ServiceName   string `json:"serviceName"`
+	ContainerName string `json:"containerName"`
+	Replicas      *int32 `json:"replicas"`
+	Image         string `json:"image"`
+	resourceRequest
 	EnvVars         []envVarRequest `json:"envVars"`
 	ResourceVersion string          `json:"resourceVersion"`
 }
 
-func buildStatefulSet(req statefulSetRequest) *appsv1.StatefulSet {
+func buildStatefulSet(req statefulSetRequest) (*appsv1.StatefulSet, error) {
 	replicas := replicasOrDefault(req.Replicas)
 	containerName := req.ContainerName
 	if containerName == "" {
@@ -81,15 +82,8 @@ func buildStatefulSet(req statefulSetRequest) *appsv1.StatefulSet {
 		Env:   buildEnvVars(req.EnvVars),
 	}
 
-	if req.CpuRequest != "" || req.MemoryRequest != "" {
-		reqs := corev1.ResourceList{}
-		if req.CpuRequest != "" {
-			reqs[corev1.ResourceCPU] = resource.MustParse(req.CpuRequest)
-		}
-		if req.MemoryRequest != "" {
-			reqs[corev1.ResourceMemory] = resource.MustParse(req.MemoryRequest)
-		}
-		container.Resources = corev1.ResourceRequirements{Requests: reqs}
+	if err := applyResources(&container, req.resourceRequest); err != nil {
+		return nil, err
 	}
 
 	return &appsv1.StatefulSet{
@@ -113,7 +107,7 @@ func buildStatefulSet(req statefulSetRequest) *appsv1.StatefulSet {
 				},
 			},
 		},
-	}
+	}, nil
 }
 
 // GetStatefulSets
@@ -171,7 +165,12 @@ func (c *ApiController) AddStatefulSet() {
 	if req.Namespace == "" {
 		req.Namespace = "default"
 	}
-	created, err := object.AddStatefulSet(cfg, buildStatefulSet(req))
+	statefulSet, err := buildStatefulSet(req)
+	if err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
+	created, err := object.AddStatefulSet(cfg, statefulSet)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
@@ -208,19 +207,16 @@ func (c *ApiController) UpdateStatefulSet() {
 		replicas := replicasOrDefault(req.Replicas)
 		existing.Spec.Replicas = &replicas
 	}
-	if len(existing.Spec.Template.Spec.Containers) > 0 {
-		existing.Spec.Template.Spec.Containers[0].Image = req.Image
-		existing.Spec.Template.Spec.Containers[0].Env = buildEnvVars(req.EnvVars)
-	} else {
-		containerName := req.ContainerName
-		if containerName == "" {
-			containerName = req.Name
-		}
-		existing.Spec.Template.Spec.Containers = []corev1.Container{{
-			Name:  containerName,
-			Image: req.Image,
-			Env:   buildEnvVars(req.EnvVars),
-		}}
+	if len(existing.Spec.Template.Spec.Containers) == 0 {
+		c.ResponseError(fmt.Sprintf("stateful set %s/%s has no containers", req.Namespace, req.Name))
+		return
+	}
+	container := &existing.Spec.Template.Spec.Containers[0]
+	container.Image = req.Image
+	container.Env = buildEnvVars(req.EnvVars)
+	if err := applyResources(container, req.resourceRequest); err != nil {
+		c.ResponseError(err.Error())
+		return
 	}
 	existing.ResourceVersion = req.ResourceVersion
 

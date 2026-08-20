@@ -28,12 +28,29 @@ import {ReplicasControl} from "@/components/shared/replicas-control";
 import {EnvVarEditor, envVarsToRows, rowsToEnvVars} from "@/components/shared/env-var-editor";
 import {DeploymentStorageEditor} from "@/components/shared/deployment-storage-editor";
 import {
+  ResourceEditor,
+  emptyResources,
+  resourcesFromRecord,
+  resourcesToPayload,
+  validateResources,
+  workloadUsage,
+} from "@/components/shared/resource-editor";
+import {
   DeploymentDomainDialog,
   DeploymentExposeDialog,
   DeploymentUpdateImageDialog,
 } from "@/components/shared/deployment-dialogs";
 
-const emptyForm = {namespace: "", name: "", image: "", replicas: 1, containerName: "", envVars: [], volumes: []};
+const emptyForm = {
+  namespace: "",
+  name: "",
+  image: "",
+  replicas: 1,
+  containerName: "",
+  ...emptyResources,
+  envVars: [],
+  volumes: [],
+};
 
 function splitImage(image) {
   if (!image) {
@@ -181,6 +198,7 @@ function DeploymentListPage() {
       image: record.image,
       replicas: record.replicas,
       containerName: "",
+      ...resourcesFromRecord(record),
       envVars: envVarsToRows(record.envVars),
       volumes: record.volumes ?? [],
     });
@@ -249,6 +267,7 @@ function DeploymentListPage() {
     if (!form.image) {
       nextErrors.image = "Image is required";
     }
+    Object.assign(nextErrors, validateResources(form));
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) {
       return;
@@ -263,6 +282,7 @@ function DeploymentListPage() {
       replicas: form.replicas === "" || form.replicas === null ? null : Number(form.replicas),
       image: form.image,
       containerName: form.containerName ?? "",
+      ...resourcesToPayload(form),
       envVars: rowsToEnvVars(form.envVars),
       // Volumes are only sent on create; the API rejects mount changes on an
       // existing deployment, and the editor is read-only there for that reason.
@@ -371,19 +391,20 @@ function DeploymentListPage() {
         if (!metricsAvailable) {
           return <span className="text-muted-foreground text-xs">—</span>;
         }
-        // Pods of a deployment are named "<deployment>-<replicaset>-<suffix>";
-        // summing them is what turns per-pod metrics into a workload figure.
-        const totals = podMetrics
-          .filter((pod) => pod.namespace === record.namespace && pod.name.startsWith(`${record.name}-`))
-          .reduce((accumulator, pod) => ({cpuM: accumulator.cpuM + pod.cpuM, memMi: accumulator.memMi + pod.memMi}), {
-            cpuM: 0,
-            memMi: 0,
-          });
+        const totals = workloadUsage(podMetrics, record.namespace, record.name);
         const memory = totals.memMi >= 1024 ? `${(totals.memMi / 1024).toFixed(1)}G` : `${totals.memMi}M`;
-        return (
-          <span className="text-muted-foreground font-mono text-xs">
-            {(totals.cpuM / 1000).toFixed(3)}c {memory}
+        const budget = (
+          <span className="grid gap-0.5">
+            <span>{`Requests: ${record.cpuRequest || "—"} CPU, ${record.memoryRequest || "—"} memory`}</span>
+            <span>{`Limits: ${record.cpuLimit || "—"} CPU, ${record.memoryLimit || "—"} memory`}</span>
           </span>
+        );
+        return (
+          <SimpleTooltip title={budget}>
+            <span className="text-muted-foreground font-mono text-xs">
+              {(totals.cpuM / 1000).toFixed(3)}c {memory}
+            </span>
+          </SimpleTooltip>
         );
       },
     },
@@ -581,6 +602,17 @@ function DeploymentListPage() {
             />
           </Field>
         ) : null}
+
+        <Separator />
+
+        <Field label="CPU & Memory">
+          <ResourceEditor
+            value={form}
+            onChange={(next) => setForm((prev) => ({...prev, ...next}))}
+            errors={errors}
+            usage={editing && metricsAvailable ? workloadUsage(podMetrics, editing.namespace, editing.name) : null}
+          />
+        </Field>
 
         <Separator />
 

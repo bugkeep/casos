@@ -5,6 +5,7 @@ import * as DaemonSetBackend from "@/backend/DaemonSetBackend";
 import * as NamespaceBackend from "@/backend/NamespaceBackend";
 import * as ConfigMapBackend from "@/backend/ConfigMapBackend";
 import * as SecretBackend from "@/backend/SecretBackend";
+import * as MetricsBackend from "@/backend/MetricsBackend";
 import {runAction, useResource} from "@/hooks/use-resource";
 import {Button} from "@/components/ui/button";
 import {Input} from "@/components/ui/input";
@@ -17,12 +18,21 @@ import {PageContainer} from "@/components/shared/page-header";
 import {SearchSelect} from "@/components/shared/simple-select";
 import {ReadyBadge} from "@/components/shared/status-badge";
 import {EnvVarEditor, envVarsToRows, rowsToEnvVars} from "@/components/shared/env-var-editor";
+import {
+  ResourceEditor,
+  emptyResources,
+  resourcesFromRecord,
+  resourcesToPayload,
+  validateResources,
+  workloadUsage,
+} from "@/components/shared/resource-editor";
 
-const emptyForm = {namespace: "", name: "", image: "", containerName: "", envVars: []};
+const emptyForm = {namespace: "", name: "", image: "", containerName: "", ...emptyResources, envVars: []};
 
 function DaemonSetListPage() {
   const {data: daemonSets, loading, error, refresh} = useResource(() => DaemonSetBackend.getDaemonSets(), [], {initialData: []});
   const {data: namespaces} = useResource(() => NamespaceBackend.getNamespaces(), [], {initialData: [], toastOnError: false});
+  const {data: metrics} = useResource(() => MetricsBackend.getMetrics(), [], {initialData: null, toastOnError: false});
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [mode, setMode] = useState("add");
@@ -78,6 +88,7 @@ function DaemonSetListPage() {
       name: record.name,
       image: record.image,
       containerName: "",
+      ...resourcesFromRecord(record),
       envVars: envVarsToRows(record.envVars),
     });
     setErrors({});
@@ -95,6 +106,7 @@ function DaemonSetListPage() {
     if (!form.image) {
       nextErrors.image = "Image is required";
     }
+    Object.assign(nextErrors, validateResources(form));
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) {
       return;
@@ -105,6 +117,7 @@ function DaemonSetListPage() {
       name: form.name,
       image: form.image,
       containerName: form.containerName ?? "",
+      ...resourcesToPayload(form),
       envVars: rowsToEnvVars(form.envVars),
     };
 
@@ -244,6 +257,17 @@ function DaemonSetListPage() {
             />
           </Field>
         ) : null}
+
+        <Separator />
+
+        <Field label="CPU & Memory">
+          <ResourceEditor
+            value={form}
+            onChange={(next) => setForm((prev) => ({...prev, ...next}))}
+            errors={errors}
+            usage={editing ? workloadUsage(metrics?.pods, editing.namespace, editing.name) : null}
+          />
+        </Field>
 
         <Separator />
 
