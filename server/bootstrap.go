@@ -41,7 +41,14 @@ func Bootstrap(ctx context.Context, cfg *rest.Config, srvCfg Config) error {
 		errs = append(errs, cleanupServiceLB(ctx, client))
 	}
 	if srvCfg.StorageProvisionerEnabled {
-		errs = append(errs, ensureDefaultStorageProvisioner(ctx, client, srvCfg))
+		// Logged on its own, because this is the one add-on whose absence is
+		// invisible until much later: the cluster comes up healthy and only
+		// the first workload wanting a PersistentVolumeClaim gets stuck
+		// Pending, with nothing pointing back at startup.
+		if err := ensureDefaultStorageProvisioner(ctx, client, srvCfg); err != nil {
+			logrus.Errorf("default storage provisioner: %v — the cluster has no default StorageClass, so any workload with a PersistentVolumeClaim will stay Pending", err)
+			errs = append(errs, err)
+		}
 	}
 	return errors.Join(errs...)
 }

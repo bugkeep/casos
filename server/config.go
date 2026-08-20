@@ -23,6 +23,7 @@ type Config struct {
 	CoreDNSImage              string             // CoreDNS image used by the built-in DNS bootstrap
 	LocalPathProvisionerImage string             // local-path-provisioner controller image
 	LocalPathHelperImage      string             // helper pod image used by local-path-provisioner
+	LocalPathRootDir          string             // node-side directory the local-path provisioner carves PVs out of
 	FlannelImage              string             // Flannel daemon image used by the built-in network bootstrap
 	FlannelCNIPluginImage     string             // Flannel CNI plugin image installed on worker hosts
 	IngressControllerImage    string             // Traefik image used by the built-in Ingress controller
@@ -52,6 +53,18 @@ const (
 	defaultApiserverPort = 20443
 	defaultWebhookPort   = 20943
 )
+
+// defaultLocalPathRootDir is where the built-in provisioner carves out its
+// PersistentVolumes.
+//
+// It is a path on the *node*, not on the machine running CasOS, and the two are
+// not interchangeable: on Windows the node is a WSL distribution, and any node
+// added from the Machines page is a separate host reached over SSH. Deriving
+// this from dataDir only ever worked for a Linux host that happened to also be
+// its own only node — everywhere else it produced a path no node could create.
+// So it is a fixed Linux path, alongside the other node-side paths the deploy
+// package writes (/var/lib/kubelet, /etc/casos-resolv.conf).
+const defaultLocalPathRootDir = "/var/lib/casos/local-path-provisioner"
 
 // ConfigFromAppConf reads server config from the beego app.conf.
 func ConfigFromAppConf() (Config, error) {
@@ -85,6 +98,7 @@ func ConfigFromAppConf() (Config, error) {
 	coreDNSImage := conf.GetConfigStringDefault("coreDNSImage", "docker.io/coredns/coredns:1.12.4")
 	localPathProvisionerImage := conf.GetConfigStringDefault("localPathProvisionerImage", "docker.io/rancher/local-path-provisioner:v0.0.32")
 	localPathHelperImage := conf.GetConfigStringDefault("localPathHelperImage", "docker.io/library/busybox:1.37.0")
+	localPathRootDir := conf.GetConfigStringDefault("localPathRootDir", defaultLocalPathRootDir)
 	flannelImage := conf.GetConfigStringDefault("flannelImage", defaultFlannelImage)
 	flannelCNIPluginImage := conf.GetConfigStringDefault("flannelCNIPluginImage", defaultFlannelCNIPluginImage)
 	registryMirrorMode, err := resolveRegistryMirrorMode()
@@ -106,6 +120,7 @@ func ConfigFromAppConf() (Config, error) {
 		CoreDNSImage:              coreDNSImage,
 		LocalPathProvisionerImage: localPathProvisionerImage,
 		LocalPathHelperImage:      localPathHelperImage,
+		LocalPathRootDir:          localPathRootDir,
 		FlannelImage:              flannelImage,
 		FlannelCNIPluginImage:     flannelCNIPluginImage,
 		IngressControllerImage:    ingressControllerImage,

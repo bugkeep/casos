@@ -37,10 +37,10 @@ type localPathNodePathMap struct {
 }
 
 func ensureDefaultStorageProvisioner(ctx context.Context, client kubernetes.Interface, cfg Config) error {
-	if !path.IsAbs(cfg.DataDir) {
-		return fmt.Errorf("dataDir must be absolute to enable local-path storage: %s", cfg.DataDir)
+	rootDir, err := localPathRootDir(cfg)
+	if err != nil {
+		return err
 	}
-	rootDir := path.Join(cfg.DataDir, "local-path-provisioner")
 	configData, err := localPathConfigData(rootDir, cfg.LocalPathHelperImage)
 	if err != nil {
 		return err
@@ -64,6 +64,29 @@ func ensureDefaultStorageProvisioner(ctx context.Context, client kubernetes.Inte
 		return err
 	}
 	return ensureLocalPathStorageClass(ctx, client)
+}
+
+// localPathRootDir validates the node-side directory the provisioner owns.
+//
+// The path is interpreted on a Linux node, so it is checked with "path" rather
+// than "path/filepath" — on a Windows host the two disagree, and using the
+// host's rules here is what previously rejected every configuration CasOS
+// produced on Windows.
+func localPathRootDir(cfg Config) (string, error) {
+	rootDir := strings.TrimRight(strings.TrimSpace(cfg.LocalPathRootDir), "/")
+	if rootDir == "" {
+		return "", fmt.Errorf("localPathRootDir must not be empty")
+	}
+	if !path.IsAbs(rootDir) {
+		return "", fmt.Errorf("localPathRootDir must be an absolute path on the node, such as %s: %s", defaultLocalPathRootDir, cfg.LocalPathRootDir)
+	}
+	// The teardown script deletes anything under this root, and its safety
+	// check is a prefix match. A root at or one level below / would make that
+	// check meaningless, so it is not a configuration worth honouring.
+	if strings.Count(rootDir, "/") < 2 {
+		return "", fmt.Errorf("localPathRootDir is too close to the filesystem root to delete volumes safely: %s", cfg.LocalPathRootDir)
+	}
+	return rootDir, nil
 }
 
 func ensureNamespace(ctx context.Context, client kubernetes.Interface, name string) error {
