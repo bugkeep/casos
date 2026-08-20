@@ -48,6 +48,18 @@ server = "https://registry.k8s.io"
 `
 }
 
+// GenerateGhcrHostsToml returns the content for
+// /etc/containerd/certs.d/ghcr.io/hosts.toml. The canonical server remains the
+// fallback when the mirror is unavailable.
+func GenerateGhcrHostsToml() string {
+	return generatedRegistryHostsMarker + `
+server = "https://ghcr.io"
+
+[host."https://ghcr.nju.edu.cn"]
+  capabilities = ["pull", "resolve"]
+`
+}
+
 func legacyDockerHubHostsToml() string {
 	return `server = "https://registry-1.docker.io"
 

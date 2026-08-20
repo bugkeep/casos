@@ -14,7 +14,13 @@ const nodeDeployResolverPath = "/etc/casos-resolv.conf"
 const (
 	dockerHubHostsPath   = "/etc/containerd/certs.d/docker.io/hosts.toml"
 	k8sRegistryHostsPath = "/etc/containerd/certs.d/registry.k8s.io/hosts.toml"
+	ghcrHostsPath        = "/etc/containerd/certs.d/ghcr.io/hosts.toml"
 )
+
+// A mirror target CasOS only ever wrote with the marker has no unmarked
+// predecessor to recognise, and this stands in for the digest of one. sha256sum
+// never prints it, so nothing on disk is mistaken for a file CasOS wrote.
+const noRegistryMirrorLegacyDigest = "none"
 
 type registryMirrorFileRunner interface {
 	RunRootContext(ctx context.Context, command string) (string, error)
@@ -24,6 +30,7 @@ type registryMirrorFileRunner interface {
 type registryMirrorSelection struct {
 	dockerHub bool
 	k8s       bool
+	ghcr      bool
 }
 
 func (d *NodeDeployer) installNodeBinaries(ctx context.Context, runner NodeDeployRunner, arch, k8sVersion string) error {
@@ -116,10 +123,10 @@ fi`, version, version, arch, version, arch, cniVersion, arch, cniVersion)
 func (d *NodeDeployer) resolveRegistryMirrors(ctx context.Context, runner registryMirrorFileRunner) (registryMirrorSelection, error) {
 	switch d.config.RegistryMirrorMode {
 	case server.RegistryMirrorModeAlways:
-		d.logStep(nodeDeployPhaseConfiguring, "Registry mirror mode always: enabling Docker Hub and registry.k8s.io mirrors")
-		return registryMirrorSelection{dockerHub: true, k8s: true}, nil
+		d.logStep(nodeDeployPhaseConfiguring, "Registry mirror mode always: enabling Docker Hub, registry.k8s.io, and ghcr.io mirrors")
+		return registryMirrorSelection{dockerHub: true, k8s: true, ghcr: true}, nil
 	case server.RegistryMirrorModeNever:
-		d.logStep(nodeDeployPhaseConfiguring, "Registry mirror mode never: disabling Docker Hub and registry.k8s.io mirrors")
+		d.logStep(nodeDeployPhaseConfiguring, "Registry mirror mode never: disabling Docker Hub, registry.k8s.io, and ghcr.io mirrors")
 		return registryMirrorSelection{}, nil
 	case server.RegistryMirrorModeAuto:
 		d.logStep(nodeDeployPhaseConfiguring, "Registry mirror mode auto: probing canonical registries from the target worker")
@@ -139,7 +146,25 @@ func (d *NodeDeployer) resolveRegistryMirrors(ctx context.Context, runner regist
 	}
 	d.logRegistryProbe("registry.k8s.io", k8sReachable, k8sDetail)
 
-	return registryMirrorSelection{dockerHub: !dockerHubReachable, k8s: !k8sReachable}, nil
+	// ghcr.io is decided by the other two rather than probed on its own. Its API
+	// endpoint answers in under a second from a network that cannot reach either
+	// of them, so a reachability probe says "no mirror needed" and the operator
+	// then waits out an App Store chart pulling its layers at a few tens of KB/s
+	// from the blob CDN behind it — long enough to spend the whole install
+	// timeout on one image. A worker that needs the other two mirrors is on such
+	// a network, and the mirror keeps ghcr.io as its fallback either way.
+	ghcr := !dockerHubReachable || !k8sReachable
+	d.logGhcrMirrorDecision(ghcr)
+
+	return registryMirrorSelection{dockerHub: !dockerHubReachable, k8s: !k8sReachable, ghcr: ghcr}, nil
+}
+
+func (d *NodeDeployer) logGhcrMirrorDecision(enabled bool) {
+	if enabled {
+		d.logStep(nodeDeployPhaseConfiguring, "ghcr.io mirror enabled: this worker already needs a mirror for a canonical registry")
+		return
+	}
+	d.logStep(nodeDeployPhaseConfiguring, "ghcr.io mirror disabled: the canonical registries are reachable from this worker")
 }
 
 // k8sRegistryProbeURL returns the manifest URL for sandboxImage. A manifest
@@ -206,6 +231,7 @@ func (d *NodeDeployer) reconcileRegistryMirrorFiles(ctx context.Context, runner 
 	}{
 		{name: "Docker Hub", path: dockerHubHostsPath, content: GenerateDockerHubHostsToml(), legacyContent: legacyDockerHubHostsToml(), enabled: selection.dockerHub},
 		{name: "registry.k8s.io", path: k8sRegistryHostsPath, content: GenerateK8sRegistryHostsToml(), legacyContent: legacyK8sRegistryHostsToml(), enabled: selection.k8s},
+		{name: "ghcr.io", path: ghcrHostsPath, content: GenerateGhcrHostsToml(), enabled: selection.ghcr},
 	}
 	for _, target := range targets {
 		action, err := reconcileRegistryMirrorFile(ctx, runner, target.path, target.content, target.legacyContent, target.enabled)
@@ -231,7 +257,10 @@ func (d *NodeDeployer) reconcileRegistryMirrorFiles(ctx context.Context, runner 
 }
 
 func reconcileRegistryMirrorFile(ctx context.Context, runner registryMirrorFileRunner, path, content, legacyContent string, enabled bool) (string, error) {
-	legacyDigest := fmt.Sprintf("%x", sha256.Sum256([]byte(legacyContent)))
+	legacyDigest := noRegistryMirrorLegacyDigest
+	if legacyContent != "" {
+		legacyDigest = fmt.Sprintf("%x", sha256.Sum256([]byte(legacyContent)))
+	}
 	if enabled {
 		state, err := registryMirrorFileState(ctx, runner, path, legacyDigest)
 		if err != nil {

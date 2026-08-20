@@ -77,6 +77,16 @@ server = "https://registry.k8s.io"
 [host."https://registry.aliyuncs.com/google_containers"]
   capabilities = ["pull", "resolve"]
 EOF
+
+# ghcr.io (App Store charts). Its API endpoint answers quickly from a network
+# that needs the other two mirrors, while the CDN its layers come from crawls.
+sudo mkdir -p /etc/containerd/certs.d/ghcr.io
+sudo tee /etc/containerd/certs.d/ghcr.io/hosts.toml > /dev/null << 'EOF'
+server = "https://ghcr.io"
+
+[host."https://ghcr.nju.edu.cn"]
+  capabilities = ["pull", "resolve"]
+EOF
 ```
 
 Start and verify:
