@@ -188,6 +188,7 @@
     "Release name": "Release name",
     "Release name pattern": "Lowercase letters, numbers, and hyphens only",
     "Repo URL": "Repo URL",
+    "Repo URL pattern": "Must start with http://, https:// or oci://",
     "Repo name": "Repo name",
     "Retry status check": "Retry status check",
     "Rollback": "Rollback",

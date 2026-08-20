@@ -96,8 +96,10 @@ function AddRepoDialog({open, onClose, onAdded}) {
     }
     if (!form.url) {
       nextErrors.url = t("policy:required");
-    } else if (!/^https?:\/\//.test(form.url)) {
-      nextErrors.url = "Must be a valid URL";
+    } else if (!/^(https?|oci):\/\//.test(form.url)) {
+      // OCI registries (e.g. "oci://registry-1.docker.io/casbin/casdoor-helm-charts")
+      // host charts just like a classic index.yaml repo, so they are valid here too.
+      nextErrors.url = t("helm:Repo URL pattern");
     }
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) {

@@ -90,8 +90,11 @@ async function addCustomHelmRepo(page, {name, url, addedHelmRepos}) {
   await dialog.getByLabel("Repo name").fill(name);
   await dialog.getByLabel("Repo URL").fill(url);
 
-  const addRepo = page.waitForResponse(response =>
-    response.url().includes(API_ADD_HELM_REPO) && response.request().method() === "POST"
+  // Bounded so a dialog that never submits (e.g. client-side URL validation rejecting the
+  // repo) fails here instead of burning the whole test timeout.
+  const addRepo = page.waitForResponse(
+    response => response.url().includes(API_ADD_HELM_REPO) && response.request().method() === "POST",
+    {timeout: 60_000}
   );
   await dialog.getByRole("button", {name: "Add", exact: true}).click();
   await expectOkJson(await addRepo);
