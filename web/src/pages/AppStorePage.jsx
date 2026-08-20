@@ -1,4 +1,4 @@
-import React, {useCallback, useEffect, useState} from "react";
+import React, {useCallback, useEffect, useRef, useState} from "react";
 import {Link} from "react-router-dom";
 import {useTranslation} from "react-i18next";
 import {Plus, RefreshCw, Rocket, Search, Store, Trash2} from "lucide-react";
@@ -156,6 +156,7 @@ export default function AppStorePage() {
   const [customRepos, setCustomRepos] = useState([]);
   const [addRepoOpen, setAddRepoOpen] = useState(false);
   const [installTarget, setInstallTarget] = useState(null);
+  const sentinelRef = useRef(null);
 
   // ArtifactHub is a search API with server-side paging; a plain repo returns its
   // whole index at once and is filtered in the browser.
@@ -213,6 +214,31 @@ export default function AppStorePage() {
       fetchCharts(source, query, page);
     }
   }, [page, fetchCharts, source, query]);
+
+  // Infinite scroll: the sentinel sits below the grid, so the next ArtifactHub
+  // page is requested as soon as it scrolls close to the viewport. Re-running
+  // once "loading" flips back to false re-arms the observer, which also keeps
+  // paging when a short page does not fill the screen.
+  useEffect(() => {
+    if (!isArtifactHub || !hasMore || loading) {
+      return;
+    }
+    const sentinel = sentinelRef.current;
+    if (!sentinel) {
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          observer.disconnect();
+          setPage((previous) => previous + 1);
+        }
+      },
+      {rootMargin: "400px"}
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [isArtifactHub, hasMore, loading, charts.length]);
 
   // ArtifactHub and a plain Helm index describe a chart with different field
   // names; normalising here keeps the card and the install dialog from each
@@ -381,13 +407,7 @@ export default function AppStorePage() {
 
         {loading ? <Loading /> : null}
 
-        {!loading && isArtifactHub && hasMore && visibleCharts.length > 0 ? (
-          <div className="mt-5 text-center">
-            <Button variant="outline" onClick={() => setPage((previous) => previous + 1)}>
-              {t("helm:Load more")}
-            </Button>
-          </div>
-        ) : null}
+        {isArtifactHub && hasMore ? <div ref={sentinelRef} className="h-px" aria-hidden="true" /> : null}
 
         {!loading && visibleCharts.length === 0 && !error ? (
           <p className="text-muted-foreground py-16 text-center text-sm">{t("helm:No charts found")}</p>

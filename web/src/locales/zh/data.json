@@ -178,7 +178,6 @@
     "Kubernetes API unavailable": "Kubernetes API 当前不可用，请检查控制面状态和网络连接。",
     "Kubernetes discovery failed": "Kubernetes API Discovery 失败，无法确认目标资源类型是否可用。",
     "Last deployed": "最近部署",
-    "Load more": "加载更多",
     "Loading values": "加载默认配置中",
     "Logs": "日志",
     "Missing resource": "缺少资源",

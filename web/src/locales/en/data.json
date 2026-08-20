@@ -178,7 +178,6 @@
     "Kubernetes API unavailable": "The Kubernetes API is unavailable. Check the control plane and network connection.",
     "Kubernetes discovery failed": "Kubernetes API discovery failed, so the required resource types could not be verified.",
     "Last deployed": "Last deployed",
-    "Load more": "Load more",
     "Loading values": "Loading default values",
     "Logs": "Logs",
     "Missing resource": "Missing resource",
