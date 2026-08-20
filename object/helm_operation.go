@@ -31,6 +31,11 @@ const (
 
 	HelmOperationPersistenceTimeout = 5 * time.Second
 	helmOperationStaleAfter         = 11 * time.Minute
+
+	// What an interrupted task records as its failure. A Helm operation only
+	// runs inside the CasOS process that created it, so a task still marked
+	// active at startup was cut short rather than left running.
+	HelmOperationInterruptedMessage = "Helm operation was interrupted when CasOS stopped"
 )
 
 func isSupportedHelmOperation(operation string) bool {
@@ -146,6 +151,54 @@ func CreateHelmOperationTask(owner, operation, releaseName, namespace, chartName
 
 func helmOperationActiveKey(namespace, releaseName string) string {
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(namespace+"\x00"+releaseName)))
+}
+
+// FailInterruptedHelmOperationTasks marks every task still recorded as active
+// as failed, and is meant to run once at startup.
+//
+// Nothing else ever closes those rows. A task outlives the browser request that
+// created it but not the process that runs it, so one left pending or running
+// at startup belongs to a process that is gone: its release keeps a phantom
+// "installing" status, the install dialog polls a task that can never finish,
+// and the release name stays blocked until the stale window expires.
+func FailInterruptedHelmOperationTasks() (int64, error) {
+	now := time.Now().UTC()
+	return ormer.Engine.
+		Where("status IN (?, ?)", HelmOperationStatusPending, HelmOperationStatusRunning).
+		Cols("active_key", "status", "phase", "error_msg", "finished_at", "updated_at").
+		Update(&HelmOperationTask{
+			ActiveKey:  nil,
+			Status:     HelmOperationStatusFailed,
+			Phase:      HelmOperationPhaseFailed,
+			ErrorMsg:   HelmOperationInterruptedMessage,
+			FinishedAt: now,
+			UpdatedAt:  now,
+		})
+}
+
+// GetLatestHelmOperationTaskForRelease returns the most recent task recorded
+// for a release, or (nil, nil) when CasOS never ran one for it.
+//
+// Unlike GetHelmOperationTaskForOwner this is not scoped to the owner: it is
+// addressed by a release rather than by a task id, and every administrator who
+// can reach it can already see that release and its Kubernetes objects. Scoping
+// it would only hide the explanation of a stuck release from whoever is looking
+// at it, which is the question this answers.
+func GetLatestHelmOperationTaskForRelease(namespace, releaseName string) (*HelmOperationTask, error) {
+	namespace = strings.TrimSpace(namespace)
+	releaseName = strings.TrimSpace(releaseName)
+	if namespace == "" || releaseName == "" {
+		return nil, fmt.Errorf("namespace and releaseName are required")
+	}
+	task := &HelmOperationTask{}
+	found, err := ormer.Engine.
+		Where("namespace = ? AND release_name = ?", namespace, releaseName).
+		Desc("id").
+		Get(task)
+	if err != nil || !found {
+		return nil, err
+	}
+	return task, nil
 }
 
 func GetHelmOperationTask(id int64) (*HelmOperationTask, error) {

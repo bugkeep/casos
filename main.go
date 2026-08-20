@@ -74,6 +74,14 @@ func main() {
 
 	object.InitAdapter()
 	object.CreateTables()
+	// Before anything can read them: a Helm task still marked active belongs to
+	// a previous run of this process, and left alone it keeps a release stuck
+	// showing an install that nothing is performing any more.
+	if interrupted, err := object.FailInterruptedHelmOperationTasks(); err != nil {
+		logs.Warning("recover interrupted Helm operations: %v", err)
+	} else if interrupted > 0 {
+		logs.Info("marked %d interrupted Helm operation(s) as failed", interrupted)
+	}
 	object.InitSite()
 	object.InitUsers()
 	if err := object.SeedDefaultPolicies(); err != nil {

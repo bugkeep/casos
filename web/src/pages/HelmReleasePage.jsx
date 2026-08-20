@@ -1,6 +1,6 @@
 import React, {useEffect, useState} from "react";
 import {useTranslation} from "react-i18next";
-import {CircleArrowUp, History, RefreshCw, RotateCcw, Trash2} from "lucide-react";
+import {CircleArrowUp, History, RefreshCw, RotateCcw, ScrollText, Trash2} from "lucide-react";
 import * as HelmBackend from "@/backend/HelmBackend";
 import * as Setting from "@/Setting";
 import {Badge} from "@/components/ui/badge";
@@ -12,7 +12,7 @@ import {ConfirmDialog} from "@/components/shared/confirm-dialog";
 import {PageContainer} from "@/components/shared/page-header";
 import {ResourceSheet} from "@/components/shared/resource-sheet";
 import {SimpleSelect} from "@/components/shared/simple-select";
-import {Loading} from "@/components/shared/loading";
+import {AiDots, Loading} from "@/components/shared/loading";
 import {HelmInstallDialog} from "@/components/shared/helm-install-dialog";
 
 const STATUS_VARIANTS = {
@@ -25,6 +25,40 @@ const STATUS_VARIANTS = {
   superseded: "muted",
   uninstalling: "info",
 };
+
+const OPERATION_STATUS_VARIANTS = {
+  succeeded: "success",
+  failed: "danger",
+  running: "info",
+  pending: "warning",
+};
+
+// How often the table re-reads a release that Helm still calls pending. Such a
+// release is mid-operation, and its row only becomes truthful on a later read.
+const RELEASE_POLL_INTERVAL = 5000;
+const OPERATION_POLL_INTERVAL = 3000;
+
+const isPendingRelease = (status) => typeof status === "string" && status.startsWith("pending");
+const isActiveOperation = (status) => status === "running" || status === "pending";
+
+// Go marshals a time.Time that was never set as year one; that is "never", not
+// a date to show.
+function formatTimestamp(value) {
+  if (!value || value.startsWith("0001-")) {
+    return "-";
+  }
+  return value.slice(0, 19).replace("T", " ");
+}
+
+function logLineClass(line) {
+  if (line.startsWith("ERROR")) {
+    return "text-red-400";
+  }
+  if (line.startsWith("WARNING")) {
+    return "text-amber-400";
+  }
+  return "text-neutral-300";
+}
 
 // Helm reports the chart as "name-version" in one string. Splitting on the first
 // segment that starts with a digit is what separates "ingress-nginx" from
@@ -72,25 +106,122 @@ export default function HelmReleasePage() {
 
   const [upgradeTarget, setUpgradeTarget] = useState(null);
 
-  function fetchReleases() {
-    setLoading(true);
-    setError(null);
-    HelmBackend.getHelmReleases(namespace)
+  const [logsRelease, setLogsRelease] = useState(null);
+  const [operation, setOperation] = useState(null);
+  const [operationLogs, setOperationLogs] = useState([]);
+  const [operationLoading, setOperationLoading] = useState(false);
+  const [operationError, setOperationError] = useState(null);
+
+  // A background refresh leaves the table alone: it is the page keeping itself
+  // current, not the operator asking for something, and a spinner every few
+  // seconds would say otherwise.
+  function fetchReleases({background = false} = {}) {
+    if (!background) {
+      setLoading(true);
+      setError(null);
+    }
+    return HelmBackend.getHelmReleases(namespace)
       .then((res) => {
         if (res.status === "ok") {
           setReleases(res.data ?? []);
-        } else {
+        } else if (!background) {
           setError(res.msg);
         }
       })
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
+      .catch((e) => {
+        if (!background) {
+          setError(e.message);
+        }
+      })
+      .finally(() => {
+        if (!background) {
+          setLoading(false);
+        }
+      });
   }
 
   useEffect(() => {
     fetchReleases();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [namespace]);
+
+  // A pending release is one Helm has not finished with. Left alone the row
+  // keeps its stale status until someone presses Refresh, which is what makes
+  // an install that is merely slow look like one that has died.
+  const hasPendingRelease = releases.some((release) => isPendingRelease(release.status));
+  useEffect(() => {
+    if (!hasPendingRelease) {
+      return undefined;
+    }
+    const timer = setInterval(() => fetchReleases({background: true}), RELEASE_POLL_INTERVAL);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasPendingRelease, namespace]);
+
+  // The operation behind the open log sheet, re-read while it is still running
+  // so its output arrives as it is produced.
+  useEffect(() => {
+    if (!logsRelease) {
+      return undefined;
+    }
+    let cancelled = false;
+    let timer = null;
+
+    function load(initial) {
+      if (initial) {
+        setOperationLoading(true);
+      }
+      HelmBackend.getHelmReleaseOperation(logsRelease.name, logsRelease.namespace)
+        .then((res) => {
+          if (cancelled) {
+            return;
+          }
+          if (res.status !== "ok") {
+            setOperationError(res.msg);
+            return;
+          }
+          const task = res.data ?? null;
+          setOperationError(null);
+          setOperation(task);
+          setOperationLogs((res.data2 ?? []).map((entry) => entry?.message).filter(Boolean));
+          if (isActiveOperation(task?.status)) {
+            timer = setTimeout(() => load(false), OPERATION_POLL_INTERVAL);
+          }
+        })
+        .catch((e) => {
+          if (!cancelled) {
+            setOperationError(e.message);
+          }
+        })
+        .finally(() => {
+          if (!cancelled && initial) {
+            setOperationLoading(false);
+          }
+        });
+    }
+
+    load(true);
+    return () => {
+      cancelled = true;
+      if (timer) {
+        clearTimeout(timer);
+      }
+    };
+  }, [logsRelease]);
+
+  function openLogs(release) {
+    setOperation(null);
+    setOperationLogs([]);
+    setOperationError(null);
+    setLogsRelease(release);
+  }
+
+  function closeLogs() {
+    setLogsRelease(null);
+    // The list is refreshed on the way out: the sheet is usually closed just
+    // after an operation it was watching has finished.
+    fetchReleases({background: true});
+  }
 
   function openHistory(release) {
     setHistoryRelease(release);
@@ -156,7 +287,12 @@ export default function HelmReleasePage() {
       dataIndex: "status",
       width: 150,
       sortable: true,
-      render: (value, record) => <StatusBadge status={value} description={record.description} />,
+      render: (value, record) => (
+        <span className="flex items-center gap-1.5">
+          <StatusBadge status={value} description={record.description} />
+          {isPendingRelease(value) ? <AiDots size="small" /> : null}
+        </span>
+      ),
     },
     {key: "app_version", title: t("helm:App version"), dataIndex: "app_version", width: 140},
     {
@@ -170,10 +306,15 @@ export default function HelmReleasePage() {
     {
       key: "action",
       title: t("general:Action"),
-      width: 150,
+      width: 190,
       align: "right",
       render: (_, release) => (
         <div className="flex justify-end gap-1">
+          <SimpleTooltip title={t("helm:Logs")}>
+            <Button variant="outline" size="icon-sm" onClick={() => openLogs(release)} aria-label="Logs">
+              <ScrollText className="size-4" />
+            </Button>
+          </SimpleTooltip>
           <SimpleTooltip title={t("helm:Upgrade")}>
             <Button
               variant="outline"
@@ -205,6 +346,20 @@ export default function HelmReleasePage() {
     },
   ];
 
+  // The status the cluster reports now, not the one the row carried when the
+  // sheet was opened.
+  const logsReleaseStatus =
+    releases.find((release) => release.name === logsRelease?.name && release.namespace === logsRelease?.namespace)
+      ?.status ?? logsRelease?.status;
+  // Helm leaves a release pending when the operation that was writing it never
+  // reached an end — a CasOS restart mid-install is the usual way. Nothing in
+  // the cluster will move it now, so say so instead of showing a status that
+  // reads like work in progress.
+  const stuckHint =
+    logsRelease && isPendingRelease(logsReleaseStatus) && !isActiveOperation(operation?.status)
+      ? t("helm:Release stuck in a pending status", {status: logsReleaseStatus})
+      : null;
+
   return (
     <PageContainer>
       {error ? <MessageAlert title={error} /> : null}
@@ -226,7 +381,7 @@ export default function HelmReleasePage() {
               options={[{value: "all", label: t("helm:All namespaces")}]}
               className="w-44"
             />
-            <Button variant="outline" size="sm" onClick={fetchReleases} loading={loading}>
+            <Button variant="outline" size="sm" onClick={() => fetchReleases()} loading={loading}>
               <RefreshCw />
               {t("general:Refresh")}
             </Button>
@@ -273,6 +428,60 @@ export default function HelmReleasePage() {
               </li>
             ))}
           </ol>
+        )}
+      </ResourceSheet>
+
+      <ResourceSheet
+        open={Boolean(logsRelease)}
+        onOpenChange={(next) => (next ? null : closeLogs())}
+        title={logsRelease ? `${t("helm:Release logs")}: ${logsRelease.name}` : ""}
+        description={logsRelease ? `${logsRelease.namespace} · ${logsRelease.chart ?? ""}` : ""}
+        size="lg"
+        bodyClassName="gap-3 overflow-y-auto scrollbar-thin"
+      >
+        {operationLoading ? (
+          <Loading />
+        ) : (
+          <>
+            {operationError ? <MessageAlert title={operationError} /> : null}
+            {operation ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="muted">{operation.operation}</Badge>
+                <Badge variant={OPERATION_STATUS_VARIANTS[operation.status] ?? "muted"}>{operation.status}</Badge>
+                <Badge variant="muted">{operation.phase}</Badge>
+                <span className="text-muted-foreground text-xs">
+                  {formatTimestamp(operation.startedAt)} → {formatTimestamp(operation.finishedAt)}
+                </span>
+              </div>
+            ) : null}
+            {!operation && !operationError ? (
+              <MessageAlert variant="info" description={t("helm:No operation recorded for this release")} />
+            ) : null}
+            {operation?.errorMsg ? (
+              <MessageAlert
+                title={t("helm:Helm operation failed")}
+                description={<span className="break-all whitespace-pre-wrap">{operation.errorMsg}</span>}
+              />
+            ) : null}
+            {isActiveOperation(operation?.status) ? (
+              <MessageAlert variant="info" description={t("helm:This operation is still running")} />
+            ) : null}
+            {stuckHint ? <MessageAlert variant="warning" description={stuckHint} /> : null}
+            {operationLogs.length > 0 ? (
+              <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto rounded-lg bg-neutral-950 p-3 font-mono text-xs leading-relaxed">
+                {operationLogs.map((line, index) => (
+                  <div key={index} className={logLineClass(line)}>
+                    {line}
+                  </div>
+                ))}
+                {isActiveOperation(operation?.status) ? (
+                  <span className="mt-1 inline-flex items-center text-neutral-500">
+                    <AiDots size="small" />
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
+          </>
         )}
       </ResourceSheet>
 

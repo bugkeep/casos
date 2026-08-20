@@ -377,6 +377,41 @@ func (c *ApiController) GetHelmOperationTask() {
 	c.ResponseOk(task, taskLogs)
 }
 
+// GetHelmReleaseOperation returns the most recent Helm operation recorded for a
+// release, with its log history, so the Helm Releases page can answer why a
+// release is still pending instead of showing a status with no explanation.
+// A release CasOS never operated on answers with a null task rather than an
+// error, because "no logs were recorded" is an answer.
+// @router /api/get-helm-release-operation [get]
+func (c *ApiController) GetHelmReleaseOperation() {
+	if c.RequireAdmin() {
+		return
+	}
+	namespace := strings.TrimSpace(c.GetString("namespace"))
+	name := strings.TrimSpace(c.GetString("name"))
+	if namespace == "" || name == "" {
+		c.ResponseError("name and namespace are required")
+		return
+	}
+	task, err := object.GetLatestHelmOperationTaskForRelease(namespace, name)
+	if err != nil {
+		logs.Error("get Helm operation task for %s/%s: %v", namespace, name, err)
+		c.ResponseError("failed to load Helm operation task")
+		return
+	}
+	if task == nil {
+		c.ResponseOk(nil, []*object.HelmOperationLog{})
+		return
+	}
+	taskLogs, err := object.GetHelmOperationLogs(task.Id, 1000)
+	if err != nil {
+		logs.Error("get Helm operation task %d logs: %v", task.Id, err)
+		c.ResponseError("failed to load Helm operation task")
+		return
+	}
+	c.ResponseOk(task, taskLogs)
+}
+
 func helmOperationOwner(c *ApiController) string {
 	if user := c.GetSessionUser(); user != nil {
 		return canonicalHelmOperationOwner(user.Id, user.Owner, user.Name)

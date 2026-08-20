@@ -50,6 +50,15 @@ export function getHelmOperationTask(id) {
   }).then(r => r.json());
 }
 
+// Returns the most recent operation CasOS ran for a release, with its logs.
+// A release CasOS never operated on answers with a null task.
+export function getHelmReleaseOperation(name, namespace) {
+  return fetch(
+    `${Setting.ServerUrl}/api/get-helm-release-operation?name=${encodeURIComponent(name)}&namespace=${encodeURIComponent(namespace)}`,
+    {credentials: "include", headers: lang()}
+  ).then(r => r.json());
+}
+
 export function installHelmChart(payload) {
   return fetch(`${Setting.ServerUrl}/api/install-helm-chart`, {
     method: "POST", credentials: "include", headers: jsonHeaders(), body: JSON.stringify(payload),

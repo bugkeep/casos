@@ -1489,6 +1489,7 @@ func installHelmChartStream(ctx context.Context, lifecycle HelmInstallLifecycle,
 		if streamCtx == nil {
 			streamCtx = context.Background()
 		}
+		logThrottle := newHelmLogThrottle()
 		send := func(event HelmInstallStreamEvent) bool {
 			persistedMessage := event.Message
 			switch event.Type {
@@ -1496,6 +1497,12 @@ func installHelmChartStream(ctx context.Context, lifecycle HelmInstallLifecycle,
 				persistedMessage = "ERROR: " + event.Message
 			case HelmInstallStreamEventWarning:
 				persistedMessage = "WARNING: " + event.Message
+			case HelmInstallStreamEventLog:
+				// A repeat carries nothing the reader has not already seen, and
+				// only warnings and errors are exempt from that.
+				if !logThrottle.allow(event.Message) {
+					return true
+				}
 			}
 			if persistedMessage != "" {
 				if err := lifecycle.RecordLog(persistedMessage); err != nil {
@@ -1593,7 +1600,13 @@ func installHelmChartStream(ctx context.Context, lifecycle HelmInstallLifecycle,
 		}
 		install := action.NewInstall(actionConfig)
 		configureHelmInstall(install, releaseName, namespace, installTimeout)
+		progress := startHelmProgressReporter(installCtx, cfg, releaseName, namespace, func(line string) {
+			sendLog(line)
+		})
 		failedRelease, installErr := install.RunWithContext(installCtx, helmChart, vals)
+		// Stopped before anything else, because the reporter holds sendLog and
+		// this goroutine closes the channel sendLog writes to.
+		progress.Stop()
 		if installErr != nil {
 			err = finishFailedHelmInstall(
 				installErr,
@@ -1639,6 +1652,7 @@ func runHelmUpgradeStream(ctx context.Context, lifecycle HelmInstallLifecycle, r
 		if streamCtx == nil {
 			streamCtx = context.Background()
 		}
+		logThrottle := newHelmLogThrottle()
 		send := func(event HelmInstallStreamEvent) bool {
 			persistedMessage := event.Message
 			switch event.Type {
@@ -1646,6 +1660,10 @@ func runHelmUpgradeStream(ctx context.Context, lifecycle HelmInstallLifecycle, r
 				persistedMessage = "ERROR: " + event.Message
 			case HelmInstallStreamEventWarning:
 				persistedMessage = "WARNING: " + event.Message
+			case HelmInstallStreamEventLog:
+				if !logThrottle.allow(event.Message) {
+					return true
+				}
 			}
 			if persistedMessage != "" {
 				if err := lifecycle.RecordLog(persistedMessage); err != nil {
@@ -1806,7 +1824,11 @@ func upgradeHelmReleaseWithContext(ctx context.Context, logFn func(string, ...in
 	}
 	upgrade := newHelmUpgrade(actionConfig, namespace)
 
+	progress := startHelmProgressReporter(ctx, cfg, releaseName, namespace, func(line string) {
+		logFn("%s", line)
+	})
 	_, err = upgrade.RunWithContext(ctx, releaseName, ch, vals)
+	progress.Stop()
 	if err != nil {
 		for _, line := range helmReleaseDiagnostics(ctx, cfg, releaseName, namespace) {
 			logFn("%s", line)
