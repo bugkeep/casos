@@ -7,7 +7,14 @@ import (
 
 	"github.com/sirupsen/logrus"
 	cmapp "k8s.io/kubernetes/cmd/kube-controller-manager/app"
+
+	"github.com/casosorg/casos/util"
 )
+
+// controllerManagerDefaultPort is the secure port kube-controller-manager
+// serves on. It is bound to loopback and nothing dials it, so CasOS moves it
+// out of the way when another program already holds the number.
+const controllerManagerDefaultPort = 10257
 
 // StartControllerManager launches kube-controller-manager in-process. Must be
 // called after the apiserver is ready.
@@ -22,6 +29,14 @@ func StartControllerManager(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("controller-manager kubeconfig: %w", err)
 	}
 
+	securePort, err := util.FreePortFrom(componentBindAddress, controllerManagerDefaultPort)
+	if err != nil {
+		return fmt.Errorf("controller-manager port: %w", err)
+	}
+	if securePort != controllerManagerDefaultPort {
+		logrus.Warnf("port %d is taken by another program, controller-manager is using %d instead", controllerManagerDefaultPort, securePort)
+	}
+
 	caKey := filepath.Join(certDir, "ca.key")
 	caCrt := filepath.Join(certDir, "ca.crt")
 	saKey := filepath.Join(certDir, "sa.key")
@@ -31,8 +46,8 @@ func StartControllerManager(ctx context.Context, cfg Config) error {
 		cmd.SetArgs([]string{
 			"--kubeconfig=" + kubeconfigPath,
 			"--leader-elect=false",
-			"--bind-address=127.0.0.1",
-			"--secure-port=10257",
+			"--bind-address=" + componentBindAddress,
+			fmt.Sprintf("--secure-port=%d", securePort),
 			"--cluster-signing-cert-file=" + caCrt,
 			"--cluster-signing-key-file=" + caKey,
 			"--root-ca-file=" + caCrt,

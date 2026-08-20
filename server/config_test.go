@@ -14,6 +14,15 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
+func TestKineEndpointConfigListensOnTheGivenPort(t *testing.T) {
+	kineConfig := kineEndpointConfig("sqlite://casos.db", kineDefaultPort+2)
+
+	want := "tcp://127.0.0.1:2381"
+	if kineConfig.Listener != want {
+		t.Errorf("Listener = %q, want %q", kineConfig.Listener, want)
+	}
+}
+
 func TestResolveDatastoreEndpoint(t *testing.T) {
 	dataDir := t.TempDir()
 
@@ -86,7 +95,7 @@ func TestKineSQLiteEndpoint(t *testing.T) {
 		}
 	}
 
-	kineConfig := kineEndpointConfig(datastoreEndpoint)
+	kineConfig := kineEndpointConfig(datastoreEndpoint, kineDefaultPort)
 	kineConfig.Listener = "tcp://127.0.0.1:0"
 	kineConfig.WaitGroup = &wg
 	etcdConfig, err := endpoint.Listen(ctx, kineConfig)

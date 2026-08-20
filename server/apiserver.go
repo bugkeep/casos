@@ -23,6 +23,13 @@ import (
 )
 
 const (
+	// kineBindAddress and kineDefaultPort are where kine offers its etcd API.
+	// Only the in-process apiserver dials it, and it is handed the address
+	// kine reports back, so the port is free to move when something else on
+	// the machine already holds the default.
+	kineBindAddress = "127.0.0.1"
+	kineDefaultPort = 2379
+
 	serviceClusterIPRange      = "10.43.0.0/16"
 	kubernetesServiceIP        = "10.43.0.1"
 	kubernetesEndpointsEtcdKey = "/registry/services/endpoints/default/kubernetes"
@@ -42,13 +49,20 @@ func Start(ctx context.Context, cfg Config) (<-chan struct{}, error) {
 		return nil, fmt.Errorf("service account key: %w", err)
 	}
 
-	if err := util.StopOldInstance(2379); err != nil {
-		logrus.Warnf("failed to stop old instance on port 2379: %v", err)
+	if err := util.StopOldInstance(kineDefaultPort); err != nil {
+		logrus.Warnf("failed to stop old instance on port %d: %v", kineDefaultPort, err)
 	}
 	if err := ensureKineDataDirectory(cfg.DatastoreEndpoint); err != nil {
 		return nil, err
 	}
-	etcdCfg, err := endpoint.Listen(ctx, kineEndpointConfig(cfg.DatastoreEndpoint))
+	kinePort, err := util.FreePortFrom(kineBindAddress, kineDefaultPort)
+	if err != nil {
+		return nil, fmt.Errorf("kine port: %w", err)
+	}
+	if kinePort != kineDefaultPort {
+		logrus.Warnf("port %d is taken by another program, kine is using %d instead", kineDefaultPort, kinePort)
+	}
+	etcdCfg, err := endpoint.Listen(ctx, kineEndpointConfig(cfg.DatastoreEndpoint, kinePort))
 	if err != nil {
 		return nil, fmt.Errorf("kine listen: %w", err)
 	}
@@ -105,10 +119,10 @@ func Start(ctx context.Context, cfg Config) (<-chan struct{}, error) {
 	return readyCh, nil
 }
 
-func kineEndpointConfig(datastoreEndpoint string) endpoint.Config {
+func kineEndpointConfig(datastoreEndpoint string, port int) endpoint.Config {
 	return endpoint.Config{
 		Endpoint:            datastoreEndpoint,
-		Listener:            "tcp://127.0.0.1:2379",
+		Listener:            fmt.Sprintf("tcp://%s:%d", kineBindAddress, port),
 		EmulatedETCDVersion: "3.6.11",
 		CompactBatchSize:    100,
 		NotifyInterval:      time.Second,
