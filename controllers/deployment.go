@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"encoding/json"
+	"fmt"
 	"strconv"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -20,12 +21,60 @@ type deploymentSummary struct {
 	ReadyReplicas     int32             `json:"readyReplicas"`
 	AvailableReplicas int32             `json:"availableReplicas"`
 	Image             string            `json:"image"`
+	CpuRequest        string            `json:"cpuRequest"`
+	MemoryRequest     string            `json:"memoryRequest"`
 	Ports             []portSummary     `json:"ports"`
 	Selector          map[string]string `json:"selector"`
 	EnvVars           []envVarSummary   `json:"envVars"`
 	Volumes           []volumeSummary   `json:"volumes"`
 	CreatedAt         string            `json:"createdAt"`
 	ResourceVersion   string            `json:"resourceVersion"`
+}
+
+// containerResourcesRequest extracts the cpu/memory request strings from the
+// first container's Resources.Requests. Returns empty strings when the field
+// is unset so the form can round-trip the value.
+func containerResourcesRequest(d appsv1.Deployment) (cpu, memory string) {
+	if len(d.Spec.Template.Spec.Containers) == 0 {
+		return "", ""
+	}
+	reqs := d.Spec.Template.Spec.Containers[0].Resources.Requests
+	if q, ok := reqs[corev1.ResourceCPU]; ok {
+		cpu = q.String()
+	}
+	if q, ok := reqs[corev1.ResourceMemory]; ok {
+		memory = q.String()
+	}
+	return cpu, memory
+}
+
+// mergeContainerResourceRequests writes the supplied cpu/memory request
+// strings into the given container's Resources.Requests map, only overriding
+// keys the caller actually supplied. An empty input string leaves that
+// particular resource untouched. parseQuantity failures are surfaced as
+// errors with the bad input so the controller can return them to the user
+// instead of panicking.
+func mergeContainerResourceRequests(container *corev1.Container, cpu, memory string) error {
+	reqs := container.Resources.Requests
+	if reqs == nil {
+		reqs = corev1.ResourceList{}
+	}
+	if cpu != "" {
+		q, err := resource.ParseQuantity(cpu)
+		if err != nil {
+			return fmt.Errorf("invalid cpuRequest %q: %w", cpu, err)
+		}
+		reqs[corev1.ResourceCPU] = q
+	}
+	if memory != "" {
+		q, err := resource.ParseQuantity(memory)
+		if err != nil {
+			return fmt.Errorf("invalid memoryRequest %q: %w", memory, err)
+		}
+		reqs[corev1.ResourceMemory] = q
+	}
+	container.Resources.Requests = reqs
+	return nil
 }
 
 func toDeploymentSummary(d appsv1.Deployment) deploymentSummary {
@@ -56,6 +105,7 @@ func toDeploymentSummary(d appsv1.Deployment) deploymentSummary {
 			})
 		}
 	}
+	cpu, memory := containerResourcesRequest(d)
 	return deploymentSummary{
 		Namespace:         d.Namespace,
 		Name:              d.Name,
@@ -63,6 +113,8 @@ func toDeploymentSummary(d appsv1.Deployment) deploymentSummary {
 		ReadyReplicas:     d.Status.ReadyReplicas,
 		AvailableReplicas: d.Status.AvailableReplicas,
 		Image:             image,
+		CpuRequest:        cpu,
+		MemoryRequest:     memory,
 		Ports:             ports,
 		Selector:          selector,
 		EnvVars:           extractEnvVars(d.Spec.Template.Spec.Containers),
@@ -124,7 +176,7 @@ type deploymentRequest struct {
 	ResourceVersion string          `json:"resourceVersion"`
 }
 
-func buildDeployment(req deploymentRequest) *appsv1.Deployment {
+func buildDeployment(req deploymentRequest) (*appsv1.Deployment, error) {
 	replicas := req.Replicas
 	if replicas <= 0 {
 		replicas = 1
@@ -141,14 +193,9 @@ func buildDeployment(req deploymentRequest) *appsv1.Deployment {
 	}
 
 	if req.CpuRequest != "" || req.MemoryRequest != "" {
-		reqs := corev1.ResourceList{}
-		if req.CpuRequest != "" {
-			reqs[corev1.ResourceCPU] = resource.MustParse(req.CpuRequest)
+		if err := mergeContainerResourceRequests(&container, req.CpuRequest, req.MemoryRequest); err != nil {
+			return nil, err
 		}
-		if req.MemoryRequest != "" {
-			reqs[corev1.ResourceMemory] = resource.MustParse(req.MemoryRequest)
-		}
-		container.Resources = corev1.ResourceRequirements{Requests: reqs}
 	}
 
 	podVolumes, mounts := buildPodVolumes(req.Name, req.Volumes)
@@ -175,7 +222,7 @@ func buildDeployment(req deploymentRequest) *appsv1.Deployment {
 				},
 			},
 		},
-	}
+	}, nil
 }
 
 // AddDeployment
@@ -194,11 +241,16 @@ func (c *ApiController) AddDeployment() {
 	if req.Namespace == "" {
 		req.Namespace = "default"
 	}
+	deployment, err := buildDeployment(req)
+	if err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
 	if err := ensureDeploymentPVCs(cfg, req.Namespace, req.Name, req.Volumes); err != nil {
 		c.ResponseError(err.Error())
 		return
 	}
-	created, err := object.AddDeployment(cfg, buildDeployment(req))
+	created, err := object.AddDeployment(cfg, deployment)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
@@ -235,19 +287,25 @@ func (c *ApiController) UpdateDeployment() {
 		replicas = 1
 	}
 	existing.Spec.Replicas = &replicas
-	if len(existing.Spec.Template.Spec.Containers) > 0 {
-		existing.Spec.Template.Spec.Containers[0].Image = req.Image
-		existing.Spec.Template.Spec.Containers[0].Env = buildEnvVars(req.EnvVars)
-	} else {
-		containerName := req.ContainerName
-		if containerName == "" {
-			containerName = req.Name
+	if len(existing.Spec.Template.Spec.Containers) == 0 {
+		// K8s rejects Deployments with no containers at create time, so this
+		// only fires if the apiserver returns a malformed object. Surface it
+		// instead of silently rebuilding a container — rebuilding would mask
+		// the actual cluster state.
+		c.ResponseError(fmt.Sprintf("deployment %s/%s has no containers", existing.Namespace, existing.Name))
+		return
+	}
+	container := &existing.Spec.Template.Spec.Containers[0]
+	container.Image = req.Image
+	container.Env = buildEnvVars(req.EnvVars)
+	// Resource requests: only override the keys the form actually sent. An
+	// empty string leaves the existing value intact so opening the editor
+	// and saving image/env alone does not clear resources.
+	if req.CpuRequest != "" || req.MemoryRequest != "" {
+		if err := mergeContainerResourceRequests(container, req.CpuRequest, req.MemoryRequest); err != nil {
+			c.ResponseError(err.Error())
+			return
 		}
-		existing.Spec.Template.Spec.Containers = []corev1.Container{{
-			Name:  containerName,
-			Image: req.Image,
-			Env:   buildEnvVars(req.EnvVars),
-		}}
 	}
 	existing.ResourceVersion = req.ResourceVersion
 

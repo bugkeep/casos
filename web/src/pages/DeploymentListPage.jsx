@@ -33,7 +33,23 @@ import {
   DeploymentUpdateImageDialog,
 } from "@/components/shared/deployment-dialogs";
 
-const emptyForm = {namespace: "", name: "", image: "", replicas: 1, containerName: "", envVars: [], volumes: []};
+const emptyForm = {namespace: "", name: "", image: "", replicas: 1, containerName: "", cpuRequest: "", memoryRequest: "", envVars: [], volumes: []};
+
+// K8s quantity syntax. Mirrors the regex embedded in `resource.ParseQuantity`
+// (k8s.io/apimachinery/pkg/api/resource) so the form rejects the same input
+// the API would. An empty string is always allowed here — the backend
+// treats absence as "leave the value unset", which keeps the update path
+// from silently zeroing existing resources when the user opens the dialog
+// and saves without touching the field. Final authority is the backend
+// ParseQuantity call.
+const QUANTITY_PATTERN = /^([+-]?[0-9.]+)([eEinumkKMGTP]*[-+]?[0-9]*)$/;
+
+function isValidQuantity(value) {
+  if (value === "" || value == null) {
+    return true;
+  }
+  return QUANTITY_PATTERN.test(value.trim());
+}
 
 function splitImage(image) {
   if (!image) {
@@ -181,6 +197,8 @@ function DeploymentListPage() {
       image: record.image,
       replicas: record.replicas,
       containerName: "",
+      cpuRequest: record.cpuRequest ?? "",
+      memoryRequest: record.memoryRequest ?? "",
       envVars: envVarsToRows(record.envVars),
       volumes: record.volumes ?? [],
     });
@@ -249,6 +267,12 @@ function DeploymentListPage() {
     if (!form.image) {
       nextErrors.image = "Image is required";
     }
+    if (!isValidQuantity(form.cpuRequest)) {
+      nextErrors.cpuRequest = "Must be a Kubernetes quantity (e.g. 100m, 0.5, 1Gi)";
+    }
+    if (!isValidQuantity(form.memoryRequest)) {
+      nextErrors.memoryRequest = "Must be a Kubernetes quantity (e.g. 256Mi, 1Gi)";
+    }
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) {
       return;
@@ -260,6 +284,8 @@ function DeploymentListPage() {
       replicas: Number(form.replicas) ?? 1,
       image: form.image,
       containerName: form.containerName ?? "",
+      cpuRequest: form.cpuRequest.trim(),
+      memoryRequest: form.memoryRequest.trim(),
       envVars: rowsToEnvVars(form.envVars),
       // Volumes are only sent on create; the API rejects mount changes on an
       // existing deployment, and the editor is read-only there for that reason.
@@ -539,6 +565,29 @@ function DeploymentListPage() {
             value={form.image}
             onChange={(event) => setForm((prev) => ({...prev, image: event.target.value}))}
             placeholder="nginx:latest"
+          />
+        </Field>
+
+        <Field label="CPU Request" htmlFor="deploy-cpu-request" hint="Optional. Kubernetes quantity, e.g. 100m or 0.5." error={errors.cpuRequest}>
+          <Input
+            id="deploy-cpu-request"
+            value={form.cpuRequest}
+            onChange={(event) => setForm((prev) => ({...prev, cpuRequest: event.target.value}))}
+            placeholder="100m"
+          />
+        </Field>
+
+        <Field
+          label="Memory Request"
+          htmlFor="deploy-memory-request"
+          hint="Optional. Kubernetes quantity, e.g. 256Mi or 1Gi."
+          error={errors.memoryRequest}
+        >
+          <Input
+            id="deploy-memory-request"
+            value={form.memoryRequest}
+            onChange={(event) => setForm((prev) => ({...prev, memoryRequest: event.target.value}))}
+            placeholder="256Mi"
           />
         </Field>
 

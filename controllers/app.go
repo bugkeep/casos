@@ -58,7 +58,11 @@ func (c *ApiController) DeployApp() {
 		Image:     req.Image,
 		EnvVars:   req.EnvVars,
 	}
-	depl := buildDeployment(deplReq)
+	depl, err := buildDeployment(deplReq)
+	if err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
 
 	if len(req.Ports) > 0 && len(depl.Spec.Template.Spec.Containers) > 0 {
 		cports := make([]corev1.ContainerPort, 0, len(req.Ports))
