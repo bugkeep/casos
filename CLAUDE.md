@@ -66,3 +66,12 @@ go build -o casos.exe .
 
 - All yarn/frontend commands must be run inside `web/`, not the repo root.
 - Do not commit `web/node_modules/`.
+
+## Code Style
+
+- Don't add Go tests unless asked. Verify changes with `go build ./...` and
+  `go vet ./...` instead.
+- Keep comments sparse. Comment only what the code can't say itself — a
+  non-obvious constraint, a workaround, an unexpected invariant. No comments
+  that restate the line below them, and no doc comments on self-explanatory
+  functions.
