@@ -72,11 +72,19 @@ var helmChartAdapterRegistry = map[string]helmChartAdapter{
 	"kube-prometheus-stack": {valuesPatches: kubePrometheusStackValuesPatches()},
 	"kubernetes-dashboard":  {valuesPatches: kubernetesDashboardValuesPatches()},
 	"loki":                  {valuesPatches: lokiValuesPatches()},
+	"metrics-server":        {valuesPatches: metricsServerValuesPatches()},
 	"pgadmin4":              {valuesPatches: nodePortServiceValuesPatch()},
 	"postgresql":            {valuesPatches: postgresqlValuesPatches()},
 	"prometheus":            {valuesPatches: prometheusValuesPatches()},
 	"redis":                 {valuesPatches: redisValuesPatches()},
 	"traefik":               {valuesPatches: traefikValuesPatches()},
+	"vault":                 {valuesPatches: vaultValuesPatches()},
+	"harbor":                {valuesPatches: harborValuesPatches()},
+	"keycloak":              {valuesPatches: nodePortServiceValuesPatch()},
+	"jenkins":               {valuesPatches: jenkinsValuesPatches()},
+	"longhorn":              {valuesPatches: longhornValuesPatches()},
+	"rabbitmq":              {valuesPatches: nodePortServiceValuesPatch()},
+	"gitlab":                {valuesPatches: gitLabValuesPatches()},
 	"n8n": {
 		valuesPatches:      nodePortServiceValuesPatch(),
 		chartValuesPatchFn: n8nSecureCookiePatch,
@@ -123,6 +131,64 @@ func argoCDValuesPatches() map[string]interface{} {
 
 func certManagerValuesPatches() map[string]interface{} {
 	return helmValuePatch([]string{"crds"}, map[string]interface{}{"enabled": true})
+}
+
+// metricsServerValuesPatches lets metrics-server scrape the kubelet that CasOS
+// provisions. That kubelet's serving certificate is intentionally local and
+// does not carry the WSL node IP as a SAN, so the upstream default can start
+// but never becomes ready (there are no metrics to serve).
+func metricsServerValuesPatches() map[string]interface{} {
+	return map[string]interface{}{
+		"args": []interface{}{"--kubelet-insecure-tls"},
+	}
+}
+
+func vaultValuesPatches() map[string]interface{} {
+	return helmValuePatch([]string{"server", "service"}, map[string]interface{}{"type": "NodePort"})
+}
+
+func harborValuesPatches() map[string]interface{} {
+	return map[string]interface{}{
+		"expose": map[string]interface{}{
+			"type": "nodePort",
+			"tls":  map[string]interface{}{"enabled": false},
+			"nodePort": map[string]interface{}{
+				"ports": map[string]interface{}{
+					"http":  map[string]interface{}{"nodePort": nil},
+					"https": map[string]interface{}{"nodePort": nil},
+				},
+			},
+		},
+	}
+}
+
+func jenkinsValuesPatches() map[string]interface{} {
+	return helmValuePatch([]string{"controller"}, map[string]interface{}{
+		"serviceType": "NodePort",
+		"nodePort":    nil,
+	})
+}
+
+func longhornValuesPatches() map[string]interface{} {
+	return helmValuePatch([]string{"service", "ui"}, map[string]interface{}{
+		"type":     "NodePort",
+		"nodePort": nil,
+	})
+}
+
+// GitLab 19 enables its Gateway API cert-manager integration by default, but
+// the chart deliberately leaves the ACME account email empty. CasOS does not
+// own an email address it can safely submit to a certificate authority, so the
+// local App Store install disables that integration instead of failing Helm's
+// render preflight before creating any resources.
+func gitLabValuesPatches() map[string]interface{} {
+	return map[string]interface{}{
+		"installCertmanager": false,
+		"global": map[string]interface{}{
+			"gatewayApi": map[string]interface{}{"configureCertmanager": false},
+			"ingress":    map[string]interface{}{"configureCertmanager": false},
+		},
+	}
 }
 
 func prometheusExporterCompatibilityPatch() map[string]interface{} {

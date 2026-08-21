@@ -36,6 +36,11 @@ After=containerd.service
 Requires=containerd.service
 
 [Service]
+# CSI drivers such as Longhorn use bidirectional mount propagation. WSL starts
+# with / private, so their privileged pods fail before the application can
+# become ready unless the kubelet first promotes the root mount to rshared.
+# Repeating this on ordinary Linux nodes and kubelet restarts is idempotent.
+ExecStartPre=/bin/mount --make-rshared /
 ExecStart=/usr/local/bin/kubelet \
   --kubeconfig=/etc/kubernetes/worker.kubeconfig \
   --config=/var/lib/kubelet/config.yaml \

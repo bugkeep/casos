@@ -48,6 +48,71 @@ func TestHelmChartAdapterRespectsExplicitServiceType(t *testing.T) {
 	}
 }
 
+func TestMetricsServerAdapterAcceptsLocalKubeletCertificate(t *testing.T) {
+	values, _, err := prepareHelmInstallValues(testChart("metrics-server"), "https://example.com/charts", map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("prepare values: %v", err)
+	}
+	want := []interface{}{"--kubelet-insecure-tls"}
+	if got := values["args"]; !reflect.DeepEqual(got, want) {
+		t.Errorf("expected kubelet TLS compatibility arg, got %#v", got)
+	}
+}
+
+func TestSecondPageWebAppsArePublished(t *testing.T) {
+	tests := []struct {
+		name string
+		path []string
+	}{
+		{"vault", []string{"server", "service", "type"}},
+		{"keycloak", []string{"service", "type"}},
+		{"jenkins", []string{"controller", "serviceType"}},
+		{"longhorn", []string{"service", "ui", "type"}},
+		{"rabbitmq", []string{"service", "type"}},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			values, _, err := prepareHelmInstallValues(testChart(testCase.name), "https://example.com/charts", map[string]interface{}{})
+			if err != nil {
+				t.Fatalf("prepare values: %v", err)
+			}
+			if got := helmValueAtPath(values, testCase.path); got != "NodePort" {
+				t.Errorf("expected %v to be NodePort, got %#v", testCase.path, got)
+			}
+		})
+	}
+}
+
+func TestHarborAdapterPublishesPlainHTTPWithAllocatedPort(t *testing.T) {
+	values, _, err := prepareHelmInstallValues(testChart("harbor"), "https://example.com/charts", map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("prepare values: %v", err)
+	}
+	if got := helmValueAtPath(values, []string{"expose", "type"}); got != "nodePort" {
+		t.Errorf("expected expose.type nodePort, got %#v", got)
+	}
+	if got := helmValueAtPath(values, []string{"expose", "tls", "enabled"}); got != false {
+		t.Errorf("expected plain HTTP exposure, got %#v", got)
+	}
+	httpValues := helmValueMapAtPath(values, "expose", "nodePort", "ports", "http")
+	httpNodePort, exists := httpValues["nodePort"]
+	if !exists || httpNodePort != nil {
+		t.Errorf("expected Kubernetes-allocated HTTP NodePort, got %#v (exists=%v)", httpNodePort, exists)
+	}
+}
+
+func TestGitLabAdapterDoesNotRequireACMEIdentity(t *testing.T) {
+	values, _, err := prepareHelmInstallValues(testChart("gitlab"), "https://example.com/charts", map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("prepare values: %v", err)
+	}
+	for _, path := range [][]string{{"installCertmanager"}, {"global", "gatewayApi", "configureCertmanager"}, {"global", "ingress", "configureCertmanager"}} {
+		if got := helmValueAtPath(values, path); got != false {
+			t.Errorf("expected %v false, got %#v", path, got)
+		}
+	}
+}
+
 func TestHelmChartAdapterSkipsUnregisteredChart(t *testing.T) {
 	values, _, err := prepareHelmInstallValues(testChart("some-other-app"), "https://example.com/charts", map[string]interface{}{})
 	if err != nil {
