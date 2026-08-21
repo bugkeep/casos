@@ -861,7 +861,8 @@ func loadChartWithContext(parent context.Context, chartName, repoURL, version st
 	defer cancel()
 
 	if isOCIRepo(repoURL) {
-		ch, err := loadOCIChart(ctx, repoURL, version)
+		reportHelmChartLoadStage(ctx, HelmChartLoadStageOCI)
+		ch, err := loadOCIChart(withHelmChartLoadStage(ctx, HelmChartLoadStageOCI), repoURL, version)
 		if err != nil {
 			return nil, fmt.Errorf(
 				"load chart %q from OCI repo %q version %q: %w",
@@ -874,7 +875,7 @@ func loadChartWithContext(parent context.Context, chartName, repoURL, version st
 		return ch, nil
 	}
 
-	idx, err := fetchIndexFile(ctx, repoURL)
+	idx, err := fetchIndexFile(withHelmChartLoadStage(ctx, HelmChartLoadStageIndex), repoURL)
 	if err != nil {
 		return nil, fmt.Errorf("load chart %q from repo %q version %q: fetch index.yaml failed: %w", chartName, redactURLForError(repoURL), version, err)
 	}
@@ -904,7 +905,8 @@ func loadChartWithContext(parent context.Context, chartName, repoURL, version st
 		if ociVersion == "" {
 			ociVersion = entry.Version
 		}
-		ch, err := loadOCIChart(ctx, chartURL, ociVersion)
+		reportHelmChartLoadStage(ctx, HelmChartLoadStageOCI)
+		ch, err := loadOCIChart(withHelmChartLoadStage(ctx, HelmChartLoadStageOCI), chartURL, ociVersion)
 		if err != nil {
 			return nil, fmt.Errorf(
 				"load chart %q from repo %q version %q: index.yaml resolved to OCI chart URL %q: %w",
@@ -921,7 +923,7 @@ func loadChartWithContext(parent context.Context, chartName, repoURL, version st
 		chartURL = strings.TrimRight(repoURL, "/") + "/" + strings.TrimLeft(chartURL, "/")
 	}
 
-	data, err := downloadHelmArtifact(ctx, chartURL)
+	data, err := downloadHelmArtifact(withHelmChartLoadStage(ctx, HelmChartLoadStageChart), chartURL)
 	if err != nil {
 		return nil, fmt.Errorf(
 			"load chart %q from repo %q version %q: download chart archive %q failed: %w",

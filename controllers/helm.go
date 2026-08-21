@@ -35,9 +35,17 @@ func (c *ApiController) responseHelmError(err error) {
 }
 
 func writeHelmInstallStreamEvent(w io.Writer, event store.HelmInstallStreamEvent) error {
+	return writeHelmStreamEvent(w, "install", event)
+}
+
+func writeHelmChartValuesStreamEvent(w io.Writer, event store.HelmChartValuesStreamEvent) error {
+	return writeHelmStreamEvent(w, "chart values", event)
+}
+
+func writeHelmStreamEvent(w io.Writer, kind string, event any) error {
 	payload, err := json.Marshal(event)
 	if err != nil {
-		return fmt.Errorf("marshal Helm install stream event: %w", err)
+		return fmt.Errorf("marshal Helm %s stream event: %w", kind, err)
 	}
 	_, err = fmt.Fprintf(w, "data: %s\n\n", payload)
 	return err
@@ -193,6 +201,47 @@ func (c *ApiController) GetHelmChartValues() {
 		return
 	}
 	c.ResponseOk(values)
+}
+
+// GetHelmChartValuesStream is GetHelmChartValues as Server-Sent Events, so the
+// install dialog can show which artifact is downloading and how far along it is.
+// @router /api/get-helm-chart-values-stream [get]
+func (c *ApiController) GetHelmChartValuesStream() {
+	if c.RequireSignedIn() {
+		return
+	}
+	w := c.Ctx.ResponseWriter.ResponseWriter
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	chartName := c.GetString("chart")
+	repoURL := c.GetString("repo")
+	version := c.GetString("version")
+	if chartName == "" || repoURL == "" {
+		_ = writeHelmChartValuesStreamEvent(w, store.HelmChartValuesStreamEvent{
+			Type:    store.HelmChartValuesStreamEventError,
+			Message: "chart and repo are required",
+		})
+		c.StopRun()
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	responseController := http.NewResponseController(w)
+
+	// Aborting the browser fetch ends the request context, which cancels the
+	// download instead of leaving it to run to its two-minute timeout.
+	events := store.GetHelmChartInstallValuesStream(c.Ctx.Request.Context(), chartName, repoURL, version)
+	for event := range events {
+		if err := writeHelmChartValuesStreamEvent(w, event); err != nil {
+			break
+		}
+		if err := responseController.Flush(); err != nil {
+			break
+		}
+	}
+	c.StopRun()
 }
 
 // ---------- Release lifecycle (via store/Helm SDK) ----------

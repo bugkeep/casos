@@ -152,6 +152,7 @@ func InitAPI() {
 	beego.Router("/api/delete-helm-repo", &controllers.ApiController{}, "POST:DeleteHelmRepo")
 	beego.Router("/api/get-repo-charts", &controllers.ApiController{}, "GET:GetRepoCharts")
 	beego.Router("/api/get-helm-chart-values", &controllers.ApiController{}, "GET:GetHelmChartValues")
+	beego.Router("/api/get-helm-chart-values-stream", &controllers.ApiController{}, "GET:GetHelmChartValuesStream")
 	beego.Router("/api/get-helm-releases", &controllers.ApiController{}, "GET:GetHelmReleases")
 	beego.Router("/api/install-helm-chart", &controllers.ApiController{}, "POST:InstallHelmChart")
 	beego.Router("/api/install-helm-chart-stream", &controllers.ApiController{}, "POST:InstallHelmChartStream")

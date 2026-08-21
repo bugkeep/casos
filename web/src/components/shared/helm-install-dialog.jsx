@@ -11,9 +11,11 @@ import {
   removeStoredHelmTask,
 } from "@/lib/helmTaskStorage";
 import {resolveHelmCompatibilityError} from "@/lib/helmCompatibilityErrors";
+import {formatBytes} from "@/lib/quantity";
 import {Button} from "@/components/ui/button";
 import {Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle} from "@/components/ui/dialog";
 import {Input} from "@/components/ui/input";
+import {Progress} from "@/components/ui/progress";
 import {Textarea} from "@/components/ui/textarea";
 import {MessageAlert} from "@/components/ui/alert";
 import {Field} from "@/components/shared/form-dialog";
@@ -28,6 +30,43 @@ const VALUES_RELOAD_DEBOUNCE = 500;
 const POLL_INTERVAL = 2000;
 const MAX_CONSECUTIVE_POLL_FAILURES = 6;
 const RELEASE_NAME_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
+
+const VALUES_STAGE_LABELS = {
+  index: "helm:Downloading repository index",
+  chart: "helm:Downloading chart archive",
+  oci: "helm:Pulling chart from registry",
+  render: "helm:Rendering default values",
+};
+
+/**
+ * What a chart load is doing while the values box is empty. A repository that
+ * answers with chunked transfer encoding sends no Content-Length, so total is
+ * 0 and only the byte count is shown rather than an invented percentage.
+ */
+function ValuesLoadProgress({progress}) {
+  const {t} = useTranslation();
+  const stageLabel = VALUES_STAGE_LABELS[progress?.stage];
+  const loaded = progress?.loaded ?? 0;
+  const total = progress?.total ?? 0;
+  const percent = total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : null;
+
+  return (
+    <div className="flex flex-col items-center gap-2 py-8">
+      <div className="text-muted-foreground flex items-center gap-3 text-sm">
+        <AiDots size="small" />
+        <span>{stageLabel ? t(stageLabel) : t("helm:Loading values")}</span>
+        {percent !== null ? <span className="tabular-nums">{percent}%</span> : null}
+      </div>
+      {percent !== null ? <Progress value={percent} className="mt-1 w-full max-w-sm" /> : null}
+      {loaded > 0 ? (
+        <div className="text-muted-foreground/80 text-xs tabular-nums">
+          {total > 0 ? `${formatBytes(loaded)} / ${formatBytes(total)}` : formatBytes(loaded)}
+          {progress?.host ? ` · ${progress.host}` : ""}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 /**
  * Installs or upgrades a Helm chart.
@@ -50,6 +89,7 @@ export function HelmInstallDialog({open, chart, action = "install", onClose, onI
   const [valuesBaselineYAML, setValuesBaselineYAML] = useState("");
   const [valuesLoading, setValuesLoading] = useState(false);
   const [valuesLoadError, setValuesLoadError] = useState(null);
+  const [valuesProgress, setValuesProgress] = useState(null);
 
   const [installing, setInstalling] = useState(false);
   const [pollingPaused, setPollingPaused] = useState(false);
@@ -223,6 +263,7 @@ export function HelmInstallDialog({open, chart, action = "install", onClose, onI
     setValuesYAML("");
     setValuesBaselineYAML("");
     setValuesLoading(false);
+    setValuesProgress(null);
     setDone(false);
     setInstalling(false);
     setPollingPaused(false);
@@ -285,28 +326,35 @@ export function HelmInstallDialog({open, chart, action = "install", onClose, onI
 
     if (!open || !chart?.chartName || !effectiveRepoURL) {
       setValuesLoading(false);
+      setValuesProgress(null);
       return undefined;
     }
 
     const controller = new AbortController();
     const changedByUser = effectiveRepoURL !== (chart?.repoURL ?? "") || effectiveVersion !== (chart?.version ?? "");
     setValuesLoading(true);
+    setValuesProgress(null);
 
     const timer = setTimeout(
       () => {
-        HelmBackend.getHelmChartValues(chart.chartName, effectiveRepoURL, effectiveVersion, controller.signal)
-          .then((res) => {
+        HelmBackend.getHelmChartValuesStream(
+          chart.chartName,
+          effectiveRepoURL,
+          effectiveVersion,
+          (progress) => {
+            if (mountedRef.current && generation === valuesGenerationRef.current) {
+              setValuesProgress(progress);
+            }
+          },
+          controller.signal
+        )
+          .then((values) => {
             if (!mountedRef.current || generation !== valuesGenerationRef.current) {
               return;
             }
-            if (res.status === "ok") {
-              const initial = res.data ?? "";
-              setValuesYAML(initial);
-              setValuesBaselineYAML(initial);
-              setValuesLoadError(null);
-            } else {
-              setValuesLoadError(res.msg);
-            }
+            setValuesYAML(values);
+            setValuesBaselineYAML(values);
+            setValuesLoadError(null);
           })
           .catch((e) => {
             if (e.name !== "AbortError" && mountedRef.current && generation === valuesGenerationRef.current) {
@@ -316,6 +364,7 @@ export function HelmInstallDialog({open, chart, action = "install", onClose, onI
           .finally(() => {
             if (mountedRef.current && generation === valuesGenerationRef.current) {
               setValuesLoading(false);
+              setValuesProgress(null);
             }
           });
       },
@@ -346,6 +395,7 @@ export function HelmInstallDialog({open, chart, action = "install", onClose, onI
     setValuesBaselineYAML("");
     setError(null);
     setValuesLoadError(null);
+    setValuesProgress(null);
     setStorageWarning(null);
     setLogs([]);
     setDone(false);
@@ -601,10 +651,7 @@ export function HelmInstallDialog({open, chart, action = "install", onClose, onI
 
               <Field label={t("helm:Values (YAML)")}>
                 {valuesLoading ? (
-                  <div className="text-muted-foreground flex items-center justify-center gap-3 py-8 text-sm">
-                    <AiDots size="small" />
-                    {t("helm:Loading values")}
-                  </div>
+                  <ValuesLoadProgress progress={valuesProgress} />
                 ) : (
                   <Textarea
                     value={valuesYAML}

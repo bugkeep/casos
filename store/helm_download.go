@@ -1,12 +1,14 @@
 package store
 
 import (
+	"compress/gzip"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -203,6 +205,9 @@ func (d *helmArtifactDownloader) downloadOnce(ctx context.Context, rawURL string
 		return nil, err
 	}
 	req.Header.Set("User-Agent", "Helm/3.21.2")
+	// Asking for gzip explicitly turns off the transport's transparent decoding,
+	// keeping Content-Length and the bytes read in the same units.
+	req.Header.Set("Accept-Encoding", "gzip")
 	if cached != nil {
 		if cached.etag != "" {
 			req.Header.Set("If-None-Match", cached.etag)
@@ -222,7 +227,7 @@ func (d *helmArtifactDownloader) downloadOnce(ctx context.Context, rawURL string
 	if resp.StatusCode != http.StatusOK {
 		return nil, &helmHTTPStatusError{statusCode: resp.StatusCode}
 	}
-	data, err := io.ReadAll(resp.Body)
+	data, err := readHelmArtifactBody(attemptCtx, resp, rawURL)
 	if err != nil {
 		return nil, err
 	}
@@ -231,6 +236,25 @@ func (d *helmArtifactDownloader) downloadOnce(ctx context.Context, rawURL string
 		etag:         resp.Header.Get("ETag"),
 		lastModified: resp.Header.Get("Last-Modified"),
 	}, nil
+}
+
+// readHelmArtifactBody returns the decoded response body, counting the encoded
+// bytes as they arrive so a slow repository shows progress instead of silence.
+func readHelmArtifactBody(ctx context.Context, resp *http.Response, rawURL string) ([]byte, error) {
+	var body io.Reader = resp.Body
+	if progress := newHelmChartLoadProgressReader(ctx, rawURL, resp.ContentLength); progress != nil {
+		defer progress.Finish()
+		body = io.TeeReader(body, progress)
+	}
+	if strings.EqualFold(resp.Header.Get("Content-Encoding"), "gzip") {
+		gzipReader, err := gzip.NewReader(body)
+		if err != nil {
+			return nil, fmt.Errorf("decompress gzip response: %w", err)
+		}
+		defer gzipReader.Close()
+		body = gzipReader
+	}
+	return io.ReadAll(body)
 }
 
 func isRetryableHelmDownloadError(err error) bool {

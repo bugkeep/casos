@@ -31,13 +31,6 @@ export function getRepoCharts(url) {
   }).then(r => r.json());
 }
 
-export function getHelmChartValues(chart, repo, version, signal) {
-  return fetch(
-    `${Setting.ServerUrl}/api/get-helm-chart-values?chart=${encodeURIComponent(chart)}&repo=${encodeURIComponent(repo)}&version=${encodeURIComponent(version ?? "")}`,
-    {credentials: "include", headers: lang(), signal}
-  ).then(r => r.json());
-}
-
 export function getHelmReleases(namespace = "all") {
   return fetch(`${Setting.ServerUrl}/api/get-helm-releases?namespace=${namespace}`, {
     credentials: "include", headers: lang(),
@@ -65,11 +58,12 @@ export function installHelmChart(payload) {
   }).then(r => r.json());
 }
 
-// onLine(line) is called for each displayable SSE message; returns "DONE" on completion.
-async function helmChartStream(endpoint, action, payload, onLine, signal) {
-  const resp = await fetch(`${Setting.ServerUrl}${endpoint}`, {
-    method: "POST", credentials: "include", headers: jsonHeaders(), body: JSON.stringify(payload), signal,
-  });
+// Reads a Server-Sent Events response, handing each parsed `data:` payload to
+// onEvent. Returning true from onEvent stops reading and cancels the body.
+async function readServerSentEvents(resp, onEvent) {
+  if (!resp.body) {
+    return;
+  }
   const reader = resp.body.getReader();
   const decoder = new TextDecoder();
   let buf = "";
@@ -82,23 +76,73 @@ async function helmChartStream(endpoint, action, payload, onLine, signal) {
     for (const part of parts) {
       const dataLine = part.split("\n").find(line => line.startsWith("data: "));
       if (!dataLine) {continue;}
-      const event = JSON.parse(dataLine.slice(6));
-      if (event.message) {
-        onLine(event.type === "warning" ? `WARNING: ${event.message}` : event.message);
-      }
-      if (event.type === "error") {
-        const actionError = new Error(event.message || `Helm ${action} failed`);
-        actionError.code = event.error?.code;
-        actionError.gvk = event.error?.gvk;
-        throw actionError;
-      }
-      if (event.type === "done") {
-        onLine("DONE");
-        return "DONE";
+      if (onEvent(JSON.parse(dataLine.slice(6)))) {
+        reader.cancel().catch(() => {});
+        return;
       }
     }
   }
-  throw new Error(`helm ${action} stream ended before completion`);
+}
+
+// Loads a chart's default values over SSE. onProgress receives
+// {stage, loaded, total, host} updates while the repository index and the chart
+// archive download.
+export async function getHelmChartValuesStream(chart, repo, version, onProgress, signal) {
+  const resp = await fetch(
+    `${Setting.ServerUrl}/api/get-helm-chart-values-stream?chart=${encodeURIComponent(chart)}&repo=${encodeURIComponent(repo)}&version=${encodeURIComponent(version ?? "")}`,
+    {credentials: "include", headers: lang(), signal}
+  );
+  if (!resp.ok) {
+    throw new Error(`load chart values failed with HTTP ${resp.status}`);
+  }
+  let values = null;
+  await readServerSentEvents(resp, (event) => {
+    if (event.type === "progress") {
+      onProgress?.(event.progress ?? {});
+      return false;
+    }
+    if (event.type === "error") {
+      throw new Error(event.message || "load chart values failed");
+    }
+    if (event.type === "done") {
+      values = event.values ?? "";
+      return true;
+    }
+    return false;
+  });
+  if (values === null) {
+    throw new Error("chart values stream ended before completion");
+  }
+  return values;
+}
+
+// onLine(line) is called for each displayable SSE message; returns "DONE" on completion.
+async function helmChartStream(endpoint, action, payload, onLine, signal) {
+  const resp = await fetch(`${Setting.ServerUrl}${endpoint}`, {
+    method: "POST", credentials: "include", headers: jsonHeaders(), body: JSON.stringify(payload), signal,
+  });
+  let completed = false;
+  await readServerSentEvents(resp, (event) => {
+    if (event.message) {
+      onLine(event.type === "warning" ? `WARNING: ${event.message}` : event.message);
+    }
+    if (event.type === "error") {
+      const actionError = new Error(event.message || `Helm ${action} failed`);
+      actionError.code = event.error?.code;
+      actionError.gvk = event.error?.gvk;
+      throw actionError;
+    }
+    if (event.type === "done") {
+      onLine("DONE");
+      completed = true;
+      return true;
+    }
+    return false;
+  });
+  if (!completed) {
+    throw new Error(`helm ${action} stream ended before completion`);
+  }
+  return "DONE";
 }
 
 // Closing the browser stream does not cancel a submitted Helm operation.

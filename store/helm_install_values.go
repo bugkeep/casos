@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"strings"
@@ -44,10 +45,17 @@ func tomcatDefaultWebappsWarning() string {
 // GetHelmChartInstallValues returns chart defaults with only the compatibility
 // overrides that the install path will also enforce.
 func GetHelmChartInstallValues(chartName, repoURL, version string) (string, error) {
-	ch, err := loadChart(chartName, repoURL, version)
+	return GetHelmChartInstallValuesContext(context.Background(), chartName, repoURL, version)
+}
+
+// GetHelmChartInstallValuesContext is GetHelmChartInstallValues bound to a
+// context, so a slow repository download can be cancelled and reported on.
+func GetHelmChartInstallValuesContext(ctx context.Context, chartName, repoURL, version string) (string, error) {
+	ch, err := loadChartWithContext(ctx, chartName, repoURL, version)
 	if err != nil {
 		return "", err
 	}
+	reportHelmChartLoadStage(ctx, HelmChartLoadStageRender)
 	return renderHelmChartInstallValues(ch, repoURL)
 }
 
