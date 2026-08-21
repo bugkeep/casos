@@ -854,6 +854,10 @@ func loadChart(chartName, repoURL, version string) (*chart.Chart, error) {
 }
 
 func loadChartWithContext(parent context.Context, chartName, repoURL, version string) (*chart.Chart, error) {
+	return loadChartWithFallbackContext(parent, chartName, repoURL, version, "")
+}
+
+func loadChartWithFallbackContext(parent context.Context, chartName, repoURL, version, contentURL string) (*chart.Chart, error) {
 	if parent == nil {
 		parent = context.Background()
 	}
@@ -877,12 +881,12 @@ func loadChartWithContext(parent context.Context, chartName, repoURL, version st
 
 	idx, err := fetchIndexFile(withHelmChartLoadStage(ctx, HelmChartLoadStageIndex), repoURL)
 	if err != nil {
-		return nil, fmt.Errorf("load chart %q from repo %q version %q: fetch index.yaml failed: %w", chartName, redactURLForError(repoURL), version, err)
+		return loadChartContentURLFallback(ctx, chartName, repoURL, version, contentURL, fmt.Errorf("load chart %q from repo %q version %q: fetch index.yaml failed: %w", chartName, redactURLForError(repoURL), version, err))
 	}
 
 	versions, ok := idx.Entries[chartName]
 	if !ok || len(versions) == 0 {
-		return nil, fmt.Errorf("chart %q not found in repo", chartName)
+		return loadChartContentURLFallback(ctx, chartName, repoURL, version, contentURL, fmt.Errorf("chart %q not found in repo", chartName))
 	}
 
 	var entry *repo.ChartVersion
@@ -893,10 +897,10 @@ func loadChartWithContext(parent context.Context, chartName, repoURL, version st
 		}
 	}
 	if entry == nil {
-		return nil, fmt.Errorf("chart %q version %q not found", chartName, version)
+		return loadChartContentURLFallback(ctx, chartName, repoURL, version, contentURL, fmt.Errorf("chart %q version %q not found", chartName, version))
 	}
 	if len(entry.URLs) == 0 {
-		return nil, fmt.Errorf("chart %q has no download URLs", chartName)
+		return loadChartContentURLFallback(ctx, chartName, repoURL, version, contentURL, fmt.Errorf("chart %q has no download URLs", chartName))
 	}
 
 	chartURL := entry.URLs[0]
@@ -925,25 +929,47 @@ func loadChartWithContext(parent context.Context, chartName, repoURL, version st
 
 	data, err := downloadHelmArtifact(withHelmChartLoadStage(ctx, HelmChartLoadStageChart), chartURL)
 	if err != nil {
-		return nil, fmt.Errorf(
+		return loadChartContentURLFallback(ctx, chartName, repoURL, version, contentURL, fmt.Errorf(
 			"load chart %q from repo %q version %q: download chart archive %q failed: %w",
 			chartName,
 			redactURLForError(repoURL),
 			entry.Version,
 			redactURLForError(chartURL),
 			sanitizeErrorMessage(err, chartURL, repoURL),
-		)
+		))
 	}
 	ch, err := loader.LoadArchive(bytes.NewReader(data))
 	if err != nil {
-		return nil, fmt.Errorf(
+		return loadChartContentURLFallback(ctx, chartName, repoURL, version, contentURL, fmt.Errorf(
 			"load chart %q from repo %q version %q: parse chart archive %q failed: %w",
 			chartName,
 			redactURLForError(repoURL),
 			entry.Version,
 			redactURLForError(chartURL),
 			err,
-		)
+		))
+	}
+	return ch, nil
+}
+
+func loadChartContentURLFallback(ctx context.Context, chartName, repoURL, version, contentURL string, primaryErr error) (*chart.Chart, error) {
+	if strings.TrimSpace(contentURL) == "" {
+		return nil, primaryErr
+	}
+	data, err := downloadHelmArtifact(withHelmChartLoadStage(ctx, HelmChartLoadStageChart), contentURL)
+	if err != nil {
+		return nil, errors.Join(primaryErr, fmt.Errorf("download ArtifactHub content URL %q failed: %w", redactURLForError(contentURL), sanitizeErrorMessage(err, contentURL, repoURL)))
+	}
+	ch, err := loader.LoadArchive(bytes.NewReader(data))
+	if err != nil {
+		return nil, errors.Join(primaryErr, fmt.Errorf("parse ArtifactHub chart archive %q failed: %w", redactURLForError(contentURL), err))
+	}
+	if ch.Metadata == nil || ch.Name() != chartName || (version != "" && !helmVersionsEqual(ch.Metadata.Version, version)) {
+		actualName, actualVersion := "", ""
+		if ch.Metadata != nil {
+			actualName, actualVersion = ch.Name(), ch.Metadata.Version
+		}
+		return nil, errors.Join(primaryErr, fmt.Errorf("ArtifactHub content URL resolved to chart %q version %q, expected %q version %q", actualName, actualVersion, chartName, version))
 	}
 	return ch, nil
 }
@@ -1377,14 +1403,18 @@ func GetHelmReleases(cfg *rest.Config, namespace string) ([]HelmReleaseSummary, 
 }
 
 func InstallHelmChart(cfg *rest.Config, releaseName, namespace, chartName, repoURL, version, valuesYAML string) error {
-	return installHelmChart(cfg, releaseName, namespace, chartName, repoURL, version, valuesYAML, "")
+	return installHelmChart(cfg, releaseName, namespace, chartName, repoURL, version, valuesYAML, "", "")
 }
 
 func InstallHelmChartWithValuesBaseline(cfg *rest.Config, releaseName, namespace, chartName, repoURL, version, valuesYAML, valuesBaselineYAML string) error {
-	return installHelmChart(cfg, releaseName, namespace, chartName, repoURL, version, valuesYAML, valuesBaselineYAML)
+	return installHelmChart(cfg, releaseName, namespace, chartName, repoURL, version, valuesYAML, valuesBaselineYAML, "")
 }
 
-func installHelmChart(cfg *rest.Config, releaseName, namespace, chartName, repoURL, version, valuesYAML, valuesBaselineYAML string) error {
+func InstallHelmChartWithValuesBaselineAndFallback(cfg *rest.Config, releaseName, namespace, chartName, repoURL, version, valuesYAML, valuesBaselineYAML, contentURL string) error {
+	return installHelmChart(cfg, releaseName, namespace, chartName, repoURL, version, valuesYAML, valuesBaselineYAML, contentURL)
+}
+
+func installHelmChart(cfg *rest.Config, releaseName, namespace, chartName, repoURL, version, valuesYAML, valuesBaselineYAML, contentURL string) error {
 	installTimeout, err := configuredHelmInstallTimeout()
 	if err != nil {
 		return err
@@ -1398,7 +1428,7 @@ func installHelmChart(cfg *rest.Config, releaseName, namespace, chartName, repoU
 	}); err != nil {
 		return err
 	}
-	ch, err := loadChart(chartName, repoURL, version)
+	ch, err := loadChartWithFallbackContext(context.Background(), chartName, repoURL, version, contentURL)
 	if err != nil {
 		return err
 	}
@@ -1480,14 +1510,18 @@ func newHelmErrorEvent(err error) HelmInstallStreamEvent {
 // request. Lifecycle persistence is supplied by the caller so store remains
 // independent of the database layer.
 func InstallHelmChartStream(ctx context.Context, lifecycle HelmInstallLifecycle, cfg *rest.Config, releaseName, namespace, chartName, repoURL, version, valuesYAML string) <-chan HelmInstallStreamEvent {
-	return installHelmChartStream(ctx, lifecycle, cfg, releaseName, namespace, chartName, repoURL, version, valuesYAML, "")
+	return installHelmChartStream(ctx, lifecycle, cfg, releaseName, namespace, chartName, repoURL, version, valuesYAML, "", "")
 }
 
 func InstallHelmChartStreamWithValuesBaseline(ctx context.Context, lifecycle HelmInstallLifecycle, cfg *rest.Config, releaseName, namespace, chartName, repoURL, version, valuesYAML, valuesBaselineYAML string) <-chan HelmInstallStreamEvent {
-	return installHelmChartStream(ctx, lifecycle, cfg, releaseName, namespace, chartName, repoURL, version, valuesYAML, valuesBaselineYAML)
+	return installHelmChartStream(ctx, lifecycle, cfg, releaseName, namespace, chartName, repoURL, version, valuesYAML, valuesBaselineYAML, "")
 }
 
-func installHelmChartStream(ctx context.Context, lifecycle HelmInstallLifecycle, cfg *rest.Config, releaseName, namespace, chartName, repoURL, version, valuesYAML, valuesBaselineYAML string) <-chan HelmInstallStreamEvent {
+func InstallHelmChartStreamWithValuesBaselineAndFallback(ctx context.Context, lifecycle HelmInstallLifecycle, cfg *rest.Config, releaseName, namespace, chartName, repoURL, version, valuesYAML, valuesBaselineYAML, contentURL string) <-chan HelmInstallStreamEvent {
+	return installHelmChartStream(ctx, lifecycle, cfg, releaseName, namespace, chartName, repoURL, version, valuesYAML, valuesBaselineYAML, contentURL)
+}
+
+func installHelmChartStream(ctx context.Context, lifecycle HelmInstallLifecycle, cfg *rest.Config, releaseName, namespace, chartName, repoURL, version, valuesYAML, valuesBaselineYAML, contentURL string) <-chan HelmInstallStreamEvent {
 	eventCh := make(chan HelmInstallStreamEvent, 64)
 	if lifecycle == nil {
 		eventCh <- newHelmErrorEvent(errors.New("Helm install lifecycle is required"))
@@ -1570,7 +1604,7 @@ func installHelmChartStream(ctx context.Context, lifecycle HelmInstallLifecycle,
 			finishWithError(err, "node preflight error")
 			return
 		}
-		helmChart, err := loadChartWithContext(installCtx, chartName, repoURL, version)
+		helmChart, err := loadChartWithFallbackContext(installCtx, chartName, repoURL, version, contentURL)
 		if err != nil {
 			finishWithError(err, "chart loading error")
 			return

@@ -51,7 +51,11 @@ func GetHelmChartInstallValues(chartName, repoURL, version string) (string, erro
 // GetHelmChartInstallValuesContext is GetHelmChartInstallValues bound to a
 // context, so a slow repository download can be cancelled and reported on.
 func GetHelmChartInstallValuesContext(ctx context.Context, chartName, repoURL, version string) (string, error) {
-	ch, err := loadChartWithContext(ctx, chartName, repoURL, version)
+	return GetHelmChartInstallValuesWithFallbackContext(ctx, chartName, repoURL, version, "")
+}
+
+func GetHelmChartInstallValuesWithFallbackContext(ctx context.Context, chartName, repoURL, version, contentURL string) (string, error) {
+	ch, err := loadChartWithFallbackContext(ctx, chartName, repoURL, version, contentURL)
 	if err != nil {
 		return "", err
 	}

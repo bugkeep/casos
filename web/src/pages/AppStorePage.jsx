@@ -248,6 +248,7 @@ export default function AppStorePage() {
       return {
         chartName: chart.name,
         repoURL: chart.repository?.url ?? "",
+        artifactHubRepository: chart.repository?.name ?? "",
         version: chart.version ?? "",
         displayName: chart.display_name || chart.name,
         description: chart.description,

@@ -87,9 +87,9 @@ async function readServerSentEvents(resp, onEvent) {
 // Loads a chart's default values over SSE. onProgress receives
 // {stage, loaded, total, host} updates while the repository index and the chart
 // archive download.
-export async function getHelmChartValuesStream(chart, repo, version, onProgress, signal) {
+export async function getHelmChartValuesStream(chart, repo, version, artifactHubRepository, onProgress, signal) {
   const resp = await fetch(
-    `${Setting.ServerUrl}/api/get-helm-chart-values-stream?chart=${encodeURIComponent(chart)}&repo=${encodeURIComponent(repo)}&version=${encodeURIComponent(version ?? "")}`,
+    `${Setting.ServerUrl}/api/get-helm-chart-values-stream?chart=${encodeURIComponent(chart)}&repo=${encodeURIComponent(repo)}&version=${encodeURIComponent(version ?? "")}&artifactHubRepository=${encodeURIComponent(artifactHubRepository ?? "")}`,
     {credentials: "include", headers: lang(), signal}
   );
   if (!resp.ok) {

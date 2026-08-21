@@ -29,17 +29,22 @@ type HelmChartValuesStreamEvent struct {
 // exactly one done or error event, and is closed afterwards. Cancelling ctx
 // aborts the download.
 func GetHelmChartInstallValuesStream(ctx context.Context, chartName, repoURL, version string) <-chan HelmChartValuesStreamEvent {
+	return GetHelmChartInstallValuesStreamWithFallback(ctx, chartName, repoURL, version, "")
+}
+
+func GetHelmChartInstallValuesStreamWithFallback(ctx context.Context, chartName, repoURL, version, contentURL string) <-chan HelmChartValuesStreamEvent {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	collector := newHelmChartLoadProgressCollector(helmChartValuesStreamBuffer)
 	go func() {
 		defer collector.close()
-		values, err := GetHelmChartInstallValuesContext(
+		values, err := GetHelmChartInstallValuesWithFallbackContext(
 			withHelmChartLoadProgress(ctx, collector.report),
 			chartName,
 			repoURL,
 			version,
+			contentURL,
 		)
 		if err != nil {
 			collector.send(ctx, HelmChartValuesStreamEvent{

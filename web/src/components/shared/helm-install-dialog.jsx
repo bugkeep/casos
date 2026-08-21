@@ -321,6 +321,7 @@ export function HelmInstallDialog({open, chart, action = "install", onClose, onI
   useEffect(() => {
     const effectiveRepoURL = form.repoURL || chart?.repoURL;
     const effectiveVersion = form.version || chart?.version || "";
+    const artifactHubRepository = effectiveRepoURL === chart?.repoURL ? chart?.artifactHubRepository : "";
     const generation = valuesGenerationRef.current + 1;
     valuesGenerationRef.current = generation;
 
@@ -341,6 +342,7 @@ export function HelmInstallDialog({open, chart, action = "install", onClose, onI
           chart.chartName,
           effectiveRepoURL,
           effectiveVersion,
+          artifactHubRepository,
           (progress) => {
             if (mountedRef.current && generation === valuesGenerationRef.current) {
               setValuesProgress(progress);
@@ -471,6 +473,7 @@ export function HelmInstallDialog({open, chart, action = "install", onClose, onI
       namespace,
       chartName: chart.chartName,
       repoURL: form.repoURL || chart.repoURL,
+      artifactHubRepository: (form.repoURL || chart.repoURL) === chart.repoURL ? chart.artifactHubRepository : "",
       version: form.version || chart.version,
       valuesYAML,
       valuesBaselineYAML,

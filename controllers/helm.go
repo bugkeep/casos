@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -55,6 +56,65 @@ func writeHelmStreamEvent(w io.Writer, kind string, event any) error {
 
 type ahSearchResult struct {
 	Packages []json.RawMessage `json:"packages"`
+}
+
+type ahPackageDetail struct {
+	ContentURL string `json:"content_url"`
+}
+
+func artifactHubContentURL(ctx context.Context, repository, chartName, version string) (string, error) {
+	repository = strings.TrimSpace(repository)
+	chartName = strings.TrimSpace(chartName)
+	version = strings.TrimSpace(version)
+	if repository == "" || chartName == "" {
+		return "", nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	detailURL := fmt.Sprintf("https://artifacthub.io/api/v1/packages/helm/%s/%s", url.PathEscape(repository), url.PathEscape(chartName))
+	if version != "" {
+		detailURL += "/" + url.PathEscape(version)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, detailURL, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := proxypkg.HTTPClient().Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("ArtifactHub package detail returned HTTP %d", resp.StatusCode)
+	}
+	var detail ahPackageDetail
+	if err := json.NewDecoder(resp.Body).Decode(&detail); err != nil {
+		return "", err
+	}
+	contentURL := strings.TrimSpace(detail.ContentURL)
+	if contentURL == "" {
+		return "", nil
+	}
+	parsed, err := url.Parse(contentURL)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return "", fmt.Errorf("ArtifactHub returned invalid content URL")
+	}
+	return contentURL, nil
+}
+
+func optionalArtifactHubContentURL(ctx context.Context, repository, chartName, version, repoURL string) string {
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(repoURL)), "oci://") {
+		return ""
+	}
+	contentURL, err := artifactHubContentURL(ctx, repository, chartName, version)
+	if err != nil {
+		logs.Warn("resolve ArtifactHub content URL for %s/%s %s: %v", repository, chartName, version, err)
+	}
+	return contentURL
 }
 
 // SearchArtifactHub proxies a search to the ArtifactHub REST API.
@@ -191,11 +251,13 @@ func (c *ApiController) GetHelmChartValues() {
 	chartName := c.GetString("chart")
 	repoURL := c.GetString("repo")
 	version := c.GetString("version")
+	artifactHubRepository := c.GetString("artifactHubRepository")
 	if chartName == "" || repoURL == "" {
 		c.ResponseError("chart and repo are required")
 		return
 	}
-	values, err := store.GetHelmChartInstallValues(chartName, repoURL, version)
+	contentURL := optionalArtifactHubContentURL(c.Ctx.Request.Context(), artifactHubRepository, chartName, version, repoURL)
+	values, err := store.GetHelmChartInstallValuesWithFallbackContext(c.Ctx.Request.Context(), chartName, repoURL, version, contentURL)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
@@ -218,6 +280,7 @@ func (c *ApiController) GetHelmChartValuesStream() {
 	chartName := c.GetString("chart")
 	repoURL := c.GetString("repo")
 	version := c.GetString("version")
+	artifactHubRepository := c.GetString("artifactHubRepository")
 	if chartName == "" || repoURL == "" {
 		_ = writeHelmChartValuesStreamEvent(w, store.HelmChartValuesStreamEvent{
 			Type:    store.HelmChartValuesStreamEventError,
@@ -232,7 +295,8 @@ func (c *ApiController) GetHelmChartValuesStream() {
 
 	// Aborting the browser fetch ends the request context, which cancels the
 	// download instead of leaving it to run to its two-minute timeout.
-	events := store.GetHelmChartInstallValuesStream(c.Ctx.Request.Context(), chartName, repoURL, version)
+	contentURL := optionalArtifactHubContentURL(c.Ctx.Request.Context(), artifactHubRepository, chartName, version, repoURL)
+	events := store.GetHelmChartInstallValuesStreamWithFallback(c.Ctx.Request.Context(), chartName, repoURL, version, contentURL)
 	for event := range events {
 		if err := writeHelmChartValuesStreamEvent(w, event); err != nil {
 			break
@@ -271,6 +335,7 @@ type helmInstallReq struct {
 	Namespace          string `json:"namespace"`
 	ChartName          string `json:"chartName"`
 	RepoURL            string `json:"repoURL"`
+	ArtifactHubRepo    string `json:"artifactHubRepository"`
 	Version            string `json:"version"`
 	ValuesYAML         string `json:"valuesYAML"`
 	ValuesBaselineYAML string `json:"valuesBaselineYAML"`
@@ -292,7 +357,8 @@ func (c *ApiController) InstallHelmChart() {
 		c.ResponseError(err.Error())
 		return
 	}
-	if err := store.InstallHelmChartWithValuesBaseline(cfg, req.ReleaseName, req.Namespace, req.ChartName, req.RepoURL, req.Version, req.ValuesYAML, req.ValuesBaselineYAML); err != nil {
+	contentURL := optionalArtifactHubContentURL(c.Ctx.Request.Context(), req.ArtifactHubRepo, req.ChartName, req.Version, req.RepoURL)
+	if err := store.InstallHelmChartWithValuesBaselineAndFallback(cfg, req.ReleaseName, req.Namespace, req.ChartName, req.RepoURL, req.Version, req.ValuesYAML, req.ValuesBaselineYAML, contentURL); err != nil {
 		c.responseHelmError(err)
 		return
 	}
@@ -378,7 +444,8 @@ func (c *ApiController) streamHelmOperation(operation, actionLabel string, runne
 // @router /api/install-helm-chart-stream [post]
 func (c *ApiController) InstallHelmChartStream() {
 	c.streamHelmOperation(object.HelmOperationInstall, "installation", func(ctx context.Context, lifecycle store.HelmInstallLifecycle, cfg *rest.Config, req helmInstallReq) <-chan store.HelmInstallStreamEvent {
-		return store.InstallHelmChartStreamWithValuesBaseline(ctx, lifecycle, cfg, req.ReleaseName, req.Namespace, req.ChartName, req.RepoURL, req.Version, req.ValuesYAML, req.ValuesBaselineYAML)
+		contentURL := optionalArtifactHubContentURL(ctx, req.ArtifactHubRepo, req.ChartName, req.Version, req.RepoURL)
+		return store.InstallHelmChartStreamWithValuesBaselineAndFallback(ctx, lifecycle, cfg, req.ReleaseName, req.Namespace, req.ChartName, req.RepoURL, req.Version, req.ValuesYAML, req.ValuesBaselineYAML, contentURL)
 	})
 }
 
