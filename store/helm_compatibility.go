@@ -248,14 +248,24 @@ func validateHelmRollbackCompatibility(ctx context.Context, actionConfig *action
 }
 
 func newHelmCompatibilityDryRun(actionConfig *action.Configuration, releaseName, namespace string, remoteLookup bool) *action.Install {
-	dryRun := action.NewInstall(actionConfig)
+	dryRunConfig := actionConfig
+	if !remoteLookup && actionConfig != nil {
+		clientConfig := *actionConfig
+		dryRunConfig = &clientConfig
+	}
+	dryRun := action.NewInstall(dryRunConfig)
 	dryRun.ReleaseName = releaseName
 	dryRun.Namespace = namespace
 	dryRun.CreateNamespace = true
 	dryRun.DryRun = true
 	dryRun.DryRunOption = "client"
+	dryRun.ClientOnly = !remoteLookup
 	if remoteLookup {
 		dryRun.DryRunOption = "server"
+	} else if actionConfig != nil && actionConfig.Capabilities != nil {
+		kubeVersion := actionConfig.Capabilities.KubeVersion
+		dryRun.KubeVersion = &kubeVersion
+		dryRun.APIVersions = append(dryRun.APIVersions, actionConfig.Capabilities.APIVersions...)
 	}
 	dryRun.Timeout = helmCompatibilityTimeout
 	return dryRun
