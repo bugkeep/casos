@@ -13,6 +13,8 @@
 
 **Website: [casos.net](https://www.casos.net) · Live demo: [demo.casos.net](https://demo.casos.net)**
 
+**English | [简体中文](README_zh.md)**
+
 </div>
 
 ---
