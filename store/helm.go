@@ -887,7 +887,7 @@ func loadChartWithContext(parent context.Context, chartName, repoURL, version st
 
 	var entry *repo.ChartVersion
 	for _, v := range versions {
-		if version == "" || v.Version == version {
+		if version == "" || helmVersionsEqual(v.Version, version) {
 			entry = v
 			break
 		}
@@ -946,6 +946,15 @@ func loadChartWithContext(parent context.Context, chartName, repoURL, version st
 		)
 	}
 	return ch, nil
+}
+
+func helmVersionsEqual(left, right string) bool {
+	if left == right {
+		return true
+	}
+	leftVersion, leftErr := semver.NewVersion(left)
+	rightVersion, rightErr := semver.NewVersion(right)
+	return leftErr == nil && rightErr == nil && leftVersion.Equal(rightVersion)
 }
 
 func parseValues(valuesYAML string) (map[string]interface{}, error) {
