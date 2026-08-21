@@ -53,9 +53,9 @@ func finishFailedHelmInstall(installErr error, diagnose func(error) error, clean
 		installErr = diagnose(installErr)
 	}
 	if cleanupErr := cleanup(); cleanupErr != nil {
-		return errors.Join(installErr, fmt.Errorf("clean up failed Helm release: %w", cleanupErr))
+		return fmt.Errorf("Helm install failed: %w\nCleanup warning: %v", installErr, cleanupErr)
 	}
-	return installErr
+	return fmt.Errorf("Helm install failed: %w", installErr)
 }
 
 func cleanupFailedHelmRelease(actionConfig *action.Configuration, install *action.Install, failedRelease *release.Release) error {
