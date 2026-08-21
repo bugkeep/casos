@@ -11,136 +11,100 @@
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-blue?style=flat-square)](https://github.com/casosorg/casos/releases/latest)
 [![Discord](https://img.shields.io/discord/1022748306096537660?logo=discord&label=discord&color=5865F2&style=flat-square)](https://discord.gg/6ma4BAmV7P)
 
-**Official Website: [https://www.casos.net](https://www.casos.net)**
-
-**Live Demo: [https://demo.casos.net](https://demo.casos.net)**
+**Website: [casos.net](https://www.casos.net) · Live demo: [demo.casos.net](https://demo.casos.net)**
 
 </div>
 
 ---
 
-## What is CasOS?
+CasOS is a cloud operating system built on Kubernetes. It **embeds** the Kubernetes
+API server, controller manager and scheduler, so you do not need an existing
+cluster, a control plane, or a single line of YAML. Download one file, run it, and
+you have a working cluster with a web UI and an app store.
 
-CasOS is a cloud operating system built on Kubernetes. It embeds the Kubernetes API server, controller manager, and scheduler, so you do **not** need an existing Kubernetes cluster or a separate control plane — CasOS is the platform itself. Run a single binary and get a fully functional cloud OS with a built-in web UI.
+## Quick start
 
-## Features
+Three steps and about five minutes. No prior Kubernetes knowledge needed.
 
-- Embedded Kubernetes stack (API server, controller manager, scheduler) — no external cluster needed
-- Cluster resource management: Nodes, Namespaces, Pods, Services, ConfigMaps, ServiceAccounts, ClusterRoleBindings
-- Dashboard with cluster overview
-- DockerHub image browser
-- Multi-language support (i18n)
-- Built-in `admin` account out of the box, with optional [Casdoor](https://casdoor.org) single sign-on
+### 1. Install
 
-## Tech Stack
-
-| Layer    | Technology                                |
-|----------|-------------------------------------------|
-| Backend  | Go 1.26+, Beego, SQLite by default (MySQL optional) |
-| Frontend | React 18, Ant Design 6, recharts, i18next |
-| Auth     | Built-in account, or Casdoor (OAuth2 / OIDC) |
-
-## Project Structure
-
-```
-casos/
-├── main.go                  # Entry point
-├── conf/app.conf            # Backend configuration
-├── controllers/             # HTTP controllers (Beego routing)
-├── object/                  # Business logic and data models
-├── routers/                 # Route configuration and filters
-├── proxy/                   # kube-proxy related logic
-└── web/                     # React frontend
-    └── src/
-        ├── App.js
-        ├── DashboardPage.js
-        ├── ManagementPage.js
-        ├── PodListPage.js
-        ├── NodeListPage.js
-        ├── NamespaceListPage.js
-        ├── ServiceListPage.js
-        ├── ConfigMapListPage.js
-        ├── ServiceAccountListPage.js
-        ├── ClusterRoleBindingListPage.js
-        └── backend/         # API client helpers
-```
-
-## Prerequisites
-
-- **Backend**: [Go](https://golang.org/dl/) 1.26+
-- **Frontend**: [Node.js](https://nodejs.org/) 20+ and [Yarn](https://classic.yarnpkg.com/) 1.x
-- Optionally, a [Casdoor](https://casdoor.org) instance, if you want single sign-on instead of the built-in account
-
-Supported platforms: **Linux**, **macOS**, **Windows**
-
-## Install
-
-Linux and macOS (x86_64):
+**Linux / macOS**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/casosorg/casos/master/scripts/install.sh | bash
 ```
 
-Windows PowerShell (x86_64):
+**Windows (PowerShell)**
 
 ```powershell
 irm https://raw.githubusercontent.com/casosorg/casos/master/scripts/install.ps1 | iex
 ```
 
-The installer downloads the matching archive from the latest GitHub release,
-unpacks the executable, and adds CasOS to your user `PATH`. On Linux
-and macOS, open a new shell or run the `source` command printed by the
-installer before running `casos`; the installer also prints the absolute
-executable path. On Windows, the current PowerShell session is updated
-immediately. Releases are x86_64 only: an Apple Silicon Mac and a Windows on
-ARM machine both get that build and run it under emulation, while an arm64
-Linux host has to build from source. Open
-`http://localhost:20080` after starting CasOS. Rerun the command to upgrade. Set
-`CASOS_VERSION` to a release tag such as `v1.32.0` to install that version.
-Both installers read the same settings:
+The installer downloads the latest release, unpacks the executable and adds it to
+your user `PATH`. On Windows the current PowerShell session can use it right away;
+on Linux and macOS, open a new shell (or run the `source` command the installer
+prints). Prefer not to run a script? Download the archive for your system from the
+[releases page](https://github.com/casosorg/casos/releases/latest) and unpack it —
+it holds a single executable, nothing else.
 
-| Variable            | Default                                    | Purpose                          |
-|---------------------|--------------------------------------------|----------------------------------|
-| `CASOS_VERSION`     | `latest`                                   | Release tag, such as `v1.32.0`   |
-| `INSTALL_DIR`       | `$HOME/.local/bin`, `%LOCALAPPDATA%\CasOS\bin` | Directory to install into    |
-| `CASOS_REPOSITORY`  | `casosorg/casos`                           | Release repository to pull from  |
-
-For a piped Linux or macOS install, pass installer variables to `bash`, not to
-`curl`:
+### 2. Start it
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/casosorg/casos/master/scripts/install.sh | CASOS_VERSION=v1.32.0 INSTALL_DIR="$HOME/.local/bin" bash
+casos
 ```
 
-PowerShell has no equivalent prefix syntax. `iex` runs the installer inside the
-current session, so set the variables as `$env:` entries on their own lines
-first:
+On Windows you can also just **double-click `casos.exe`** — it starts the server
+and opens your browser for you.
 
-```powershell
-$env:CASOS_VERSION = 'v1.32.0'
-irm https://raw.githubusercontent.com/casosorg/casos/master/scripts/install.ps1 | iex
-```
+### 3. Open the UI
 
-Those entries outlive the install and would pin any later run in the same
-window, so clear the ones you no longer want:
+Go to **<http://localhost:20080>** and you are signed in as `admin`.
 
-```powershell
-Remove-Item Env:\CASOS_VERSION
-```
+> ⚠️ **Change the password first.** A fresh install has the built-in account
+> `admin` / `123` and signs you in automatically, which means *anyone* who can
+> reach the port is an administrator. Open the account menu in the top-right
+> corner → **My Account** → set a real password. The automatic sign-in stops the
+> moment the password is no longer `123`.
 
-Check what you ended up with, which is also what to quote in a bug report:
+### 4. Install your first app
 
-```bash
-casos --version
-```
+Open the **App Store** and install anything you like. That is the whole workflow —
+CasOS pulls the chart, schedules it, and shows you the running app.
 
-A released binary prints its tag, commit and build date; a binary you built
-yourself reports `dev`.
+The dashboard has a **first-run checklist** that tracks these steps and disappears
+once all four are done. Every step is read from the server, so it stays accurate
+after a refresh or a sign-in from another browser.
 
-### Uninstall
+### What CasOS sets up by itself
 
-The uninstaller removes the binary and the `PATH` entry the installer added.
-Pass the same `INSTALL_DIR` you installed with, if it was not the default.
+You do not have to add nodes, install a CNI or configure storage. On startup CasOS:
+
+- **Turns the machine it runs on into a worker node.** On Linux that is the host
+  itself. On Windows it uses your WSL distribution — and installs WSL for you when
+  there is none. Watch the progress on the **Machines** page.
+- Starts an **ingress controller** and a **service load balancer**, so apps get a
+  reachable address.
+- Stores everything in **SQLite** under the data directory — no database to set up.
+
+| Host | Worker node |
+|------|-------------|
+| Linux | The host itself. CasOS must run as root, or as a user with passwordless `sudo`. |
+| Windows | The local WSL2 distribution, installed automatically when missing. A brand-new WSL install can need one Windows restart. |
+| macOS | Not possible — a kubelet needs a Linux kernel. Add a Linux machine over SSH on the **Machines** page, or run CasOS inside a Linux VM. |
+
+### If something goes wrong
+
+| Symptom | Fix |
+|---------|-----|
+| The page does not load | Another program may hold port 20080. Change `httpport` in `conf/app.conf`. |
+| The cluster has no node | Look for `automatic node setup` in the CasOS log. Fix what it reports, or add a machine by hand on the **Machines** page. |
+| macOS refuses to run the binary | The release is not notarized. A browser download is quarantined: `xattr -d com.apple.quarantine ./casos`. The installer above is unaffected. |
+| Lost the admin password | There is no recovery. Delete the row from the `user` table in `data/casos.db` and restart to get the default account back. |
+| Reporting a bug | Include the output of `casos --version`. A released binary prints its tag, commit and build date; a self-built one reports `dev`. |
+
+### Upgrade and uninstall
+
+Rerun the install command to upgrade. To uninstall:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/casosorg/casos/master/scripts/install.sh | bash -s -- --uninstall
@@ -152,107 +116,86 @@ curl -fsSL https://raw.githubusercontent.com/casosorg/casos/master/scripts/insta
 
 Your data directory is **not** deleted. It holds the SQLite databases, the
 control-plane TLS material and the key that decrypts stored SSH credentials, so
-removing it is a separate, deliberate step. The uninstaller prints the path and
+removing it is a separate, deliberate step — the uninstaller prints the path and
 the exact command for it.
 
-### Notes
+<details>
+<summary><b>Installer options</b> — pin a version, or choose the install directory</summary>
 
-The macOS binaries are not notarized. The installer is unaffected because
-`curl` does not mark downloads with `com.apple.quarantine`, but a build fetched
-manually through a browser is quarantined and Gatekeeper refuses to run it —
-including the executable unpacked from a quarantined archive. Clear the
-attribute after such a download:
+Both installers read the same settings:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `CASOS_VERSION` | `latest` | Release tag, such as `v1.32.0` |
+| `INSTALL_DIR` | `$HOME/.local/bin`, `%LOCALAPPDATA%\CasOS\bin` | Directory to install into |
+| `CASOS_REPOSITORY` | `casosorg/casos` | Release repository to pull from |
+
+On Linux and macOS, pass them to `bash`, not to `curl`:
 
 ```bash
-xattr -d com.apple.quarantine ./casos
+curl -fsSL https://raw.githubusercontent.com/casosorg/casos/master/scripts/install.sh | CASOS_VERSION=v1.32.0 INSTALL_DIR="$HOME/.local/bin" bash
 ```
 
-## First run
+PowerShell has no equivalent prefix syntax. `iex` runs the installer inside the
+current session, so set the variables as `$env:` entries on their own lines first:
 
-CasOS needs at least one Kubernetes worker node before it can schedule
-workloads. After signing in, the dashboard shows a first-run checklist that
-walks through the setup, and disappears once all four steps are done:
+```powershell
+$env:CASOS_VERSION = 'v1.32.0'
+irm https://raw.githubusercontent.com/casosorg/casos/master/scripts/install.ps1 | iex
+```
 
-1. Change the default `admin` password — see [Sign-in](#sign-in) for why this
-   comes first.
-2. Add a machine with SSH credentials on the **Machines** page.
-3. Deploy that machine as a worker node. The node must join the cluster and be
-   ready before workloads can run.
-4. Install the first application from the **App Store**.
+Those entries outlive the install and would pin any later run in the same window,
+so clear the ones you no longer want:
 
-Each step is derived from the server rather than from a local flag, so the
-checklist stays accurate after refreshing the browser or signing in from
-another session.
+```powershell
+Remove-Item Env:\CASOS_VERSION
+```
+
+Releases are x86_64 only. An Apple Silicon Mac and a Windows on ARM machine both
+get that build and run it under emulation; an arm64 Linux host has to
+[build from source](#development).
+
+</details>
+
+## Features
+
+- **Embedded Kubernetes** — API server, controller manager and scheduler in one
+  binary. No external cluster and no `kubeadm`.
+- **Zero-configuration worker node** — the machine you start CasOS on joins the
+  cluster by itself; more machines are added over SSH from the **Machines** page.
+- **App Store** — install and manage Helm releases from the UI.
+- **Full resource management** — Deployments, StatefulSets, DaemonSets, Jobs,
+  CronJobs, Pods, Services, Ingresses, ConfigMaps, Secrets, PVCs, StorageClasses,
+  HPAs, quotas, namespaces and RBAC.
+- **Observability** — dashboard, cluster topology, monitoring, log search, and pod
+  terminals in the browser.
+- **Security** — Casbin-backed admission and authorization policies, plus Trivy
+  image scanning.
+- **Sign-in that needs no setup** — a built-in `admin` account out of the box, with
+  optional [Casdoor](https://casdoor.org) single sign-on.
+- **Multi-language UI** (i18n).
 
 ## Configuration
 
-Edit `conf/app.conf` with your values:
+Most people never need this section: CasOS runs on its defaults, and the setting a
+fresh install is most likely to touch is the HTTP port.
+
+Settings live in `conf/app.conf` next to the executable:
 
 ```ini
-appname       = casos
-httpport      = 20080
-runmode       = dev
+httpport      = 20080      ; web UI and REST API
+apiserverPort = 20443      ; embedded Kubernetes API server
+dataDir       = ./data     ; databases, TLS material, credential key
 
-; Database
-driverName    = sqlite
-dataSourceName=
-dbName        = casos
-kineEndpoint  =
-
-; Casdoor (optional, see Sign-in below)
-casdoorEndpoint     =
-clientId            =
-clientSecret        =
-casdoorOrganization =
-casdoorApplication  =
-
-; Optional control-plane SOCKS5 proxy
-; Leave blank to use environment proxy settings or direct access.
-; When set, the proxy is required for requests not matched by NO_PROXY.
-socks5Proxy =
-
-; Kubernetes control plane
-apiserverPort = 20443
-apiserverBind = 127.0.0.1
-dataDir       = ./data
+driverName    = sqlite     ; default; "mysql" is also supported
+casdoorEndpoint =          ; blank = built-in admin account
+autoEnrollLocalNode = true ; make this machine a worker node on startup
 ```
 
-SQLite is the default and stores CasOS business data in `data/casos.db` and
-Kubernetes state in `data/kine/state.db`. The `data` directory is ignored by
-Git and is writable when running the development command from the repository
-root. A binary that runs without `conf/app.conf` and without a `dataDir`
-environment variable falls back to the per-user data directory
-(`~/.local/share/casos`, `~/Library/Application Support/CasOS`, or
-`%LOCALAPPDATA%\CasOS`) instead of a working-directory-relative path.
-
-> **Breaking change:** `dataDir` used to default to `/var/lib/casos`. It now
-> defaults to `./data`, which is resolved against the working directory of the
-> CasOS process, so starting CasOS from a different directory points it at a
-> different — and most likely empty — data directory. Besides the two SQLite
-> databases, `dataDir` also holds the control-plane TLS material and the key
-> that encrypts stored SSH private keys, so a service that loses track of it
-> can no longer decrypt existing machine credentials. Set `dataDir` to an
-> absolute path such as `/var/lib/casos` for any system installation, make sure
-> the service user can write to it, and move an existing `/var/lib/casos` to
-> the new location before restarting. CasOS logs the directory it resolved as
-> `casos data directory: <path>` on startup.
-
-MySQL remains available by setting `driverName=mysql`, configuring
-`dataSourceName` and `dbName`, and optionally setting a complete
-`kineEndpoint`. Switching an existing installation from MySQL to SQLite starts
-with empty SQLite databases; existing MySQL data is not imported automatically.
-
-The control-plane proxy accepts `host:port`, `socks5://`, and `socks5h://`
-addresses. When `socks5Proxy` is set, CasOS fails requests that cannot use the
-configured proxy instead of silently falling back to direct access. Destinations
-matched by the CasOS process `NO_PROXY` environment variable continue to use
-direct access. When `socks5Proxy` is blank, CasOS follows `HTTP_PROXY`,
-`HTTPS_PROXY`, and `NO_PROXY`, and uses direct access when no environment proxy
-is configured.
-
-**Upgrade notice:** the previous example default of `127.0.0.1:10808` has been
-removed. Set `socks5Proxy` explicitly before upgrading if that local proxy is a
-required control-plane dependency.
+A binary started **without** `conf/app.conf` stores its data in the per-user data
+directory instead: `~/.local/share/casos`, `~/Library/Application Support/CasOS`,
+or `%LOCALAPPDATA%\CasOS`. CasOS logs the directory it resolved as
+`casos data directory: <path>` on startup.
 
 ### Sign-in
 
@@ -260,102 +203,143 @@ required control-plane dependency.
 
 | `casdoorEndpoint` | Sign-in |
 |---|---|
-| blank (default) | Built-in account, stored in the CasOS database |
-| set | Casdoor single sign-on; the built-in account is never created |
+| blank (default) | Built-in `admin` account, stored in the CasOS database |
+| set | [Casdoor](https://casdoor.org) single sign-on; the built-in account is never created |
 
-On first start CasOS creates a single built-in account, `admin`, with the
-password `123`, and signs you straight in so a fresh install has nothing to
-configure. **That also means anyone who can reach the CasOS port is an
-administrator until you change that password.** Open the account menu in the
-top-right corner, pick *My Account*, and set a real one before exposing CasOS
-beyond your own machine — the automatic sign-in stops the moment the password is
-no longer `123`. There is no password recovery: if you lose it, delete the row
-from the `user` table in `data/casos.db` and restart CasOS to get the default
-account back.
-
-To use Casdoor instead, fill in all five Casdoor settings before the first
-start. Each one also reads an environment variable of the same name, so
-`clientSecret` does not have to be written to disk:
+To use Casdoor, fill in all five Casdoor settings before the first start. Each one
+also reads an environment variable of the same name, so `clientSecret` does not
+have to be written to disk:
 
 ```bash
 casdoorEndpoint=https://your-casdoor-instance clientId=... clientSecret=... casdoorOrganization=... casdoorApplication=... casos
 ```
 
-**Upgrade notice:** earlier releases shipped with `conf/app.conf` pointing at a
-shared public Casdoor demo application, credentials included. Those values are
-now blank. An installation that relied on them must configure its own Casdoor
-application, or clear the five settings to switch to the built-in account.
+<details>
+<summary><b>Data directory, MySQL, outbound proxy, manual nodes, upgrade notices</b></summary>
+
+**Data directory.** SQLite stores CasOS business data in `data/casos.db` and
+Kubernetes state in `data/kine/state.db`. The directory also holds the
+control-plane TLS material and the key that encrypts stored SSH private keys, so an
+installation that loses track of it can no longer decrypt existing machine
+credentials.
+
+> **Breaking change:** `dataDir` used to default to `/var/lib/casos`. It now
+> defaults to `./data`, which is resolved against the working directory of the
+> CasOS process — so starting CasOS from a different directory points it at a
+> different, and most likely empty, data directory. Set `dataDir` to an absolute
+> path such as `/var/lib/casos` for any system installation, make sure the service
+> user can write to it, and move an existing `/var/lib/casos` to the new location
+> before restarting.
+
+**MySQL.** Set `driverName=mysql`, configure `dataSourceName` and `dbName`, and
+optionally set a complete `kineEndpoint`. Switching an existing installation from
+MySQL to SQLite starts with empty SQLite databases; existing MySQL data is not
+imported automatically.
+
+**Outbound proxy.** `socks5Proxy` accepts `host:port`, `socks5://` and `socks5h://`
+addresses. When it is set, CasOS fails requests that cannot use the configured
+proxy instead of silently falling back to direct access; destinations matched by
+the CasOS process `NO_PROXY` continue to use direct access. When it is blank, CasOS
+follows `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY`, and uses direct access when no
+environment proxy is configured.
+
+> **Upgrade notice:** the previous example default of `127.0.0.1:10808` has been
+> removed. Set `socks5Proxy` explicitly before upgrading if that local proxy is a
+> required control-plane dependency.
+
+> **Upgrade notice:** earlier releases shipped `conf/app.conf` pointing at a shared
+> public Casdoor demo application, credentials included. Those values are now
+> blank. An installation that relied on them must configure its own Casdoor
+> application, or clear the five settings to switch to the built-in account.
+
+**Manual worker nodes.** Set `autoEnrollLocalNode = false` to manage nodes
+yourself. [`worker-setup.md`](worker-setup.md) walks through building a WSL2 worker
+by hand, and [`machine-setup.md`](machine-setup.md) covers preparing a machine for
+SSH enrollment.
+
+</details>
 
 ## Development
 
-### Backend
+Prerequisites: [Go](https://golang.org/dl/) 1.26+, [Node.js](https://nodejs.org/)
+20+ and [Yarn](https://classic.yarnpkg.com/) 1.x. All frontend commands run inside
+`web/`, and **yarn** is the package manager — the lock file is `web/yarn.lock`.
+
+```bash
+git clone https://github.com/casosorg/casos.git
+cd casos
+```
+
+**Backend** — serves the API and the UI on port 20080:
 
 ```bash
 go run main.go
 ```
 
-### Frontend
+**Frontend** — dev server on port 8002, proxying the API to `localhost:20080`
+(override with `BACKEND_URL`):
 
 ```bash
 cd web
-
-# Install dependencies (first time only)
-yarn install
-
-# Start dev server — port 8002, proxies API to localhost:20080
+yarn install    # first time only
 yarn start
 ```
 
-## Deployment
-
-### Backend
-
-```bash
-# Build binary
-go build -o casos .
-
-# Run
-./casos
-```
-
-### Frontend
+**Tests and lint:**
 
 ```bash
 cd web
-
-# Production build (outputs to web/build/)
-yarn build
+yarn lint          # ESLint with --fix
+yarn lint:ci       # the same check without --fix, as CI runs it
+yarn test:unit     # unit tests
+yarn ui:test       # Playwright end-to-end suite; starts its own backend and dev server
 ```
 
-Serve the `web/build/` directory with any static file server, or let the Go
-backend serve it directly: the backend reads it from disk, so a rebuild of the
-frontend needs no rebuild of the backend.
+See [`web/FRONTEND.md`](web/FRONTEND.md) for the component contract and the
+selector hooks the Playwright suite depends on.
 
-### Standalone binary
+### Building a release binary
 
-Building with `-tags embed` compiles `web/build/` into the backend, producing a
-single file that serves the UI without needing the directory beside it. Run
-`yarn build` first — the build tag requires `web/build/` to exist.
+The backend reads `web/build/` from disk, so during development a frontend rebuild
+alone is enough. To produce the single self-contained file that releases ship,
+build the frontend first and compile with `-tags embed`:
 
 ```bash
 cd web && yarn build && cd ..
 CGO_ENABLED=0 go build -trimpath -tags embed -o casos .
 ```
 
-Every release publishes this binary for Linux, macOS, and Windows on x86_64 on the
-[releases page](https://github.com/casosorg/casos/releases/latest). Each one
-ships as an archive — `.tar.gz` for Linux and macOS, `.zip` for Windows —
-holding the executable alone; compressing a statically linked Kubernetes
-control plane cuts the download to roughly a third.
+Every release publishes that binary for Linux, macOS and Windows on x86_64, as a
+`.tar.gz` (Linux, macOS) or `.zip` (Windows) holding the executable alone.
 
-### Lint
+### Project structure
 
-```bash
-cd web
-
-yarn lint       # ESLint with --fix
-yarn lint:ci    # the same check without --fix, as CI runs it
 ```
+casos/
+├── main.go          # Entry point
+├── conf/app.conf    # Backend configuration
+├── controllers/     # HTTP controllers (Beego routing)
+├── object/          # Business logic and data models
+├── routers/         # Route configuration and filters
+├── server/          # Embedded Kubernetes control plane
+├── deploy/          # Node deployment and the local-node bootstrap
+├── store/           # Helm and App Store logic
+├── proxy/           # kube-proxy related logic
+├── i18n/            # Backend translations
+└── web/             # React frontend
+    └── src/
+        ├── pages/       # One file per screen
+        ├── components/  # shadcn/ui components and shared widgets
+        ├── backend/     # API client helpers
+        ├── hooks/ lib/ locales/
+        └── routes.jsx
+```
+
+| Layer | Technology |
+|---|---|
+| Backend | Go 1.26+, Beego, embedded Kubernetes, SQLite via kine (MySQL optional) |
+| Frontend | React 18, shadcn/ui (Radix + Tailwind v4), Vite, recharts, i18next |
+| Auth | Built-in account, or Casdoor (OAuth2 / OIDC) |
 
 ## License
 
