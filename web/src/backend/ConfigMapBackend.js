@@ -1,7 +1,10 @@
 import * as Setting from "../Setting";
 
-export function getConfigMaps(namespace = "") {
-  return fetch(`${Setting.ServerUrl}/api/get-configmaps?namespace=${encodeURIComponent(namespace)}`, {
+export function getConfigMaps(namespace = "", {page, limit} = {}) {
+  const params = new URLSearchParams({namespace});
+  if (page) {params.set("page", String(page));}
+  if (limit) {params.set("limit", String(limit));}
+  return fetch(`${Setting.ServerUrl}/api/get-configmaps?${params.toString()}`, {
     method: "GET",
     credentials: "include",
     headers: {"Accept-Language": Setting.getAcceptLanguage()},

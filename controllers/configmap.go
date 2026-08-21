@@ -57,6 +57,7 @@ func (c *ApiController) GetConfigMaps() {
 		return
 	}
 	namespace := c.GetString("namespace")
+	page, limit, paged := parsePagination(c)
 	cms, err := object.GetConfigMaps(cfg, namespace)
 	if err != nil {
 		c.ResponseError(err.Error())
@@ -65,6 +66,24 @@ func (c *ApiController) GetConfigMaps() {
 	result := make([]configMapSummary, 0, len(cms))
 	for _, cm := range cms {
 		result = append(result, toSummary(cm))
+	}
+	// Stable order keeps a given object from drifting between pages when the
+	// caller paginates while traffic is mutating the namespace.
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Namespace != result[j].Namespace {
+			return result[i].Namespace < result[j].Namespace
+		}
+		return result[i].Name < result[j].Name
+	})
+	if paged {
+		items, total := paginateSlice(result, page, limit)
+		c.ResponseOk(map[string]any{
+			"items": items,
+			"total": total,
+			"page":  page,
+			"limit": limit,
+		})
+		return
 	}
 	c.ResponseOk(result)
 }

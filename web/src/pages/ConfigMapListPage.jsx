@@ -5,11 +5,13 @@ import * as ConfigMapBackend from "@/backend/ConfigMapBackend";
 import * as NamespaceBackend from "@/backend/NamespaceBackend";
 import * as Setting from "@/Setting";
 import {runAction, useResource} from "@/hooks/use-resource";
+import {usePaginatedResource} from "@/hooks/use-paginated-resource";
 import {Badge} from "@/components/ui/badge";
 import {Button} from "@/components/ui/button";
 import {Input} from "@/components/ui/input";
 import {MessageAlert} from "@/components/ui/alert";
 import {DataTable} from "@/components/shared/data-table";
+import {Pagination} from "@/components/shared/pagination";
 import {ConfirmDialog} from "@/components/shared/confirm-dialog";
 import {Field, FormDialog} from "@/components/shared/form-dialog";
 import {PageContainer} from "@/components/shared/page-header";
@@ -20,7 +22,11 @@ import {RestartDeploymentsDialog} from "@/components/shared/restart-deployments-
 const emptyForm = {namespace: "", name: "", entries: []};
 
 function ConfigMapListPage() {
-  const {data: configMaps, loading, error, refresh} = useResource(() => ConfigMapBackend.getConfigMaps(), [], {initialData: []});
+  const {items: configMaps, total, page, setPage, limit, loading, error, refresh} = usePaginatedResource(
+    ({page, limit}) => ConfigMapBackend.getConfigMaps("", {page, limit}),
+    [],
+    {initialData: []}
+  );
   const {data: namespaces} = useResource(() => NamespaceBackend.getNamespaces(), [], {initialData: [], toastOnError: false});
 
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -171,12 +177,13 @@ function ConfigMapListPage() {
 
       <DataTable
         title={i18next.t("general:ConfigMaps")}
-        description={`${configMaps?.length ?? 0} config maps`}
+        description={`${total} config maps`}
         columns={columns}
         dataSource={configMaps}
         rowKey={(record) => `${record.namespace}/${record.name}`}
         loading={loading}
         searchable
+        pageSize={0}
         emptyText="No ConfigMaps found"
         toolbar={
           <>
@@ -191,6 +198,7 @@ function ConfigMapListPage() {
           </>
         }
       />
+      <Pagination page={page} limit={limit} total={total} onPageChange={setPage} />
 
       <FormDialog
         open={dialogOpen}
