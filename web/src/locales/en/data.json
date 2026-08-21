@@ -32,6 +32,8 @@
     "col Namespace": "Namespace",
     "col Status": "Status",
     "health data unavailable": "Cluster health data unavailable",
+    "no usable nodes title": "No worker nodes are available",
+    "no usable nodes description": "Workloads can't run until at least one node is ready. Add a machine and deploy it as a node to get started.",
     "label Offline": "Offline",
     "label Online": "Online",
     "label Other": "Other",

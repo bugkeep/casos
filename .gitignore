@@ -41,3 +41,9 @@ tmp/
 # Editor/IDE
 .idea/
 .vscode/
+
+# Local playwright-mcp browsing artifacts (console logs + page snapshots)
+/.playwright-mcp/
+
+# Empty-cluster dashboard screenshots captured during local testing
+/dashboard-empty-cluster*.png

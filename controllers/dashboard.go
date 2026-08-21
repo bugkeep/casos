@@ -37,6 +37,10 @@ const (
 type dashboardStats struct {
 	NodesTotal           int            `json:"nodesTotal"`
 	NodesReady           int            `json:"nodesReady"`
+	// NodesLoaded tells the UI whether the node list above is real data or a
+	// zero default from a failed apiserver query, so the "no worker nodes"
+	// banner can avoid firing on a transient apiserver outage.
+	NodesLoaded          bool           `json:"nodesLoaded"`
 	NodesByOS            map[string]int `json:"nodesByOS"`
 	NodesByArch          map[string]int `json:"nodesByArch"`
 	PodsTotal            int            `json:"podsTotal"`
@@ -82,6 +86,7 @@ func (c *ApiController) GetDashboard() {
 	nodesLoaded := false
 	if nodes, err := object.GetNodes(cfg); err == nil {
 		nodesLoaded = true
+		stats.NodesLoaded = true
 		stats.NodesTotal = len(nodes)
 		for _, n := range nodes {
 			for _, cond := range n.Status.Conditions {

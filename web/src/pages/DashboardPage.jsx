@@ -1,15 +1,16 @@
 import React, {useEffect, useMemo, useState} from "react";
 import {useHistory} from "react-router-dom";
 import {useTranslation} from "react-i18next";
-import {Boxes, CheckCircle2, Layers, Network, Server, Settings, TriangleAlert} from "lucide-react";
+import {ArrowRight, Boxes, CheckCircle2, Layers, Network, Server, Settings, TriangleAlert} from "lucide-react";
 import * as AccountBackend from "@/backend/AccountBackend";
 import * as DashboardBackend from "@/backend/DashboardBackend";
 import * as HelmBackend from "@/backend/HelmBackend";
 import * as MachineBackend from "@/backend/MachineBackend";
 import {useResource} from "@/hooks/use-resource";
 import {Badge} from "@/components/ui/badge";
+import {Button} from "@/components/ui/button";
 import {Card, CardContent, CardHeader, CardTitle} from "@/components/ui/card";
-import {Alert, AlertTitle} from "@/components/ui/alert";
+import {Alert, AlertTitle, MessageAlert} from "@/components/ui/alert";
 import {Progress} from "@/components/ui/progress";
 import {DataTable} from "@/components/shared/data-table";
 import {PageContainer} from "@/components/shared/page-header";
@@ -159,6 +160,12 @@ function DashboardPage({account, accountUpdatedAt, onOpenAccount}) {
   const unhealthyPods = Array.isArray(stats.unhealthyPods) ? stats.unhealthyPods : [];
   const {healthStatus, notReadyNodes} = getDashboardHealthState(stats);
   const clusterHealthy = healthStatus === "healthy";
+  // nodesLoaded guards against a transient apiserver outage being read as
+  // "fresh install, no nodes" — the banner is wrong on a brief blip but right
+  // on the common case where the cluster genuinely has zero nodes. We narrow
+  // to nodesTotal === 0 (not nodesReady === 0) so the "Add a machine" CTA
+  // doesn't fire on a cluster whose nodes exist but are all NotReady.
+  const needsNodes = stats.nodesLoaded && stats.nodesTotal === 0;
   let healthMessage = "";
   if (healthStatus === "unknown") {
     healthMessage = t("dashboard:health data unavailable");
@@ -190,7 +197,19 @@ function DashboardPage({account, accountUpdatedAt, onOpenAccount}) {
   return (
     <PageContainer>
       {firstRunChecklist}
-      {!clusterHealthy ? (
+      {needsNodes ? (
+        <MessageAlert
+          variant="destructive"
+          title={t("dashboard:no usable nodes title")}
+          description={t("dashboard:no usable nodes description")}
+          action={
+            <Button size="sm" onClick={() => history.push("/machines")}>
+              {t("general:Add Machine")}
+              <ArrowRight />
+            </Button>
+          }
+        />
+      ) : !clusterHealthy ? (
         <div className="grid gap-2">
           <Alert variant={healthStatus === "unknown" ? "warning" : "destructive"}>
             <TriangleAlert />

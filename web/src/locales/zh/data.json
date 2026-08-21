@@ -32,6 +32,8 @@
     "col Namespace": "命名空间",
     "col Status": "状态",
     "health data unavailable": "集群健康数据不可用",
+    "no usable nodes title": "当前没有可用的工作节点",
+    "no usable nodes description": "集群中至少需要一个就绪节点才能调度工作负载。请先添加一台机器并将其部署为节点。",
     "label Offline": "离线",
     "label Online": "在线",
     "label Other": "其他",
