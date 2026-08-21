@@ -60,20 +60,51 @@ func helmInstallNodeProblem(nodes []corev1.Node, now time.Time) (problem string,
 		return "no Kubernetes nodes are registered, so this app has nowhere to run; add a worker node before installing", false
 	}
 	cordoned, notReady := 0, 0
+	schedulable := 0
+	var schedulableAllocatablePods int64
+	anySchedulableReady := false
 	for _, node := range nodes {
 		if node.Spec.Unschedulable {
 			cordoned++
 			continue
 		}
+		schedulable++
+		schedulableAllocatablePods += nodeAllocatablePods(node)
 		ready, since := helmInstallNodeReadiness(node)
 		if ready {
-			return "", false
+			anySchedulableReady = true
+			continue
 		}
 		notReady++
 		if since.IsZero() || now.Sub(since) < helmInstallNodeSettleGrace {
 			settling = true
 		}
 	}
+	// Branch 1 — fast pass: at least one schedulable node is Ready AND the
+	// cluster reports non-zero Pod capacity overall. Helm can attempt to
+	// schedule; any notReady node's settling state is irrelevant.
+	if anySchedulableReady && schedulableAllocatablePods > 0 {
+		return "", false
+	}
+	// Branch 2 — resource-exhaustion guard. At least one schedulable node is
+	// Ready (so kubelet is responding) yet the cluster reports zero
+	// allocatable Pods overall. The release's Pods would stay Pending for
+	// the full helmInstallTimeout; fail in seconds instead. This branch
+	// intentionally hard-fails even when other nodes are settling, because
+	// the Ready node's reported state is the authoritative signal — kubelet
+	// writes Conditions (including Ready) and Allocatable in the same
+	// NodeStatus update, so a Ready=True + pods=0 observation is the
+	// genuine cluster state, not a transient boot window.
+	if anySchedulableReady && schedulableAllocatablePods == 0 {
+		return fmt.Sprintf(
+			"no Kubernetes node can fit a Pod (%d schedulable, total pods=0 allocatable); free capacity or add workers before installing",
+			schedulable,
+		), false
+	}
+	// Branch 3 — no Ready node. The readiness summary dominates; a pods=0
+	// observation here is incidental (kubelet has not reported yet, or the
+	// cluster is mid-boot), not the root cause. Preserve settling so a
+	// cold-start cluster can still install.
 	return fmt.Sprintf(
 		"no Kubernetes node can run this app (%d cordoned, %d not ready); uncordon or repair a worker node before installing",
 		cordoned, notReady,
@@ -87,4 +118,15 @@ func helmInstallNodeReadiness(node corev1.Node) (bool, time.Time) {
 		}
 	}
 	return false, time.Time{}
+}
+
+// nodeAllocatablePods returns the Pod capacity that a schedulable node is
+// willing to admit, or 0 if the node reports no Pods key at all (treated as
+// "cannot accept work" rather than infinity).
+func nodeAllocatablePods(node corev1.Node) int64 {
+	q, ok := node.Status.Allocatable[corev1.ResourcePods]
+	if !ok {
+		return 0
+	}
+	return q.Value()
 }
