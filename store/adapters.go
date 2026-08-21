@@ -65,8 +65,18 @@ type clusterContext struct {
 // helmChartAdapterRegistry maps canonical chart names to install adaptations.
 // Explicit user values always win over adapter patches.
 var helmChartAdapterRegistry = map[string]helmChartAdapter{
-	"grafana":  {valuesPatches: nodePortServiceValuesPatch()},
-	"pgadmin4": {valuesPatches: nodePortServiceValuesPatch()},
+	"argo-cd":               {valuesPatches: argoCDValuesPatches()},
+	"cert-manager":          {valuesPatches: certManagerValuesPatches()},
+	"grafana":               {valuesPatches: nodePortServiceValuesPatch()},
+	"ingress-nginx":         {valuesPatches: ingressNginxValuesPatches()},
+	"kube-prometheus-stack": {valuesPatches: kubePrometheusStackValuesPatches()},
+	"kubernetes-dashboard":  {valuesPatches: kubernetesDashboardValuesPatches()},
+	"loki":                  {valuesPatches: lokiValuesPatches()},
+	"pgadmin4":              {valuesPatches: nodePortServiceValuesPatch()},
+	"postgresql":            {valuesPatches: postgresqlValuesPatches()},
+	"prometheus":            {valuesPatches: prometheusValuesPatches()},
+	"redis":                 {valuesPatches: redisValuesPatches()},
+	"traefik":               {valuesPatches: traefikValuesPatches()},
 	"n8n": {
 		valuesPatches:      nodePortServiceValuesPatch(),
 		chartValuesPatchFn: n8nSecureCookiePatch,
@@ -104,6 +114,112 @@ var nextcloudTrustedDomainsBinding = []clusterHostBinding{{
 func nodePortServiceValuesPatch() map[string]interface{} {
 	return map[string]interface{}{
 		"service": map[string]interface{}{"type": "NodePort"},
+	}
+}
+
+func argoCDValuesPatches() map[string]interface{} {
+	return helmValuePatch([]string{"server", "service"}, map[string]interface{}{"type": "NodePort"})
+}
+
+func certManagerValuesPatches() map[string]interface{} {
+	return helmValuePatch([]string{"crds"}, map[string]interface{}{"enabled": true})
+}
+
+func prometheusExporterCompatibilityPatch() map[string]interface{} {
+	return map[string]interface{}{
+		"prometheus-node-exporter": map[string]interface{}{
+			"hostRootFsMount": map[string]interface{}{"enabled": false},
+			"hostNetwork":     false,
+			"hostPID":         false,
+		},
+	}
+}
+
+func prometheusValuesPatches() map[string]interface{} {
+	patches := prometheusExporterCompatibilityPatch()
+	patches["server"] = map[string]interface{}{
+		"service": map[string]interface{}{"type": "NodePort"},
+	}
+	return patches
+}
+
+func kubePrometheusStackValuesPatches() map[string]interface{} {
+	patches := prometheusExporterCompatibilityPatch()
+	patches["grafana"] = map[string]interface{}{
+		"service": map[string]interface{}{"type": "NodePort"},
+	}
+	patches["prometheus"] = map[string]interface{}{
+		"service": map[string]interface{}{"type": "NodePort"},
+	}
+	return patches
+}
+
+func kubernetesDashboardValuesPatches() map[string]interface{} {
+	return helmValuePatch([]string{"kong", "proxy"}, map[string]interface{}{"type": "NodePort"})
+}
+
+func ingressNginxValuesPatches() map[string]interface{} {
+	return helmValuePatch([]string{"controller", "service"}, map[string]interface{}{"type": "NodePort"})
+}
+
+func redisValuesPatches() map[string]interface{} {
+	return map[string]interface{}{
+		"architecture": "standalone",
+		"master": map[string]interface{}{
+			"service": map[string]interface{}{"type": "NodePort"},
+		},
+	}
+}
+
+func postgresqlValuesPatches() map[string]interface{} {
+	return helmValuePatch([]string{"primary", "service"}, map[string]interface{}{"type": "NodePort"})
+}
+
+func traefikValuesPatches() map[string]interface{} {
+	return map[string]interface{}{
+		"ingressClass": map[string]interface{}{
+			"enabled":        true,
+			"isDefaultClass": false,
+			"name":           "traefik-app",
+		},
+		"providers": map[string]interface{}{
+			"kubernetesCRD":     map[string]interface{}{"ingressClass": "traefik-app"},
+			"kubernetesIngress": map[string]interface{}{"ingressClass": "traefik-app"},
+		},
+		"service": map[string]interface{}{
+			"spec": map[string]interface{}{"type": "NodePort"},
+		},
+	}
+}
+
+func lokiValuesPatches() map[string]interface{} {
+	return map[string]interface{}{
+		"deploymentMode": "SingleBinary",
+		"loki": map[string]interface{}{
+			"commonConfig": map[string]interface{}{"replication_factor": 1},
+			"schemaConfig": map[string]interface{}{
+				"configs": []interface{}{
+					map[string]interface{}{
+						"from":         "2024-04-01",
+						"store":        "tsdb",
+						"object_store": "filesystem",
+						"schema":       "v13",
+						"index": map[string]interface{}{
+							"prefix": "loki_index_",
+							"period": "24h",
+						},
+					},
+				},
+			},
+			"storage": map[string]interface{}{"type": "filesystem"},
+		},
+		"singleBinary": map[string]interface{}{"replicas": 1},
+		"backend":      map[string]interface{}{"replicas": 0},
+		"read":         map[string]interface{}{"replicas": 0},
+		"write":        map[string]interface{}{"replicas": 0},
+		"gateway": map[string]interface{}{
+			"service": map[string]interface{}{"type": "NodePort"},
+		},
 	}
 }
 

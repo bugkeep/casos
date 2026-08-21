@@ -72,6 +72,7 @@ func main() {
 		return
 	}
 
+	proxy.EnsureClusterNoProxy()
 	object.InitAdapter()
 	object.CreateTables()
 	// Before anything can read them: a Helm task still marked active belongs to

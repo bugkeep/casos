@@ -3,7 +3,10 @@ package deploy
 import (
 	"context"
 	"fmt"
+	"net"
+	"os/exec"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -110,7 +113,46 @@ func bootstrapLocalNode(ctx context.Context) error {
 		return fmt.Errorf("deploy node %s: %w", machine.Name, err)
 	}
 	logs.Info("automatic node setup: deploying node %s as task %d", machine.Name, task.Id)
-	return waitForNodeDeployTask(ctx, task.Id)
+	if err = waitForNodeDeployTask(ctx, task.Id); err != nil {
+		return err
+	}
+	if runtime.GOOS == "windows" {
+		if err = ensureWindowsWSLClusterRoutes(ctx, machine.Ip); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ensureWindowsWSLClusterRoutes lets the Windows-hosted control plane reach
+// Services and Pods behind the WSL worker. WSL's NAT address changes whenever
+// it restarts, so these active-store routes must be reconciled on every CasOS
+// startup rather than installed once.
+func ensureWindowsWSLClusterRoutes(ctx context.Context, gateway string) error {
+	ip := net.ParseIP(strings.TrimSpace(gateway))
+	if ip == nil || ip.To4() == nil || ip.IsLoopback() {
+		return fmt.Errorf("configure WSL cluster routes: invalid WSL gateway %q", gateway)
+	}
+	gateway = ip.String()
+	for _, route := range []struct {
+		network string
+		mask    string
+	}{
+		{network: "10.43.0.0", mask: "255.255.0.0"},
+		{network: "10.244.0.0", mask: "255.255.0.0"},
+	} {
+		args := []string{"CHANGE", route.network, "MASK", route.mask, gateway, "METRIC", "5"}
+		output, err := exec.CommandContext(ctx, "route.exe", args...).CombinedOutput()
+		if err != nil {
+			args[0] = "ADD"
+			output, err = exec.CommandContext(ctx, "route.exe", args...).CombinedOutput()
+		}
+		if err != nil {
+			return fmt.Errorf("configure Windows route %s/16 through WSL %s: %w: %s", route.network, gateway, err, strings.TrimSpace(string(output)))
+		}
+	}
+	logs.Info("automatic node setup: Windows routes to Service and Pod networks now use WSL gateway %s", gateway)
+	return nil
 }
 
 // localNodeMachine registers whatever stands in for this machine and returns

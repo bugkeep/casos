@@ -41,6 +41,7 @@ import (
 	"gopkg.in/yaml.v3"
 	sigsyaml "sigs.k8s.io/yaml"
 
+	"github.com/casosorg/casos/conf"
 	proxypkg "github.com/casosorg/casos/proxy"
 )
 
@@ -584,6 +585,40 @@ func pullOCIChart(ctx context.Context, repoURL, version string) (*registry.PullR
 	return pull, nil
 }
 
+func loadOCIChartWithMirrorFallback(ctx context.Context, repoURL, version string) (*chart.Chart, error) {
+	ch, err := loadOCIChart(ctx, repoURL, version)
+	if err == nil {
+		return ch, nil
+	}
+	mirrorURL := dockerHubOCIChartMirror(repoURL)
+	if mirrorURL == "" {
+		return nil, err
+	}
+	mirrored, mirrorErr := loadOCIChart(ctx, mirrorURL, version)
+	if mirrorErr == nil {
+		return mirrored, nil
+	}
+	return nil, errors.Join(err, fmt.Errorf("Docker Hub OCI mirror %q failed: %w", redactURLForError(mirrorURL), mirrorErr))
+}
+
+func dockerHubOCIChartMirror(repoURL string) string {
+	if strings.EqualFold(strings.TrimSpace(conf.GetConfigStringDefault("imageRegistryMirror", "auto")), "never") {
+		return ""
+	}
+	prefix := fmt.Sprintf("%s://", registry.OCIScheme)
+	ref := strings.TrimPrefix(strings.TrimSpace(repoURL), prefix)
+	host, path, ok := strings.Cut(ref, "/")
+	if !ok || path == "" {
+		return ""
+	}
+	switch strings.ToLower(host) {
+	case "docker.io", "registry-1.docker.io":
+		return prefix + "docker.1ms.run/" + path
+	default:
+		return ""
+	}
+}
+
 func cachedOCIChartPull(pullRef string) (*registry.PullResult, bool, error) {
 	data, ok := defaultHelmArtifactCache.get("oci-chart:" + pullRef)
 	if !ok {
@@ -866,7 +901,7 @@ func loadChartWithFallbackContext(parent context.Context, chartName, repoURL, ve
 
 	if isOCIRepo(repoURL) {
 		reportHelmChartLoadStage(ctx, HelmChartLoadStageOCI)
-		ch, err := loadOCIChart(withHelmChartLoadStage(ctx, HelmChartLoadStageOCI), repoURL, version)
+		ch, err := loadOCIChartWithMirrorFallback(withHelmChartLoadStage(ctx, HelmChartLoadStageOCI), repoURL, version)
 		if err != nil {
 			return nil, fmt.Errorf(
 				"load chart %q from OCI repo %q version %q: %w",
@@ -910,7 +945,7 @@ func loadChartWithFallbackContext(parent context.Context, chartName, repoURL, ve
 			ociVersion = entry.Version
 		}
 		reportHelmChartLoadStage(ctx, HelmChartLoadStageOCI)
-		ch, err := loadOCIChart(withHelmChartLoadStage(ctx, HelmChartLoadStageOCI), chartURL, ociVersion)
+		ch, err := loadOCIChartWithMirrorFallback(withHelmChartLoadStage(ctx, HelmChartLoadStageOCI), chartURL, ociVersion)
 		if err != nil {
 			return nil, fmt.Errorf(
 				"load chart %q from repo %q version %q: index.yaml resolved to OCI chart URL %q: %w",

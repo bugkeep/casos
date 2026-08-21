@@ -42,9 +42,8 @@ func GenerateK8sRegistryHostsToml() string {
 	return generatedRegistryHostsMarker + `
 server = "https://registry.k8s.io"
 
-[host."https://registry.aliyuncs.com/v2/google_containers"]
+[host."https://k8s.m.daocloud.io"]
   capabilities = ["pull", "resolve"]
-  override_path = true
 `
 }
 

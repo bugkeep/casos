@@ -361,6 +361,7 @@ func isAllowedNodeDeployPath(path string) bool {
 	allowedExactPaths := []string{
 		"/etc/containerd/config.toml",
 		"/etc/containerd/certs.d/docker.io/hosts.toml",
+		"/etc/containerd/certs.d/ghcr.io/hosts.toml",
 		"/etc/containerd/certs.d/registry.k8s.io/hosts.toml",
 		"/etc/kubernetes/worker.kubeconfig",
 		"/etc/kubernetes/ca.crt",
