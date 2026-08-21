@@ -198,7 +198,16 @@ function PodListPage() {
         );
       },
     },
-    {key: "image", title: i18next.t("general:Image"), dataIndex: "image", ellipsis: true, className: "font-mono text-xs"},
+    {
+      key: "image",
+      title: i18next.t("general:Image"),
+      dataIndex: "image",
+      // Every other column here is fixed-width, so without a floor the image is
+      // the one that gives, and a registry-qualified tag clips to nothing.
+      minWidth: 260,
+      ellipsis: true,
+      className: "font-mono text-xs",
+    },
     {
       key: "nodeName",
       title: "Node",

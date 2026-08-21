@@ -46,15 +46,20 @@ from `components/ui/` directly except for `Button`, `Input`, `Badge`.
 The list-page workhorse. Columns are declared as:
 
 ```js
-{key, title, dataIndex, render(value, record, index), width, align,
+{key, title, dataIndex, render(value, record, index), width, minWidth, align,
  sortable, ellipsis, className, headerClassName}
 ```
 
 `dataIndex` may be a dotted path; a column without one is a display column
-(actions) and cannot sort. Table props: `dataSource`, `rowKey` (string or
-function), `loading`, `title`, `description`, `toolbar`, `searchable`,
-`pageSize` (0 disables pagination), `emptyText`, `onRowClick`, `expandable`,
-`dense`. Pagination only renders once the rows overflow a page.
+(actions) and cannot sort. `width` pins a column; `minWidth` only stops it
+being squeezed, which is what an `ellipsis` column needs so it clips at a
+readable size instead of collapsing between fixed-width neighbours. An
+`ellipsis` cell also exposes its raw value as a hover tooltip.
+
+Table props: `dataSource`, `rowKey` (string or function), `loading`, `title`,
+`description`, `toolbar`, `searchable`, `pageSize` (0 disables pagination),
+`emptyText`, `onRowClick`, `expandable`, `dense`. Pagination only renders once
+the rows overflow a page.
 
 ### Dialogs
 

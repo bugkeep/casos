@@ -16,10 +16,25 @@ import {Skeleton} from "@/components/ui/skeleton";
 import {EmptyState} from "@/components/shared/empty-state";
 
 // Column descriptor accepted by DataTable:
-//   {key, title, dataIndex, render(value, record, index), width, align,
-//    sortable, ellipsis, className, headerClassName}
+//   {key, title, dataIndex, render(value, record, index), width, minWidth,
+//    align, sortable, ellipsis, className, headerClassName}
 // `dataIndex` may be a dotted path. A column without one is a display column
 // (actions, computed cells) and is never sortable.
+
+// `width` pins a column at both ends so the browser cannot redistribute it.
+// `minWidth` alone leaves a column free to grow into spare space while keeping
+// fixed-width neighbours from squeezing it away — which is what an `ellipsis`
+// column needs, since its `max-w-0` otherwise lets it collapse to nothing once
+// the fixed widths have claimed the whole table.
+function columnStyle(meta) {
+  if (meta.width) {
+    return {width: meta.width, minWidth: meta.minWidth ?? meta.width};
+  }
+  if (meta.minWidth) {
+    return {minWidth: meta.minWidth};
+  }
+  return undefined;
+}
 
 function readPath(row, path) {
   if (path === undefined || path === null) {
@@ -196,7 +211,7 @@ export function DataTable({
                 return (
                   <TableHead
                     key={header.id}
-                    style={meta.width ? {width: meta.width, minWidth: meta.width} : undefined}
+                    style={columnStyle(meta)}
                     className={cn(
                       meta.align === "right" && "text-right",
                       meta.align === "center" && "text-center",
@@ -271,10 +286,18 @@ export function DataTable({
                     ) : null}
                     {row.getVisibleCells().map((cell) => {
                       const meta = cell.column.columnDef.meta ?? {};
+                      // A clipped cell still has to be readable somehow, so the
+                      // raw value rides along as the native hover tooltip.
+                      const cellValue = meta.dataIndex === undefined ? undefined : cell.getValue();
+                      const clipped =
+                        meta.ellipsis && (typeof cellValue === "string" || typeof cellValue === "number")
+                          ? String(cellValue)
+                          : undefined;
                       return (
                         <TableCell
                           key={cell.id}
-                          style={meta.width ? {width: meta.width, minWidth: meta.width} : undefined}
+                          title={clipped}
+                          style={columnStyle(meta)}
                           className={cn(
                             dense && "py-1.5",
                             meta.align === "right" && "text-right",
