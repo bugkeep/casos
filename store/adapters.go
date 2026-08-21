@@ -93,6 +93,39 @@ var helmChartAdapterRegistry = map[string]helmChartAdapter{
 	},
 }
 
+// simpleNodePortApps lists applications that work out-of-the-box with the
+// universal adapter: they expose a primary service that needs nothing beyond
+// being made reachable via NodePort.
+var simpleNodePortApps = []string{
+	"uptime-kuma",
+	"wordpress",
+	"ghost",
+	"jenkins",
+	"redmine",
+	"gitea",
+	"mattermost",
+	"rabbitmq",
+	"sonarqube",
+	"metallb",
+}
+
+func init() {
+	for _, appName := range simpleNodePortApps {
+		helmChartAdapterRegistry[appName] = helmChartAdapter{
+			valuesPatches: simpleNodePortValuesPatch(),
+		}
+	}
+}
+
+// simpleNodePortValuesPatch is the universal adapter for applications that
+// expose a primary service. It makes the app reachable immediately after
+// install without requiring chart-specific knowledge.
+func simpleNodePortValuesPatch() map[string]interface{} {
+	return map[string]interface{}{
+		"service": map[string]interface{}{"type": "NodePort"},
+	}
+}
+
 // nextcloudTrustedDomainsBinding keeps Nextcloud reachable through the node
 // address the NodePort patch above publishes: any Host outside trusted_domains
 // gets a 400 "Access through untrusted domain". The chart templates this path
