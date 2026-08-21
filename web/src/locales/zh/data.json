@@ -19,6 +19,8 @@
   },
   "dashboard": {
     "alert healthy": "集群健康",
+    "alert no nodes": "当前没有可用的工作节点",
+    "alert no nodes description": "添加一台机器并将其部署为节点后，CasOS 才能调度工作负载。",
     "alert nodes not ready": "{{count}} 个节点未就绪",
     "alert unhealthy": "{{count}} 个异常 Pod",
     "alert unhealthy cluster": "集群不健康",

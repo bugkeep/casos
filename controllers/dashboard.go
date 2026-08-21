@@ -37,6 +37,7 @@ const (
 type dashboardStats struct {
 	NodesTotal           int            `json:"nodesTotal"`
 	NodesReady           int            `json:"nodesReady"`
+	NodesLoaded          bool           `json:"nodesLoaded"` // false when the node query failed, so a zero NodesTotal is not "no nodes yet"
 	NodesByOS            map[string]int `json:"nodesByOS"`
 	NodesByArch          map[string]int `json:"nodesByArch"`
 	PodsTotal            int            `json:"podsTotal"`
@@ -79,9 +80,8 @@ func (c *ApiController) GetDashboard() {
 		UnhealthyPods:   []unhealthyPod{},
 	}
 
-	nodesLoaded := false
 	if nodes, err := object.GetNodes(cfg); err == nil {
-		nodesLoaded = true
+		stats.NodesLoaded = true
 		stats.NodesTotal = len(nodes)
 		for _, n := range nodes {
 			for _, cond := range n.Status.Conditions {
@@ -170,7 +170,7 @@ func (c *ApiController) GetDashboard() {
 		stats.ServiceAccounts = len(sas)
 	}
 
-	stats.HealthStatus = dashboardHealthStatus(stats, nodesLoaded, podsLoaded)
+	stats.HealthStatus = dashboardHealthStatus(stats, podsLoaded)
 
 	// Cluster resource usage — best-effort, ignored if kubelet is unreachable
 	certDir := ""
@@ -189,14 +189,14 @@ func (c *ApiController) GetDashboard() {
 	c.ResponseOk(stats)
 }
 
-func dashboardHealthStatus(stats dashboardStats, nodesLoaded, podsLoaded bool) string {
-	if nodesLoaded && stats.NodesTotal > 0 && stats.NodesReady != stats.NodesTotal {
+func dashboardHealthStatus(stats dashboardStats, podsLoaded bool) string {
+	if stats.NodesLoaded && stats.NodesTotal > 0 && stats.NodesReady != stats.NodesTotal {
 		return dashboardHealthUnhealthy
 	}
 	if podsLoaded && len(stats.UnhealthyPods) > 0 {
 		return dashboardHealthUnhealthy
 	}
-	if !nodesLoaded || !podsLoaded || stats.NodesTotal == 0 {
+	if !stats.NodesLoaded || !podsLoaded || stats.NodesTotal == 0 {
 		return dashboardHealthUnknown
 	}
 	return dashboardHealthHealthy

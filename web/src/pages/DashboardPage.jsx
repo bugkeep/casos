@@ -1,15 +1,16 @@
 import React, {useEffect, useMemo, useState} from "react";
 import {useHistory} from "react-router-dom";
 import {useTranslation} from "react-i18next";
-import {Boxes, CheckCircle2, Layers, Network, Server, Settings, TriangleAlert} from "lucide-react";
+import {ArrowRight, Boxes, CheckCircle2, Layers, Network, Server, Settings, TriangleAlert} from "lucide-react";
 import * as AccountBackend from "@/backend/AccountBackend";
 import * as DashboardBackend from "@/backend/DashboardBackend";
 import * as HelmBackend from "@/backend/HelmBackend";
 import * as MachineBackend from "@/backend/MachineBackend";
 import {useResource} from "@/hooks/use-resource";
 import {Badge} from "@/components/ui/badge";
+import {Button} from "@/components/ui/button";
 import {Card, CardContent, CardHeader, CardTitle} from "@/components/ui/card";
-import {Alert, AlertTitle} from "@/components/ui/alert";
+import {Alert, AlertTitle, MessageAlert} from "@/components/ui/alert";
 import {Progress} from "@/components/ui/progress";
 import {DataTable} from "@/components/shared/data-table";
 import {PageContainer} from "@/components/shared/page-header";
@@ -157,7 +158,7 @@ function DashboardPage({account, accountUpdatedAt, onOpenAccount}) {
   const nodeReadyRate = stats.nodesTotal > 0 ? Number(((stats.nodesReady / stats.nodesTotal) * 100).toFixed(1)) : 0;
   const podRunningRate = stats.podsTotal > 0 ? Number(((stats.podsRunning / stats.podsTotal) * 100).toFixed(1)) : 0;
   const unhealthyPods = Array.isArray(stats.unhealthyPods) ? stats.unhealthyPods : [];
-  const {healthStatus, notReadyNodes} = getDashboardHealthState(stats);
+  const {healthStatus, notReadyNodes, needsNodes} = getDashboardHealthState(stats);
   const clusterHealthy = healthStatus === "healthy";
   let healthMessage = "";
   if (healthStatus === "unknown") {
@@ -187,32 +188,58 @@ function DashboardPage({account, accountUpdatedAt, onOpenAccount}) {
     },
   ];
 
+  // With no nodes the health alert can only say "unavailable" or list Pods that
+  // are pending for that one reason, so the banner replaces it. The checklist
+  // already says it better on a fresh install, so the banner waits its turn.
+  let clusterAlert = null;
+  if (needsNodes) {
+    if (!firstRunChecklist && !firstRunLoading) {
+      clusterAlert = (
+        <MessageAlert
+          variant="destructive"
+          title={t("dashboard:alert no nodes")}
+          description={t("dashboard:alert no nodes description")}
+          action={
+            <Button size="sm" onClick={() => history.push("/machines")}>
+              {t("general:Add Machine")}
+              <ArrowRight />
+            </Button>
+          }
+        />
+      );
+    }
+  } else if (!clusterHealthy) {
+    clusterAlert = (
+      <div className="grid gap-2">
+        <Alert variant={healthStatus === "unknown" ? "warning" : "destructive"}>
+          <TriangleAlert />
+          <AlertTitle className="line-clamp-none break-words">{healthMessage}</AlertTitle>
+        </Alert>
+        {healthStatus === "unhealthy" && unhealthyPods.length > 0 ? (
+          <DataTable
+            columns={unhealthyColumns}
+            dataSource={unhealthyPods}
+            rowKey={(record, index) => `${record.namespace}/${record.name}/${index}`}
+            pageSize={5}
+            dense
+            onRowClick={(record) => history.push(`/pods?namespace=${record.namespace}`)}
+          />
+        ) : null}
+      </div>
+    );
+  } else {
+    clusterAlert = (
+      <Alert variant="success">
+        <CheckCircle2 />
+        <AlertTitle>{t("dashboard:alert healthy")}</AlertTitle>
+      </Alert>
+    );
+  }
+
   return (
     <PageContainer>
       {firstRunChecklist}
-      {!clusterHealthy ? (
-        <div className="grid gap-2">
-          <Alert variant={healthStatus === "unknown" ? "warning" : "destructive"}>
-            <TriangleAlert />
-            <AlertTitle className="line-clamp-none break-words">{healthMessage}</AlertTitle>
-          </Alert>
-          {healthStatus === "unhealthy" && unhealthyPods.length > 0 ? (
-            <DataTable
-              columns={unhealthyColumns}
-              dataSource={unhealthyPods}
-              rowKey={(record, index) => `${record.namespace}/${record.name}/${index}`}
-              pageSize={5}
-              dense
-              onRowClick={(record) => history.push(`/pods?namespace=${record.namespace}`)}
-            />
-          ) : null}
-        </div>
-      ) : (
-        <Alert variant="success">
-          <CheckCircle2 />
-          <AlertTitle>{t("dashboard:alert healthy")}</AlertTitle>
-        </Alert>
-      )}
+      {clusterAlert}
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8">
         <StatCard label={t("dashboard:stat Nodes total")} value={stats.nodesTotal} icon={Server} tone="info" />

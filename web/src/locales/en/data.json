@@ -19,6 +19,8 @@
   },
   "dashboard": {
     "alert healthy": "Cluster healthy",
+    "alert no nodes": "No worker nodes are available",
+    "alert no nodes description": "CasOS can't schedule workloads until a machine is added and deployed as a node.",
     "alert nodes not ready": "{{count}} node(s) not ready",
     "alert unhealthy": "{{count}} unhealthy pod(s)",
     "alert unhealthy cluster": "Cluster unhealthy",

@@ -11,5 +11,9 @@ export function getDashboardHealthState(stats) {
   return {
     healthStatus: HEALTH_STATES.has(stats?.healthStatus) ? stats.healthStatus : "unknown",
     notReadyNodes: Math.max(nodesTotal - nodesReady, 0),
+    // The node list loaded and was empty: a cluster waiting on its first node,
+    // not an apiserver failure. nodesTotal, not nodesReady, so the "add a
+    // machine" prompt stays off a cluster whose nodes are merely NotReady.
+    needsNodes: stats?.nodesLoaded === true && nodesTotal === 0,
   };
 }
