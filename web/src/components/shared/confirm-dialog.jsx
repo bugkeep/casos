@@ -26,6 +26,7 @@ export function ConfirmDialog({
   children,
   title,
   description,
+  extra,
   confirmText = "Confirm",
   cancelText = "Cancel",
   variant = "destructive",
@@ -60,6 +61,7 @@ export function ConfirmDialog({
           <AlertDialogTitle>{title}</AlertDialogTitle>
           {description ? <AlertDialogDescription>{description}</AlertDialogDescription> : null}
         </AlertDialogHeader>
+        {extra}
         <AlertDialogFooter>
           <AlertDialogCancel>{cancelText}</AlertDialogCancel>
           <AlertDialogAction variant={variant} onClick={handleConfirm} disabled={pending}>

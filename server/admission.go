@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"sync"
 
 	"github.com/beego/beego/logs"
 	"github.com/casosorg/casos/object"
@@ -22,33 +21,6 @@ func RegisterAdmissionHandler(mux *http.ServeMux) {
 // enforceAdmission is the policy check the handler runs; a seam so the tests
 // can assert which requests reach the enforcer at all.
 var enforceAdmission = object.EnforceAdmissionPolicy
-
-// appStoreImages holds the images belonging to the Helm releases installed
-// through the App Store — the only images the vulnerability gate blocks.
-// Refreshed in the background and read from the webhook's request goroutines,
-// hence the mutex.
-var (
-	appStoreImagesMu sync.RWMutex
-	appStoreImages   = map[string]bool{}
-)
-
-func setAppStoreImages(images []string) {
-	next := make(map[string]bool, len(images))
-	for _, image := range images {
-		if image != "" {
-			next[image] = true
-		}
-	}
-	appStoreImagesMu.Lock()
-	defer appStoreImagesMu.Unlock()
-	appStoreImages = next
-}
-
-func isAppStoreImage(image string) bool {
-	appStoreImagesMu.RLock()
-	defer appStoreImagesMu.RUnlock()
-	return appStoreImages[image]
-}
 
 // Kubernetes attaches system:authenticated (or system:unauthenticated) to every
 // request that reaches the API server, so those two say nothing about who the
@@ -141,27 +113,32 @@ func admissionValidateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Image vulnerability check: only for Pod-creating operations.
+	// Keep the scan cache current from what the cluster actually runs. This
+	// never denies the pod — see recordPodImages.
 	if req.Resource.Resource == "pods" && (req.Operation == admissionv1.Create || req.Operation == admissionv1.Update) {
-		if denyMsg := checkPodImages(req.Object.Raw); denyMsg != "" {
-			resp.Response.Allowed = false
-			RecordAdmissionDenial(req.UserInfo.Username, namespace, req.Resource.Resource, string(req.Operation), denyMsg)
-			resp.Response.Result = &metav1.Status{Message: denyMsg}
-			writeAdmissionResponse(w, resp)
-			return
-		}
+		recordPodImages(req.Object.Raw)
 	}
 
 	writeAdmissionResponse(w, resp)
 }
 
-// checkPodImages extracts images from the Pod spec, checks Trivy cache, and
-// triggers async scans for unknown images. Returns a non-empty denial message
-// if any image has CRITICAL vulnerabilities in the cache.
-func checkPodImages(raw []byte) string {
+// recordPodImages keeps the scan cache filled from what actually runs on the
+// cluster, and reports images already known to carry CRITICAL findings.
+//
+// It never denies the pod. The vulnerability gate lives at install time instead
+// (store.ImageVulnerabilityGate): admission cannot tell a first install from a
+// restart, and an image only becomes gate-eligible once its release is
+// installed, so denying here blocked exactly the pods of apps the operator had
+// already been allowed to install. Every recreation after the first scan landed
+// was rejected — a node reboot or a rollout would silently and permanently
+// destroy a working app while Helm still reported it as deployed.
+//
+// Refusing to install a vulnerable image is a decision the operator can act on.
+// Refusing to restart one they are already running only takes the app away.
+func recordPodImages(raw []byte) {
 	var pod corev1.Pod
 	if err := json.Unmarshal(raw, &pod); err != nil {
-		return ""
+		return
 	}
 
 	var images []string
@@ -179,28 +156,13 @@ func checkPodImages(raw []byte) string {
 			continue
 		}
 		if result == nil {
-			// No cache yet — allow this time and kick off a background scan.
 			object.TriggerScan(image)
 			continue
 		}
 		if result.Status == "done" && result.Critical > 0 {
-			// The gate only holds back what the operator can actually act on:
-			// a third-party image the App Store installed, which they can
-			// answer by picking a different chart version or uninstalling it.
-			// CasOS's own components are not a choice they made — CoreDNS
-			// carries CRITICALs in its transitive Go dependencies at every
-			// released tag, and denying it leaves the whole cluster without
-			// name resolution, including whatever would replace it. Those are
-			// still scanned and still listed under Trivy scan results; only
-			// the denial is withheld.
-			if !isAppStoreImage(image) {
-				logs.Warning("image %s has %d CRITICAL vulnerabilities; allowed because it is not an App Store image", image, result.Critical)
-				continue
-			}
-			return fmt.Sprintf("image %s has %d CRITICAL vulnerabilities — update the image or remove it from the scan results to override", image, result.Critical)
+			logs.Warning("image %s has %d CRITICAL vulnerabilities; it is listed under Trivy scan results", image, result.Critical)
 		}
 	}
-	return ""
 }
 
 func writeAdmissionResponse(w http.ResponseWriter, resp *admissionv1.AdmissionReview) {

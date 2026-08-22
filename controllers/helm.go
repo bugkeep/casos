@@ -603,6 +603,7 @@ func (c *ApiController) RollbackHelmRelease() {
 type helmUninstallReq struct {
 	ReleaseName string `json:"releaseName"`
 	Namespace   string `json:"namespace"`
+	DeleteData  bool   `json:"deleteData"`
 }
 
 // UninstallHelmRelease removes a Helm release from the cluster.
@@ -621,7 +622,7 @@ func (c *ApiController) UninstallHelmRelease() {
 		c.ResponseError(err.Error())
 		return
 	}
-	if err := store.UninstallHelmRelease(cfg, req.ReleaseName, req.Namespace); err != nil {
+	if err := store.UninstallHelmReleaseWithOptions(cfg, req.ReleaseName, req.Namespace, req.DeleteData); err != nil {
 		c.ResponseError(err.Error())
 		return
 	}

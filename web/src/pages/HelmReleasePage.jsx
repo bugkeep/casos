@@ -5,6 +5,7 @@ import * as HelmBackend from "@/backend/HelmBackend";
 import * as Setting from "@/Setting";
 import {Badge} from "@/components/ui/badge";
 import {Button} from "@/components/ui/button";
+import {Checkbox} from "@/components/ui/checkbox";
 import {MessageAlert} from "@/components/ui/alert";
 import {SimpleTooltip} from "@/components/ui/tooltip";
 import {DataTable} from "@/components/shared/data-table";
@@ -14,6 +15,10 @@ import {ResourceSheet} from "@/components/shared/resource-sheet";
 import {SimpleSelect} from "@/components/shared/simple-select";
 import {AiDots, Loading} from "@/components/shared/loading";
 import {HelmInstallDialog} from "@/components/shared/helm-install-dialog";
+
+function releaseKey(release) {
+  return `${release.namespace}/${release.name}`;
+}
 
 const STATUS_VARIANTS = {
   deployed: "success",
@@ -99,6 +104,8 @@ export default function HelmReleasePage() {
   const [releases, setReleases] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  // Keyed per release so the choice cannot leak from one row's dialog to another.
+  const [deleteDataFor, setDeleteDataFor] = useState({});
 
   const [historyRelease, setHistoryRelease] = useState(null);
   const [history, setHistory] = useState([]);
@@ -249,7 +256,12 @@ export default function HelmReleasePage() {
   }
 
   function handleUninstall(release) {
-    return HelmBackend.uninstallHelmRelease({releaseName: release.name, namespace: release.namespace}).then((res) => {
+    const deleteData = deleteDataFor[releaseKey(release)] ?? false;
+    return HelmBackend.uninstallHelmRelease({
+      releaseName: release.name,
+      namespace: release.namespace,
+      deleteData,
+    }).then((res) => {
       if (res.status === "ok") {
         Setting.showMessage("success", `Uninstalled ${release.name}`);
         fetchReleases();
@@ -257,6 +269,7 @@ export default function HelmReleasePage() {
         setError(res.msg);
         Setting.showMessage("error", res.msg);
       }
+      setDeleteDataFor((previous) => ({...previous, [releaseKey(release)]: false}));
     });
   }
 
@@ -333,6 +346,23 @@ export default function HelmReleasePage() {
           <ConfirmDialog
             title={t("helm:Uninstall release?")}
             description={`${release.name} (${release.namespace})`}
+            extra={
+              <label className="hover:bg-accent/50 flex cursor-pointer items-start gap-2 rounded-md px-2 py-1.5 text-sm">
+                <Checkbox
+                  className="mt-0.5"
+                  checked={deleteDataFor[releaseKey(release)] ?? false}
+                  onCheckedChange={(checked) =>
+                    setDeleteDataFor((previous) => ({...previous, [releaseKey(release)]: checked === true}))
+                  }
+                />
+                <span>
+                  {t("helm:Also delete this app's data")}
+                  <span className="text-muted-foreground block text-xs">
+                    {t("helm:Its volumes are kept by default, and reinstalling this app will reuse them")}
+                  </span>
+                </span>
+              </label>
+            }
             confirmText={t("general:Delete")}
             cancelText={t("general:Cancel")}
             onConfirm={() => handleUninstall(release)}

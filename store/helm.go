@@ -1113,6 +1113,7 @@ func helmReleaseDiagnostics(parent context.Context, cfg *rest.Config, releaseNam
 			addObjectName(pod.Name)
 			lines = appendPodDiagnostics(lines, pod)
 		}
+		lines = appendContainerLogDiagnostics(ctx, client, lines, namespace, pods.Items)
 	}
 
 	lines = appendEventDiagnostics(ctx, client, lines, namespace, releaseName, objectNames)
@@ -1490,6 +1491,9 @@ func installHelmChart(cfg *rest.Config, releaseName, namespace, chartName, repoU
 	compatibilityCtx, cancelCompatibility := context.WithTimeout(context.Background(), helmCompatibilityTimeout)
 	attachHelmCapabilities(compatibilityCtx, actionConfig, cfg, helmWarningLog)
 	err = validateHelmChartCompatibility(compatibilityCtx, cfg, actionConfig, releaseName, namespace, ch, vals)
+	if err == nil {
+		err = checkHelmInstallImages(compatibilityCtx, actionConfig, releaseName, namespace, ch, vals)
+	}
 	cancelCompatibility()
 	if err != nil {
 		return err
@@ -1497,10 +1501,14 @@ func installHelmChart(cfg *rest.Config, releaseName, namespace, chartName, repoU
 	install := action.NewInstall(actionConfig)
 	configureHelmInstall(install, releaseName, namespace, installTimeout)
 
-	failedRelease, err := install.Run(ch, vals)
+	installCtx, cancelInstall := context.WithCancel(context.Background())
+	defer cancelInstall()
+	failFast := startHelmInstallFailFast(installCtx, cancelInstall, cfg, releaseName, namespace)
+	failedRelease, err := install.RunWithContext(installCtx, ch, vals)
+	failFast.Stop()
 	if err != nil {
 		return finishFailedHelmInstall(
-			err,
+			withHelmFailFastReason(err, failFast),
 			func(installErr error) error {
 				return withHelmReleaseDiagnostics(context.Background(), cfg, releaseName, namespace, installErr)
 			},
@@ -1669,6 +1677,9 @@ func installHelmChartStream(ctx context.Context, lifecycle HelmInstallLifecycle,
 		compatibilityCtx, cancelCompatibility := context.WithTimeout(installCtx, helmCompatibilityTimeout)
 		attachHelmCapabilities(compatibilityCtx, actionConfig, cfg, logFn)
 		err = validateHelmChartCompatibility(compatibilityCtx, cfg, actionConfig, releaseName, namespace, helmChart, vals)
+		if err == nil {
+			err = checkHelmInstallImages(compatibilityCtx, actionConfig, releaseName, namespace, helmChart, vals)
+		}
 		cancelCompatibility()
 		if err != nil {
 			finishWithError(err, "compatibility validation error")
@@ -1683,15 +1694,20 @@ func installHelmChartStream(ctx context.Context, lifecycle HelmInstallLifecycle,
 		progress := startHelmProgressReporter(installCtx, cfg, releaseName, namespace, func(line string) {
 			sendLog(line)
 		})
+		failFast := startHelmInstallFailFast(installCtx, cancelInstall, cfg, releaseName, namespace)
 		failedRelease, installErr := install.RunWithContext(installCtx, helmChart, vals)
+		failFast.Stop()
 		// Stopped before anything else, because the reporter holds sendLog and
 		// this goroutine closes the channel sendLog writes to.
 		progress.Stop()
 		if installErr != nil {
+			// The diagnostics and the cleanup below both need to reach the
+			// cluster, and installCtx is cancelled once the watcher fires.
+			diagnosticsCtx := context.WithoutCancel(installCtx)
 			err = finishFailedHelmInstall(
-				installErr,
+				withHelmFailFastReason(installErr, failFast),
 				func(installErr error) error {
-					for _, line := range helmReleaseDiagnostics(installCtx, cfg, releaseName, namespace) {
+					for _, line := range helmReleaseDiagnostics(diagnosticsCtx, cfg, releaseName, namespace) {
 						sendLog(line)
 					}
 					return installErr
@@ -1953,15 +1969,39 @@ func RollbackHelmRelease(cfg *rest.Config, releaseName, namespace string, revisi
 }
 
 func UninstallHelmRelease(cfg *rest.Config, releaseName, namespace string) error {
+	return UninstallHelmReleaseWithOptions(cfg, releaseName, namespace, false)
+}
+
+// UninstallHelmReleaseWithOptions removes a release and, when deleteData is set,
+// the PersistentVolumeClaims it left behind.
+//
+// Helm never deletes a StatefulSet's volumeClaimTemplate claims, so without this
+// the next install of the same app finds the old volumes and a freshly generated
+// password in its Secret, and can no longer authenticate against its own
+// database. The claims are listed before the uninstall, because that is the only
+// moment the release's own resources are still there to identify them.
+func UninstallHelmReleaseWithOptions(cfg *rest.Config, releaseName, namespace string, deleteData bool) error {
 	actionConfig, err := newHelmConfig(cfg, namespace)
 	if err != nil {
 		return err
 	}
+	var claims []string
+	if deleteData {
+		claims, err = helmReleaseClaimNames(context.Background(), cfg, releaseName, namespace)
+		if err != nil {
+			return err
+		}
+	}
 	uninstall := action.NewUninstall(actionConfig)
 	uninstall.Wait = true
-	uninstall.Timeout = helmOperationTimeout
-	_, err = uninstall.Run(releaseName)
-	return err
+	uninstall.Timeout = helmUninstallTimeout()
+	if _, err = uninstall.Run(releaseName); err != nil {
+		return err
+	}
+	if !deleteData {
+		return nil
+	}
+	return deleteHelmReleaseClaims(context.Background(), cfg, namespace, claims)
 }
 
 func GetHelmReleaseHistory(cfg *rest.Config, releaseName, namespace string) ([]HelmReleaseHistory, error) {

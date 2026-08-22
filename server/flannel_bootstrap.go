@@ -175,12 +175,21 @@ func buildFlannelDaemonSet(cfg Config) *appsv1.DaemonSet {
 		Resources:    flannelResources("10m", "16Mi", "50m", "64Mi"),
 		VolumeMounts: []corev1.VolumeMount{{Name: "cni-bin", MountPath: "/opt/cni/bin"}},
 	}
+	// containerd loads the lexicographically first conflist and ignores the
+	// rest, so any leftover config sorting before 10-flannel.conflist silently
+	// wins: flannel keeps running, writes its subnet file and brings up
+	// flannel.1, while pods are attached by the stale plugin instead. That
+	// costs the overlay MTU and, worse, hairpinMode — without it a pod cannot
+	// reach a Service whose only endpoint is itself, which is how admission
+	// webhooks and clustered apps talk to themselves. 10-bridge.conflist is the
+	// name the pre-flannel worker-setup guide told operators to write by hand,
+	// so only nodes provisioned before managed flannel carry it.
 	initConfig := corev1.Container{
 		Name: "install-cni", Image: flannelDaemonImage, ImagePullPolicy: corev1.PullIfNotPresent,
 		Command: []string{"sh", "-ec"}, Args: []string{`tmp=/etc/cni/net.d/.10-flannel.conflist.casos
 cp -f /etc/kube-flannel/cni-conf.json "$tmp"
 chmod 0644 "$tmp"
-rm -f /etc/cni/net.d/10-casos-bridge.conflist
+rm -f /etc/cni/net.d/10-casos-bridge.conflist /etc/cni/net.d/10-bridge.conflist
 mv -f "$tmp" /etc/cni/net.d/10-flannel.conflist`},
 		Resources: flannelResources("10m", "16Mi", "50m", "64Mi"),
 		VolumeMounts: []corev1.VolumeMount{

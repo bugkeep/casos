@@ -1,48 +1,52 @@
 package server
 
 import (
-	"context"
-	"time"
+	"fmt"
+	"strings"
 
 	"github.com/beego/beego/logs"
-	"k8s.io/client-go/rest"
 
+	"github.com/casosorg/casos/object"
 	"github.com/casosorg/casos/store"
 )
 
-// appStoreImageRefreshInterval is how often the admission gate re-reads which
-// images belong to App Store releases. Helm releases change only when an
-// operator installs, upgrades or removes one, so this is a cheap poll — and
-// missing a change costs at most one interval of a newly installed chart going
-// unblocked, which is the same fail-open the gate already takes while an
-// image's first scan is still running.
-const appStoreImageRefreshInterval = 30 * time.Second
-
-// StartAppStoreImageRefresh keeps the admission gate's view of App Store images
-// current. Must be called after the apiserver is ready.
-func StartAppStoreImageRefresh(ctx context.Context, cfg *rest.Config) {
-	go func() {
-		ticker := time.NewTicker(appStoreImageRefreshInterval)
-		defer ticker.Stop()
-		for {
-			refreshAppStoreImages(cfg)
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-			}
+// InstallImageVulnerabilityGate refuses to install a chart whose images are
+// already known to carry CRITICAL findings.
+//
+// It runs before Helm creates anything, so the operator gets a decision they can
+// act on: choose another chart version, or clear the finding from the scan
+// results to override. Images with no scan yet are allowed and queued — the gate
+// reports what is known, and never guesses.
+func InstallImageVulnerabilityGate(images []string) error {
+	var blocked []string
+	for _, image := range images {
+		if image == "" {
+			continue
 		}
-	}()
+		result, err := object.GetTrivyScanResultByImage(image)
+		if err != nil {
+			logs.Error("trivy cache lookup %s: %v", image, err)
+			continue
+		}
+		if result == nil {
+			object.TriggerScan(image)
+			continue
+		}
+		if result.Status == "done" && result.Critical > 0 {
+			blocked = append(blocked, fmt.Sprintf("%s (%d CRITICAL)", image, result.Critical))
+		}
+	}
+	if len(blocked) == 0 {
+		return nil
+	}
+	return fmt.Errorf(
+		"this app was not installed because its images have known CRITICAL vulnerabilities: %s — install a chart version with updated images, or remove the image from the Trivy scan results to override",
+		strings.Join(blocked, ", "),
+	)
 }
 
-func refreshAppStoreImages(cfg *rest.Config) {
-	images, err := store.ReleaseImages(cfg)
-	if err != nil {
-		// Leaving the previous set in place is the safe failure: replacing it
-		// with an empty one would silently stop gating every App Store image
-		// for as long as Helm is unreachable.
-		logs.Warning("app store image refresh: %v", err)
-		return
-	}
-	setAppStoreImages(images)
+// RegisterInstallImageVulnerabilityGate hands the gate to the store package,
+// which cannot reach the scan results itself.
+func RegisterInstallImageVulnerabilityGate() {
+	store.ImageVulnerabilityGate = InstallImageVulnerabilityGate
 }

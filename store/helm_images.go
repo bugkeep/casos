@@ -2,50 +2,7 @@ package store
 
 import (
 	"gopkg.in/yaml.v3"
-	"helm.sh/helm/v3/pkg/action"
-	"k8s.io/client-go/rest"
 )
-
-// ReleaseImages returns every container image named by the manifests of the
-// Helm releases installed in the cluster.
-//
-// This is the App Store's footprint, and the only set of images in a CasOS
-// cluster that an operator both chose and can change: they picked the chart,
-// and they can pick a newer one. Everything else running here — CoreDNS,
-// Flannel, Traefik, the ServiceLB proxy, the local-path provisioner — is
-// CasOS's own choice, installed by its bootstraps, and holding one of those
-// back only costs the cluster the component it needs.
-func ReleaseImages(cfg *rest.Config) ([]string, error) {
-	actionConfig, err := newHelmConfig(cfg, "")
-	if err != nil {
-		return nil, err
-	}
-
-	listAction := action.NewList(actionConfig)
-	listAction.StateMask = action.ListAll
-	listAction.AllNamespaces = true
-
-	releases, err := listAction.Run()
-	if err != nil {
-		return nil, err
-	}
-
-	seen := map[string]bool{}
-	images := make([]string, 0, len(releases))
-	for _, release := range releases {
-		if release == nil {
-			continue
-		}
-		for _, image := range manifestImages([]byte(release.Manifest)) {
-			if seen[image] {
-				continue
-			}
-			seen[image] = true
-			images = append(images, image)
-		}
-	}
-	return images, nil
-}
 
 // manifestImages collects the images out of a rendered Helm manifest. A
 // document that will not parse is skipped rather than failing the whole set:
